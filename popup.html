@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&family=Noto+Serif+SC:wght@400;500&family=LXGW+WenKai+TC:wght@300;400&family=Fraunces:opsz,wght@9..144,500&display=swap" rel="stylesheet">
+  <style>
+    :root, [data-theme="light"] {
+      --bg: #ffffff;
+      --bg-sub: #fafafa;
+      --bg-hover: #f5f5f5;
+      --bg-unread: #fefcf8;
+      --border: #e5e5e5;
+      --border-light: #f0f0f0;
+      --text: #111111;
+      --text-2: #444444;
+      --text-3: #6b6b6b;
+      --text-read: #aaaaaa;
+      --accent: #e85500;
+      --accent-soft: rgba(232,85,0,0.08);
+      --cat-model: #7c3aed;
+      --cat-products: #2563eb;
+      --cat-industry: #d97706;
+      --cat-paper: #059669;
+      --cat-tips: #dc2626;
+      --cat-default: #9ca3af;
+      --shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+
+    [data-theme="dark"] {
+      --bg: #111111;
+      --bg-sub: #191919;
+      --bg-hover: #242424;
+      --bg-unread: #1a1710;
+      --border: #2c2c2c;
+      --border-light: #222222;
+      --text: #f0f0f0;
+      --text-2: #b0b0b0;
+      --text-3: #808080;
+      --text-read: #606060;
+      --accent: #ff8c5a;
+      --accent-soft: rgba(255,140,90,0.12);
+      --cat-model: #a78bfa;
+      --cat-products: #60a5fa;
+      --cat-industry: #fbbf24;
+      --cat-paper: #34d399;
+      --cat-tips: #f87171;
+      --cat-default: #6b7280;
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    [data-theme="warm"] {
+      --bg: #fdf8f3;
+      --bg-sub: #f9f3ec;
+      --bg-hover: #f3ebe3;
+      --bg-unread: #fff8ee;
+      --border: #e0d4c8;
+      --border-light: #ede4da;
+      --text: #221a10;
+      --text-2: #5c4e40;
+      --text-3: #887460;
+      --text-read: #bba898;
+      --accent: #c45a18;
+      --accent-soft: rgba(196,90,24,0.08);
+      --cat-model: #7c4dbd;
+      --cat-products: #3070c8;
+      --cat-industry: #b87808;
+      --cat-paper: #1e8860;
+      --cat-tips: #c43030;
+      --cat-default: #a89888;
+      --shadow: 0 1px 3px rgba(80,50,20,0.06);
+    }
+
+    [data-theme="green-light"] {
+      --bg: #f0f5ee;
+      --bg-sub: #e8f0e6;
+      --bg-hover: #dde8da;
+      --bg-unread: #eaf3e8;
+      --border: #c8d6c5;
+      --border-light: #d8e4d5;
+      --text: #1c2b1c;
+      --text-2: #4a5648;
+      --text-3: #687a66;
+      --text-read: #9aaa97;
+      --accent: #2d7a3e;
+      --accent-soft: rgba(45,122,62,0.08);
+      --cat-model: #7c3aed;
+      --cat-products: #2563eb;
+      --cat-industry: #c47a08;
+      --cat-paper: #0e7a5e;
+      --cat-tips: #d43030;
+      --cat-default: #8a9e88;
+      --shadow: 0 1px 3px rgba(30,60,30,0.05);
+    }
+
+    [data-theme="green-dark"] {
+      --bg: #151a16;
+      --bg-sub: #1a201b;
+      --bg-hover: #232b24;
+      --bg-unread: #1b221c;
+      --border: #2f382f;
+      --border-light: #272e27;
+      --text: #e0e8de;
+      --text-2: #a8b4a6;
+      --text-3: #748272;
+      --text-read: #505c4e;
+      --accent: #5ccc6a;
+      --accent-soft: rgba(92,204,106,0.10);
+      --cat-model: #b49afa;
+      --cat-products: #6cb0fa;
+      --cat-industry: #e8b830;
+      --cat-paper: #40d8a0;
+      --cat-tips: #fa8080;
+      --cat-default: #6a886a;
+      --shadow: 0 1px 3px rgba(0,0,0,0.35);
+    }
+
+    [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --fs-brand: 16px; --item-pad: 12px; }
+    [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --fs-brand: 18px; --item-pad: 14px; }
+    [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --fs-brand: 20px; --item-pad: 16px; }
+    [data-size="xlarge"] { --fs-base: 17px; --fs-title: 17px; --fs-meta: 14px; --fs-brand: 22px; --item-pad: 18px; }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+
+    [data-font="noto-sans"] { --ff-body: 'Noto Sans SC', -apple-system, sans-serif; }
+    [data-font="noto-serif"] { --ff-body: 'Noto Serif SC', serif; }
+    [data-font="lxgw"] { --ff-body: 'LXGW WenKai TC', cursive; }
+    [data-font="system"] { --ff-body: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+
+    html, body {
+      height: 600px;
+      overflow: hidden;
+    }
+
+    body {
+      width: 420px;
+      display: flex;
+      flex-direction: column;
+      font-family: var(--ff-body, 'Noto Sans SC', -apple-system, sans-serif);
+      font-size: var(--fs-base, 14px);
+      font-weight: 400;
+      color: var(--text);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+    }
+
+    .brand a {
+      font-family: 'Fraunces', serif;
+      font-size: var(--fs-brand, 17px);
+      font-weight: 500;
+      color: var(--accent);
+      text-decoration: none;
+      letter-spacing: -0.03em;
+    }
+
+    .brand a:hover {
+      opacity: 0.8;
+    }
+
+    .brand .live {
+      display: inline-block;
+      width: 5px;
+      height: 5px;
+      margin: 0 4px;
+      vertical-align: middle;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: blink 2s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .actions {
+      display: flex;
+      gap: 2px;
+    }
+
+    .btn-icon {
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      background: none;
+      color: var(--text-3);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-icon:hover {
+      background: var(--bg-hover);
+      color: var(--text-2);
+    }
+
+    .btn-icon:active {
+      transform: scale(0.9);
+    }
+
+    .btn-mark-read {
+      display: none;
+    }
+
+    .btn-mark-read.visible {
+      display: flex;
+    }
+
+    .btn-mark-read.done {
+      color: #22c55e;
+      animation: mark-done 1.5s ease-out forwards;
+    }
+
+    @keyframes mark-done {
+      0% { color: #22c55e; transform: scale(1.1); }
+      30% { color: #22c55e; transform: scale(1); }
+      100% { color: var(--text-3); transform: scale(1); }
+    }
+
+    .btn-icon svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      stroke-width: 1.6;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .btn-icon.spinning svg {
+      animation: rotate 0.6s linear infinite;
+    }
+
+    @keyframes rotate {
+      to { transform: rotate(360deg); }
+    }
+
+    .btn-icon.poll-ok {
+      color: #22c55e;
+      animation: flash-ok 3s ease-out forwards;
+    }
+
+    .btn-icon.poll-fail {
+      color: #ef4444;
+      animation: flash-fail 3s ease-out forwards;
+    }
+
+    @keyframes flash-ok {
+      0% { background: rgba(34,197,94,0.25); color: #22c55e; }
+      40% { background: rgba(34,197,94,0.15); color: #22c55e; }
+      100% { background: transparent; color: var(--text-3); }
+    }
+
+    @keyframes flash-fail {
+      0% { background: rgba(239,68,68,0.25); color: #ef4444; }
+      40% { background: rgba(239,68,68,0.15); color: #ef4444; }
+      100% { background: transparent; color: var(--text-3); }
+    }
+
+    /* ---- Settings ---- */
+    .settings {
+      overflow: hidden;
+      max-height: 0;
+      transition: max-height 0.25s ease;
+      background: var(--bg-sub);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .settings.open {
+      max-height: 300px;
+    }
+
+    .settings-inner {
+      padding: 14px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .setting-row label {
+      font-size: 12px;
+      color: var(--text-2);
+    }
+
+    .switch {
+      position: relative;
+      width: 32px;
+      height: 18px;
+    }
+
+    .switch input { display: none; }
+
+    .switch-track {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 18px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .switch-track::after {
+      content: '';
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      top: 2px;
+      left: 2px;
+      background: #ffffff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+    }
+
+    .switch input:checked + .switch-track {
+      background: var(--accent);
+    }
+
+    .switch input:checked + .switch-track::after {
+      transform: translateX(14px);
+    }
+
+    .select-mini {
+      font-size: 11px;
+      font-family: inherit;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .select-mini:focus {
+      border-color: var(--accent);
+    }
+
+    .badge {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 3px 8px;
+      border-radius: 9px;
+      display: none;
+      line-height: 1;
+      align-items: center;
+    }
+
+    .badge.show { display: inline-flex; }
+
+
+    /* ---- List ---- */
+    .list {
+      flex: 1;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+
+    .list::-webkit-scrollbar { width: 4px; }
+    .list::-webkit-scrollbar-track { background: transparent; }
+    .list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; opacity: 0.5; }
+
+    /* Floating date badge */
+    .date-label {
+      position: sticky;
+      top: 6px;
+      z-index: 2;
+      float: right;
+      margin-right: 12px;
+      margin-bottom: -24px;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-3);
+      background: var(--bg-sub);
+      border: 1px solid var(--border-light);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    /* Items */
+    .item {
+      display: flex;
+      align-items: flex-start;
+      padding: var(--item-pad, 12px) 18px;
+      border-bottom: 1px solid var(--border-light);
+      cursor: pointer;
+      transition: background 0.12s ease;
+    }
+
+    .item:last-child { border-bottom: none; }
+
+    .item:hover {
+      background: var(--bg-hover);
+    }
+
+    .item.unread {
+      background: var(--bg-unread);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .item.read .item-title {
+      color: var(--text-read);
+    }
+
+    .item.read .item-meta {
+      color: var(--text-read);
+    }
+
+    .item.read .cat-tag {
+      opacity: 0.45;
+    }
+
+    /* Category tag */
+    .cat-tag {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 1px 6px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+
+    .cat-tag.cat-model { color: var(--cat-model); background: color-mix(in srgb, var(--cat-model) 12%, transparent); }
+    .cat-tag.cat-products { color: var(--cat-products); background: color-mix(in srgb, var(--cat-products) 12%, transparent); }
+    .cat-tag.cat-industry { color: var(--cat-industry); background: color-mix(in srgb, var(--cat-industry) 12%, transparent); }
+    .cat-tag.cat-paper { color: var(--cat-paper); background: color-mix(in srgb, var(--cat-paper) 12%, transparent); }
+    .cat-tag.cat-tips { color: var(--cat-tips); background: color-mix(in srgb, var(--cat-tips) 12%, transparent); }
+    .cat-tag.cat-default { color: var(--cat-default); background: color-mix(in srgb, var(--cat-default) 12%, transparent); }
+
+    .item-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .item-title {
+      font-size: var(--fs-title, 13px);
+      font-weight: 400;
+      line-height: 1.55;
+      color: var(--text);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      transition: color 0.15s;
+    }
+
+    .item.unread .item-title {
+      font-weight: 500;
+    }
+
+    .item-summary {
+      margin-top: 6px;
+      font-size: var(--fs-meta, 12px);
+      line-height: 1.65;
+      color: var(--text-2);
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .item.read .item-summary {
+      color: var(--text-read);
+    }
+
+    .item-meta {
+      margin-top: 6px;
+      font-size: var(--fs-meta, 11px);
+      color: var(--text-3);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .item-meta .sep {
+      width: 2px;
+      height: 2px;
+      background: currentColor;
+      border-radius: 50%;
+    }
+
+    .empty-state {
+      padding: 52px 20px;
+      text-align: center;
+      color: var(--text-3);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">
+      <a href="https://aihot.virxact.com/" target="_blank">AI<span class="live"></span>HOT</a>
+    </div>
+    <div class="actions">
+      <span class="badge" id="unreadCount"></span>
+      <button class="btn-icon btn-mark-read" id="markAllRead" title="清除未读">
+        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z"/><path d="M8 12l3 3 5-5"/></svg>
+      </button>
+      <button class="btn-icon" id="pollNow" title="刷新">
+        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7"/><path d="M21 3v6h-6"/></svg>
+      </button>
+      <button class="btn-icon" id="settingsBtn" title="设置">
+        <svg viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="8" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="10" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="settings" id="settingsPanel">
+    <div class="settings-inner">
+      <div class="setting-row">
+        <label>通知推送</label>
+        <label class="switch">
+          <input type="checkbox" id="enabled">
+          <span class="switch-track"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <label>检查频率</label>
+        <select class="select-mini" id="interval">
+          <option value="1">1 分钟</option>
+          <option value="2">2 分钟</option>
+          <option value="3">3 分钟</option>
+          <option value="5">5 分钟</option>
+          <option value="7">7 分钟</option>
+          <option value="15">15 分钟</option>
+          <option value="30">30 分钟</option>
+          <option value="60">60 分钟</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>外观</label>
+        <select class="select-mini" id="theme">
+          <option value="light">明亮</option>
+          <option value="dark">深色</option>
+          <option value="warm">暖调</option>
+          <option value="green-light">绿野</option>
+          <option value="green-dark">暗森</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>字体</label>
+        <select class="select-mini" id="fontFamily">
+          <option value="noto-sans">思源黑体</option>
+          <option value="noto-serif">思源宋体</option>
+          <option value="lxgw">霞鹜文楷</option>
+          <option value="system">系统默认</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>字号</label>
+        <select class="select-mini" id="fontSize">
+          <option value="small">小</option>
+          <option value="medium">默认</option>
+          <option value="large">大</option>
+          <option value="xlarge">特大</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>内容源</label>
+        <select class="select-mini" id="feedMode">
+          <option value="selected">精选</option>
+          <option value="all">全部</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>显示天数</label>
+        <select class="select-mini" id="historyDays">
+          <option value="1">1 天</option>
+          <option value="2">2 天</option>
+          <option value="3">3 天</option>
+          <option value="5">5 天</option>
+          <option value="7">7 天</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="list" id="historyList"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

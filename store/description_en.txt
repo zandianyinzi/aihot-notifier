@@ -1,0 +1,37 @@
+Short description (≤132 chars):
+Real-time AI news monitoring with desktop notifications. Multiple themes, elegant reading experience.
+
+Detailed description:
+
+AI HOT Notifier — Your AI News Radar
+
+Automatically monitors the latest AI industry updates from aihot.virxact.com and delivers instant desktop notifications, keeping you informed about important developments in the AI field.
+
+✦ Core Features
+
+• Automatic polling for AI news with instant desktop notifications
+• Click notifications or list items to jump directly to the source
+• News list with title + summary for quick scanning
+• Read/unread state persists across browser restarts
+• Category tags (Model / Product / Industry / Paper / Tips) for quick filtering
+
+✦ Personalization
+
+• 5 carefully crafted themes: Light / Dark / Warm / Forest / Deep Green
+• 4 premium fonts: Noto Sans SC / Noto Serif SC / LXGW WenKai / System Default
+• 4 font size levels: Small / Default / Large / Extra Large
+• Configurable polling interval: 1 / 2 / 3 / 5 / 7 / 15 / 30 / 60 minutes
+• Configurable display range: 1-7 days
+
+✦ Technical Highlights
+
+• Manifest V3, modern architecture
+• Lightweight and efficient, minimal resource usage
+• Local storage only — no user data collected
+• Auto-resumes polling after browser restart
+
+✦ Data Source
+
+News curated from aihot.virxact.com, covering AI model releases, product updates, industry news, academic papers, and usage tips — daily curated picks.
+
+Feedback and suggestions are welcome.
