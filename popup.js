@@ -73,7 +73,7 @@ async function loadConfig() {
   enabledEl.checked = data.enabled !== false;
   intervalEl.value = String(data.interval || 5);
   feedModeEl.value = data.feedMode || 'selected';
-  const theme = data.theme || 'light';
+  const theme = data.theme || 'dark';
   themeEl.value = theme;
   applyTheme(theme);
   const font = data.fontFamily || 'noto-sans';
@@ -82,7 +82,7 @@ async function loadConfig() {
   const size = data.fontSize || 'medium';
   fontSizeEl.value = size;
   applyFontSize(size);
-  historyDaysEl.value = String(data.historyDays || 2);
+  historyDaysEl.value = String(data.historyDays || 1);
 }
 
 async function saveConfig() {
@@ -108,7 +108,7 @@ async function saveConfig() {
 }
 
 async function loadHistory() {
-  const { history: rawHistory = [], readIds = [], readAllBefore = '', historyDays = 2 } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'historyDays']);
+  const { history: rawHistory = [], readIds = [], readAllBefore = '', historyDays = 1 } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'historyDays']);
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const history = rawHistory.filter(i => new Date(i.time).getTime() > cutoff);
 
@@ -190,8 +190,12 @@ async function loadHistory() {
 }
 
 async function updateBadge() {
-  const { history = [], readIds = [], readAllBefore = '' } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore']);
-  const unread = history.filter(i => !isRead(i, readIds, readAllBefore)).length;
+  const { history = [], readIds = [], readAllBefore = '', historyDays = 1 } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'historyDays']);
+  const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
+  const unread = history.filter(i => {
+    if (new Date(i.time).getTime() <= cutoff) return false;
+    return !isRead(i, readIds, readAllBefore);
+  }).length;
   chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
   chrome.action.setBadgeBackgroundColor({ color: '#ff6b35' });
 }

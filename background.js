@@ -85,7 +85,7 @@ async function showNotification(items) {
 
   await chrome.storage.local.set({ lastItems: items.slice(0, 5) });
 
-  const { history = [], historyDays = 2 } = await chrome.storage.local.get(['history', 'historyDays']);
+  const { history = [], historyDays = 1 } = await chrome.storage.local.get(['history', 'historyDays']);
   const existingUrls = new Set(history.map(i => i.url));
   const newEntries = items.slice(0, 10)
     .filter(i => !existingUrls.has(i.url))
@@ -99,7 +99,7 @@ async function showNotification(items) {
 }
 
 async function manualPoll() {
-  const { history = [], historyDays = 2, feedMode = 'selected' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+  const { history = [], historyDays = 1, feedMode = 'selected' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
   const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
   console.log(`[AI HOT] manual poll since=${sinceTime}`);
 
@@ -146,8 +146,10 @@ async function manualPoll() {
 }
 
 async function updateBadge() {
-  const { history = [], readIds = [], readAllBefore = '' } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore']);
+  const { history = [], readIds = [], readAllBefore = '', historyDays = 1 } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'historyDays']);
+  const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const unread = history.filter(i => {
+    if (new Date(i.time).getTime() <= cutoff) return false;
     if (readIds.includes(i.url)) return false;
     if (readAllBefore && new Date(i.time) <= new Date(readAllBefore)) return false;
     return true;
@@ -159,7 +161,7 @@ async function updateBadge() {
 async function resetAndPoll(feedMode) {
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
-    const { historyDays = 2 } = await chrome.storage.local.get('historyDays');
+    const { historyDays = 1 } = await chrome.storage.local.get('historyDays');
     const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
 
@@ -228,7 +230,7 @@ async function setupAlarm() {
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log(`[AI HOT] extension ${details.reason}`);
   try {
-    const { feedMode = 'selected', historyDays = 2 } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+    const { feedMode = 'selected', historyDays = 1 } = await chrome.storage.local.get(['feedMode', 'historyDays']);
     const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
     const maxPages = 3;
     let allItems = [];
