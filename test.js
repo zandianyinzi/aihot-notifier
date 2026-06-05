@@ -31,7 +31,7 @@ function mergeAndSort(newEntries, history, cutoffDays) {
 }
 
 function calcSinceTime(lastCheck, intervalMinutes) {
-  const bufferMs = intervalMinutes * 2 * 60 * 1000;
+  const bufferMs = Math.max(intervalMinutes * 2 * 60 * 1000, 2 * 60 * 60 * 1000);
   return new Date(new Date(lastCheck).getTime() - bufferMs).toISOString();
 }
 
@@ -122,13 +122,16 @@ console.log('\n[cutoff过滤]');
 console.log('\n[回退时间-自动poll]');
 (function() {
   const since5 = calcSinceTime('2026-06-05T06:00:00.000Z', 5);
-  assert(since5 === '2026-06-05T05:50:00.000Z', '5分钟间隔回退10分钟');
+  assert(since5 === '2026-06-05T04:00:00.000Z', '5分钟间隔回退至少2小时');
 
   const since1 = calcSinceTime('2026-06-05T06:00:00.000Z', 1);
-  assert(since1 === '2026-06-05T05:58:00.000Z', '1分钟间隔回退2分钟');
+  assert(since1 === '2026-06-05T04:00:00.000Z', '1分钟间隔回退至少2小时');
 
   const since30 = calcSinceTime('2026-06-05T06:00:00.000Z', 30);
-  assert(since30 === '2026-06-05T05:00:00.000Z', '30分钟间隔回退60分钟');
+  assert(since30 === '2026-06-05T04:00:00.000Z', '30分钟间隔回退至少2小时');
+
+  const since90 = calcSinceTime('2026-06-05T06:00:00.000Z', 90);
+  assert(since90 === '2026-06-05T03:00:00.000Z', '90分钟间隔回退3小时(2*90>120)');
 })();
 
 console.log('\n[回退时间-手动poll]');

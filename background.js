@@ -21,8 +21,8 @@ async function pollForUpdates() {
   const config = await getConfig();
   if (!config.enabled) return;
 
-  // 回退2倍轮询间隔避免因 API 入库延迟而漏条目
-  const bufferMs = config.interval * 2 * 60 * 1000;
+  // API 公开接口有 30-80 分钟入库/缓存延迟，回退 2 小时确保不漏
+  const bufferMs = Math.max(config.interval * 2 * 60 * 1000, 2 * 60 * 60 * 1000);
   const sinceTime = new Date(new Date(config.lastCheck).getTime() - bufferMs).toISOString();
   const now = new Date().toISOString();
   console.log(`[AI HOT] polling since=${sinceTime}`);
@@ -87,7 +87,7 @@ async function showNotification(items) {
 
   const { history = [], historyDays = 1 } = await chrome.storage.local.get(['history', 'historyDays']);
   const existingUrls = new Set(history.map(i => i.url));
-  const newEntries = items.slice(0, 10)
+  const newEntries = items
     .filter(i => !existingUrls.has(i.url))
     .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
   const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
@@ -213,17 +213,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
     pollForUpdates();
   }
-  if (alarm.name === 'aihot-badge') {
-    updateBadge();
-    pollForUpdates();
-  }
 });
 
 async function setupAlarm() {
   const config = await getConfig();
   await chrome.alarms.clear(ALARM_NAME);
   if (config.enabled) {
-    chrome.alarms.create(ALARM_NAME, { periodInMinutes: config.interval });
+    chrome.alarms.create(ALARM_NAME, { delayInMinutes: 0.1, periodInMinutes: config.interval });
   }
 }
 
@@ -274,7 +270,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   await setupAlarm();
-  chrome.alarms.create('aihot-badge', { delayInMinutes: 0.05 });
+  pollForUpdates();
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
