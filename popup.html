@@ -116,8 +116,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 18px;
-      border-bottom: 1px solid var(--border);
+      padding: 10px 18px;
     }
 
     .brand {
@@ -224,6 +223,11 @@
       animation: flash-ok 3s ease-out forwards;
     }
 
+    #pollNow.poll-ok {
+      color: var(--accent);
+      animation: flash-poll-ok 3s ease-out forwards;
+    }
+
     .btn-icon.poll-fail {
       color: var(--state-fail);
       animation: flash-fail 3s ease-out forwards;
@@ -232,6 +236,12 @@
     @keyframes flash-ok {
       0% { background: var(--state-ok-soft); color: var(--state-ok); }
       40% { background: var(--state-ok-softer); color: var(--state-ok); }
+      100% { background: transparent; color: var(--text-3); }
+    }
+
+    @keyframes flash-poll-ok {
+      0% { background: var(--accent-soft); color: var(--accent); }
+      40% { background: var(--accent-soft); color: var(--accent); }
       100% { background: transparent; color: var(--text-3); }
     }
 
@@ -247,7 +257,6 @@
       max-height: 0;
       transition: max-height 0.25s ease;
       background: var(--bg-sub);
-      border-bottom: 1px solid var(--border);
     }
 
     .settings.open {
@@ -358,7 +367,7 @@
       top: 6px;
       z-index: 2;
       float: right;
-      margin-right: 12px;
+      margin-right: 6px;
       margin-bottom: -24px;
       font-size: 10px;
       font-weight: 500;
