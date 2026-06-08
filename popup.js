@@ -22,7 +22,51 @@ const CATEGORY_MAP = {
   'tips': { cls: 'cat-tips', label: '技巧' }
 };
 
+const FONT_FACE_MAP = {
+  'noto-sans': 'Noto+Sans+SC:wght@300;400;500',
+  'noto-serif': 'Noto+Serif+SC:wght@400;500',
+  lxgw: 'LXGW+WenKai+TC:wght@300;400'
+};
+
+const VALID_THEMES = new Set(['dark', 'green-dark']);
+
 let cachedReadIds = new Set();
+let fontLoadTimer = null;
+let activeFontHref = '';
+
+function getFontHref(font) {
+  const fonts = ['Fraunces:opsz,wght@9..144,500'];
+  if (FONT_FACE_MAP[font]) fonts.push(FONT_FACE_MAP[font]);
+  return 'https://fonts.googleapis.com/css2?' + fonts.map(family => `family=${family}`).join('&') + '&display=swap';
+}
+
+function loadFontStylesheet(font) {
+  const href = getFontHref(font);
+  if (href === activeFontHref) return;
+
+  activeFontHref = href;
+  let link = document.getElementById('fontStylesheet');
+  if (!link) {
+    link = document.createElement('link');
+    link.id = 'fontStylesheet';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
+  }
+  link.href = href;
+}
+
+function scheduleFontStylesheet(font) {
+  clearTimeout(fontLoadTimer);
+  const run = () => {
+    fontLoadTimer = setTimeout(() => loadFontStylesheet(font), 0);
+  };
+
+  if (window.requestAnimationFrame) {
+    requestAnimationFrame(run);
+  } else {
+    run();
+  }
+}
 
 function formatTime(isoStr) {
   const d = new Date(isoStr);
@@ -51,7 +95,12 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function normalizeTheme(theme) {
+  return VALID_THEMES.has(theme) ? theme : 'dark';
+}
+
 function applyTheme(theme) {
+  theme = normalizeTheme(theme);
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('theme', theme);
 }
@@ -64,6 +113,7 @@ function applyFontSize(size) {
 function applyFontFamily(font) {
   document.documentElement.setAttribute('data-font', font);
   localStorage.setItem('fontFamily', font);
+  scheduleFontStylesheet(font);
 }
 
 function applyConfig(data) {
@@ -72,7 +122,7 @@ function applyConfig(data) {
   if (interval < 5) interval = 5;
   intervalEl.value = String(interval);
   feedModeEl.value = data.feedMode || 'selected';
-  const theme = data.theme || 'dark';
+  const theme = normalizeTheme(data.theme);
   themeEl.value = theme;
   applyTheme(theme);
   const font = data.fontFamily || 'noto-sans';
@@ -183,6 +233,9 @@ async function saveConfig() {
   const fontSize = fontSizeEl.value;
   const historyDays = Number(historyDaysEl.value);
   const feedMode = feedModeEl.value;
+  applyTheme(theme);
+  applyFontFamily(fontFamily);
+  applyFontSize(fontSize);
   await chrome.storage.local.set({
     enabled: enabledEl.checked,
     interval: Number(intervalEl.value),
@@ -192,9 +245,6 @@ async function saveConfig() {
     fontSize,
     historyDays
   });
-  applyTheme(theme);
-  applyFontFamily(fontFamily);
-  applyFontSize(fontSize);
   chrome.runtime.sendMessage({ type: 'configChanged' });
   loadHistory();
 }
@@ -295,5 +345,8 @@ pollBtn.addEventListener('click', async () => {
     'history', 'readIds', 'readAllBefore'
   ]);
   applyConfig(data);
+  if (data.theme && data.theme !== normalizeTheme(data.theme)) {
+    chrome.storage.local.set({ theme: 'dark' });
+  }
   renderHistory(data);
 })();

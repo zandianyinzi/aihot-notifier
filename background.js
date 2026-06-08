@@ -226,43 +226,45 @@ async function setupAlarm() {
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log(`[AI HOT] extension ${details.reason}`);
-  try {
-    const { feedMode = 'selected', historyDays = 1 } = await chrome.storage.local.get(['feedMode', 'historyDays']);
-    const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-    const maxPages = 3;
-    let allItems = [];
-    let cursor = null;
+  if (details.reason === 'install') {
+    try {
+      const { feedMode = 'selected', historyDays = 1 } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+      const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+      const maxPages = 3;
+      let allItems = [];
+      let cursor = null;
 
-    for (let page = 0; page < maxPages; page++) {
-      let url = getApiUrl(feedMode);
-      if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+      for (let page = 0; page < maxPages; page++) {
+        let url = getApiUrl(feedMode);
+        if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
-      const res = await fetch(url);
-      if (!res.ok) break;
-      const json = await res.json();
-      if (!json.items || json.items.length === 0) break;
+        const res = await fetch(url);
+        if (!res.ok) break;
+        const json = await res.json();
+        if (!json.items || json.items.length === 0) break;
 
-      allItems = allItems.concat(json.items);
+        allItems = allItems.concat(json.items);
 
-      if (!json.hasNext || !json.nextCursor) break;
-      const oldest = json.items[json.items.length - 1];
-      if (new Date(oldest.publishedAt).getTime() < cutoff) break;
-      cursor = json.nextCursor;
+        if (!json.hasNext || !json.nextCursor) break;
+        const oldest = json.items[json.items.length - 1];
+        if (new Date(oldest.publishedAt).getTime() < cutoff) break;
+        cursor = json.nextCursor;
+      }
+
+      if (allItems.length > 0) {
+        const { history = [] } = await chrome.storage.local.get('history');
+        const existingUrls = new Set(history.map(i => i.url));
+        const newEntries = allItems
+          .filter(i => !existingUrls.has(i.url))
+          .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
+        const merged = [...newEntries, ...history]
+          .filter(i => new Date(i.time).getTime() > cutoff)
+          .sort((a, b) => new Date(b.time) - new Date(a.time));
+        await chrome.storage.local.set({ history: merged });
+      }
+    } catch (e) {
+      console.warn('[AI HOT] failed to fetch initial items:', e);
     }
-
-    if (allItems.length > 0) {
-      const { history = [] } = await chrome.storage.local.get('history');
-      const existingUrls = new Set(history.map(i => i.url));
-      const newEntries = allItems
-        .filter(i => !existingUrls.has(i.url))
-        .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
-      const merged = [...newEntries, ...history]
-        .filter(i => new Date(i.time).getTime() > cutoff)
-        .sort((a, b) => new Date(b.time) - new Date(a.time));
-      await chrome.storage.local.set({ history: merged });
-    }
-  } catch (e) {
-    console.warn('[AI HOT] failed to fetch initial items:', e);
   }
   await chrome.storage.local.set({ lastCheck: new Date().toISOString() });
   await updateBadge();
@@ -271,7 +273,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   await setupAlarm();
-  pollForUpdates();
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

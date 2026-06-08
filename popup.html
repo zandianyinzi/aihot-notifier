@@ -1,24 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html data-theme="dark" data-font="noto-sans" data-size="medium">
 <head>
   <meta charset="utf-8">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <script>
-    var t = localStorage.getItem('theme') || 'dark';
-    var f = localStorage.getItem('fontFamily') || 'noto-sans';
-    var s = localStorage.getItem('fontSize') || 'medium';
-    document.documentElement.setAttribute('data-theme', t);
-    document.documentElement.setAttribute('data-font', f);
-    document.documentElement.setAttribute('data-size', s);
-    var fonts = ['Fraunces:opsz,wght@9..144,500'];
-    var map = { 'noto-sans': 'Noto+Sans+SC:wght@300;400;500', 'noto-serif': 'Noto+Serif+SC:wght@400;500', 'lxgw': 'LXGW+WenKai+TC:wght@300;400' };
-    if (map[f]) fonts.push(map[f]);
-    var link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?' + fonts.map(function(x) { return 'family=' + x; }).join('&') + '&display=swap';
-    document.head.appendChild(link);
-  </script>
   <style>
     [data-theme="dark"] {
       --bg: #111111;
@@ -40,72 +23,6 @@
       --cat-tips: #f87171;
       --cat-default: #6b7280;
       --shadow: 0 1px 3px rgba(0,0,0,0.3);
-    }
-
-    [data-theme="light"] {
-      --bg: #ffffff;
-      --bg-sub: #fafafa;
-      --bg-hover: #f5f5f5;
-      --bg-unread: #fefcf8;
-      --border: #e5e5e5;
-      --border-light: #f0f0f0;
-      --text: #111111;
-      --text-2: #444444;
-      --text-3: #6b6b6b;
-      --text-read: #aaaaaa;
-      --accent: #e85500;
-      --accent-soft: rgba(232,85,0,0.08);
-      --cat-model: #7c3aed;
-      --cat-products: #2563eb;
-      --cat-industry: #d97706;
-      --cat-paper: #059669;
-      --cat-tips: #dc2626;
-      --cat-default: #9ca3af;
-      --shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-
-    [data-theme="warm"] {
-      --bg: #fdf8f3;
-      --bg-sub: #f9f3ec;
-      --bg-hover: #f3ebe3;
-      --bg-unread: #fff8ee;
-      --border: #e0d4c8;
-      --border-light: #ede4da;
-      --text: #221a10;
-      --text-2: #5c4e40;
-      --text-3: #887460;
-      --text-read: #bba898;
-      --accent: #c45a18;
-      --accent-soft: rgba(196,90,24,0.08);
-      --cat-model: #7c4dbd;
-      --cat-products: #3070c8;
-      --cat-industry: #b87808;
-      --cat-paper: #1e8860;
-      --cat-tips: #c43030;
-      --cat-default: #a89888;
-      --shadow: 0 1px 3px rgba(80,50,20,0.06);
-    }
-
-    [data-theme="green-light"] {
-      --bg: #f0f5ee;
-      --bg-sub: #e8f0e6;
-      --bg-hover: #dde8da;
-      --bg-unread: #eaf3e8;
-      --border: #c8d6c5;
-      --border-light: #d8e4d5;
-      --text: #1c2b1c;
-      --text-2: #4a5648;
-      --text-3: #687a66;
-      --text-read: #9aaa97;
-      --accent: #2d7a3e;
-      --accent-soft: rgba(45,122,62,0.08);
-      --cat-model: #7c3aed;
-      --cat-products: #2563eb;
-      --cat-industry: #c47a08;
-      --cat-paper: #0e7a5e;
-      --cat-tips: #d43030;
-      --cat-default: #8a9e88;
-      --shadow: 0 1px 3px rgba(30,60,30,0.05);
     }
 
     [data-theme="green-dark"] {
@@ -533,6 +450,7 @@
 
 
   </style>
+  <script src="popup-boot.js"></script>
 </head>
 <body>
   <div class="header">
@@ -574,10 +492,7 @@
       <div class="setting-row">
         <label>外观</label>
         <select class="select-mini" id="theme">
-          <option value="light">明亮</option>
-          <option value="dark">深色</option>
-          <option value="warm">暖调</option>
-          <option value="green-light">绿野</option>
+          <option value="dark">墨夜</option>
           <option value="green-dark">暗森</option>
         </select>
       </div>

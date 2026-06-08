@@ -1,0 +1,42 @@
+# Repository Guidelines
+
+## 项目结构与模块组织
+
+本仓库是一个无构建依赖的 Chrome/Edge Manifest V3 扩展。核心文件位于仓库根目录：
+
+- `manifest.json`：声明权限、图标、弹窗入口和后台 Service Worker。
+- `background.js`：负责轮询 AI HOT API、分页、去重、通知、badge 和 `chrome.storage.local` 存储。
+- `popup.html` / `popup.js`：实现弹窗界面、列表渲染、已读状态和设置交互。
+- `icons/`：扩展图标，包含 16、32、48、128px 等尺寸。
+- `store/`：Chrome Web Store 文案、隐私政策和截图素材。
+- `test*.js`：独立 Node 测试脚本，目前没有单独的 `tests/` 目录。
+
+## 构建、测试与开发命令
+
+- `node test.js`：运行纯逻辑测试，覆盖去重、排序、时间窗口和 API URL。
+- `node test-notification.js`：使用 mock 的 Chrome API 验证通知和 badge 逻辑。
+- `node test-e2e.js`：请求 `https://aihot.virxact.com`，验证线上 API 数据假设。
+- `bash pack.sh`：生成用于分发的 `aihot-notifier.zip`。
+- `node screenshot.mjs`：重新生成商店截图；首次使用前执行 `npm install --no-save puppeteer`。
+
+仓库没有 `package.json`。除非明确切换到 Node 包管理流程，否则不要新增依赖清单。
+
+## 代码风格与命名约定
+
+使用原生 JavaScript、HTML 和 CSS。保持 2 空格缩进、语句分号、变量和函数使用 `camelCase`。固定配置可使用大写常量，例如 API 基础地址或时间限制。优先保持逻辑直观，必要时拆成小型 helper 函数。
+
+修改 UI 时，将结构和样式留在 `popup.html`，状态管理和事件处理放在 `popup.js`。注意 Manifest V3 限制：`background.js` 是 Service Worker，不是持久后台页。
+
+## 测试指南
+
+修改逻辑前后至少运行 `node test.js` 和 `node test-notification.js`。涉及 API 模式、分页、日期窗口或线上 feed 假设时，运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。
+
+## 提交与 Pull Request 规范
+
+近期提交多为简短祈使句，部分使用 Conventional Commit 前缀，例如 `perf: eliminate theme FOUC`、`fix polling miss due to insufficient API delay buffer`。提交标题应说明具体行为变化。
+
+PR 需包含变更摘要、已运行的测试命令。涉及界面变化时附截图或更新 `store/` 素材；涉及权限、存储结构或 API 行为变化时需单独说明。
+
+## 安全与配置提示
+
+保持 `host_permissions` 限定为 `https://aihot.virxact.com/*`。不要提交 `node_modules/`、生成的 zip、密钥或本地浏览器 profile。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。

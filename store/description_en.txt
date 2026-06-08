@@ -1,5 +1,5 @@
 Short description (≤132 chars):
-Real-time AI news monitoring with desktop notifications. Multiple themes, elegant reading experience.
+Real-time AI news monitoring with desktop notifications. Focused dark themes and elegant reading experience.
 
 Detailed description:
 
@@ -17,7 +17,7 @@ Automatically monitors the latest AI industry updates from aihot.virxact.com and
 
 ✦ Personalization
 
-• 5 carefully crafted themes: Light / Dark / Warm / Forest / Deep Green
+• 2 carefully crafted themes: Obsidian Night / Dark Forest
 • 4 premium fonts: Noto Sans SC / Noto Serif SC / LXGW WenKai / System Default
 • 4 font size levels: Small / Default / Large / Extra Large
 • Configurable polling interval: 1 / 2 / 3 / 5 / 7 / 15 / 30 / 60 minutes

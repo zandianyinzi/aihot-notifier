@@ -6,6 +6,7 @@ zip -r aihot-notifier.zip \
   manifest.json \
   background.js \
   popup.html \
+  popup-boot.js \
   popup.js \
   icons/ \
   -x "*.DS_Store"

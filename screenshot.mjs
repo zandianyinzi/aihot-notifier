@@ -1,7 +1,7 @@
 /**
  * 生成 Chrome Web Store 全部商店素材：
- *   - 5 张主题截图（1280x800 @2x）
- *   - 1 张宣传图（440x280 @2x，多主题卡片拼接）
+ *   - 2 张主题截图（1280x800 @2x）
+ *   - 1 张宣传图（440x280 @2x，双主题卡片拼接）
  *
  * 用法（换电脑后只需执行以下命令）：
  *   npx puppeteer browsers install chrome
@@ -41,42 +41,6 @@ const catClass = {
 
 const themes = [
   {
-    name: 'light',
-    filename: 'screenshot-light.png',
-    bg: 'linear-gradient(135deg, #f8f6f4 0%, #f0ebe5 100%)',
-    textColor: '#222',
-    textColor2: '#666',
-    featureColor: '#555',
-    accentDot: '#e85500',
-    frameShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.08)',
-    frameBorder: '1px solid rgba(0,0,0,0.06)',
-    subtitle: '实时追踪 AI 行业动态，<br>不错过任何重要资讯。',
-  },
-  {
-    name: 'warm',
-    filename: 'screenshot-warm.png',
-    bg: 'linear-gradient(135deg, #f5ebe0 0%, #e8d5c4 100%)',
-    textColor: '#3d2e1f',
-    textColor2: '#7a6450',
-    featureColor: '#7a6450',
-    accentDot: '#c45a18',
-    frameShadow: '0 20px 60px rgba(0,0,0,0.10), 0 4px 16px rgba(0,0,0,0.06)',
-    frameBorder: '1px solid rgba(0,0,0,0.06)',
-    subtitle: '暖调主题，温润护眼。',
-  },
-  {
-    name: 'green-light',
-    filename: 'screenshot-green-light.png',
-    bg: 'linear-gradient(135deg, #e8f0e6 0%, #d0e0cc 100%)',
-    textColor: '#1c2b1c',
-    textColor2: '#4a5648',
-    featureColor: '#4a5648',
-    accentDot: '#2d7a3e',
-    frameShadow: '0 20px 60px rgba(0,0,0,0.10), 0 4px 16px rgba(0,0,0,0.06)',
-    frameBorder: '1px solid rgba(0,0,0,0.06)',
-    subtitle: '绿野主题，清新自然。',
-  },
-  {
     name: 'dark',
     filename: 'screenshot-dark.png',
     bg: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
@@ -86,7 +50,7 @@ const themes = [
     accentDot: '#ff8c5a',
     frameShadow: '0 20px 60px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3)',
     frameBorder: '1px solid rgba(255,255,255,0.08)',
-    subtitle: '深色模式，夜间阅读更舒适。',
+    subtitle: '墨夜主题，夜间阅读更舒适。',
   },
   {
     name: 'green-dark',
@@ -180,7 +144,7 @@ function buildWrapperHtml(theme) {
     <ul class="features">
       <li>精选 + 全量两种模式</li>
       <li>桌面通知即时推送</li>
-      <li>多主题 / 字体可选</li>
+      <li>双主题 / 字体可选</li>
       <li>轻量无依赖，隐私友好</li>
     </ul>
   </div>
@@ -251,7 +215,7 @@ function buildWrapperHtml(theme) {
     unlinkSync(wrapperPath);
   }
 
-  // ---- 宣传图 440x280（多主题卡片堆叠拼接） ----
+  // ---- 宣传图 440x280（双主题卡片堆叠拼接） ----
   console.log('');
 
   const promoHtml = `<!DOCTYPE html>
@@ -338,7 +302,7 @@ function buildWrapperHtml(theme) {
   </div>
   <div class="branding">
     <h1>AI<span class="dot"></span>HOT Notifier</h1>
-    <p>实时 AI 资讯 · 桌面通知 · 多主题</p>
+    <p>实时 AI 资讯 · 桌面通知 · 双主题</p>
   </div>
 </body>
 </html>`;
@@ -357,7 +321,7 @@ function buildWrapperHtml(theme) {
 
   const promoFrames = promoPage.frames().filter(f => f.url().includes('popup.html'));
   for (let i = 0; i < promoFrames.length; i++) {
-    const themeName = promoThemes[i] || 'light';
+    const themeName = promoThemes[i] || 'dark';
     await promoFrames[i].evaluate((themeName, items, catClass) => {
       document.documentElement.setAttribute('data-theme', themeName);
       document.body.setAttribute('data-theme', themeName);
@@ -404,176 +368,6 @@ function buildWrapperHtml(theme) {
   await promoPage.close();
   unlinkSync(promoWrapperPath);
 
-  // ---- 宣传图 5 张卡片版（从亮到暗扇形排列） ----
-
-  const promo5Html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    width: 440px;
-    height: 280px;
-    background: linear-gradient(135deg, #1c1c2e 0%, #141e30 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    position: relative;
-    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  }
-  .cards {
-    position: relative;
-    width: 360px;
-    height: 220px;
-  }
-  .card {
-    position: absolute;
-    width: 140px;
-    height: 200px;
-    border-radius: 6px;
-    overflow: hidden;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.35), 0 2px 6px rgba(0,0,0,0.2);
-  }
-  .card iframe {
-    width: 420px;
-    height: 600px;
-    border: none;
-    transform: scale(0.3333);
-    transform-origin: top left;
-  }
-  .card-1 {
-    left: 0px; top: 40px; z-index: 1;
-    transform: rotate(-8deg);
-    border: 1px solid rgba(255,255,255,0.06);
-  }
-  .card-2 {
-    left: 50px; top: 20px; z-index: 2;
-    transform: rotate(-4deg);
-    border: 1px solid rgba(255,255,255,0.08);
-  }
-  .card-3 {
-    left: 110px; top: 5px; z-index: 5;
-    transform: rotate(0deg);
-    border: 1px solid rgba(255,255,255,0.12);
-  }
-  .card-4 {
-    left: 170px; top: 20px; z-index: 2;
-    transform: rotate(4deg);
-    border: 1px solid rgba(255,255,255,0.08);
-  }
-  .card-5 {
-    left: 220px; top: 40px; z-index: 1;
-    transform: rotate(8deg);
-    border: 1px solid rgba(255,255,255,0.06);
-  }
-  .branding {
-    position: absolute;
-    bottom: 16px;
-    left: 0; right: 0;
-    text-align: center;
-    z-index: 10;
-  }
-  .branding h1 {
-    font-family: 'Georgia', serif;
-    font-size: 15px;
-    font-weight: 600;
-    color: #fff;
-    letter-spacing: 0.5px;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.6);
-  }
-  .branding h1 .dot {
-    display: inline-block;
-    width: 5px; height: 5px;
-    background: #e40012;
-    border-radius: 50%;
-    margin: 0 2px;
-    vertical-align: middle;
-  }
-  .branding p {
-    font-size: 9px;
-    color: rgba(255,255,255,0.55);
-    margin-top: 3px;
-  }
-</style>
-</head>
-<body>
-  <div class="cards">
-    <div class="card card-1"><iframe src="popup.html"></iframe></div>
-    <div class="card card-2"><iframe src="popup.html"></iframe></div>
-    <div class="card card-3"><iframe src="popup.html"></iframe></div>
-    <div class="card card-4"><iframe src="popup.html"></iframe></div>
-    <div class="card card-5"><iframe src="popup.html"></iframe></div>
-  </div>
-  <div class="branding">
-    <h1>AI<span class="dot"></span>HOT Notifier</h1>
-    <p>实时 AI 资讯 · 桌面通知 · 5 套主题</p>
-  </div>
-</body>
-</html>`;
-
-  const promo5Themes = ['light', 'warm', 'green-light', 'dark', 'green-dark'];
-  const promo5Items = mockItems.slice(0, 5);
-
-  const promo5Page = await browser.newPage();
-  await promo5Page.setViewport({ width: 440, height: 280, deviceScaleFactor: 2 });
-
-  const promo5WrapperPath = resolve(__dirname, '_wrapper_promo5.html');
-  writeFileSync(promo5WrapperPath, promo5Html, 'utf-8');
-
-  await promo5Page.goto(`file:///${promo5WrapperPath.replace(/\\/g, '/')}`, { waitUntil: 'networkidle0' });
-  await new Promise(r => setTimeout(r, 1500));
-
-  const promo5Frames = promo5Page.frames().filter(f => f.url().includes('popup.html'));
-  for (let i = 0; i < promo5Frames.length; i++) {
-    const themeName = promo5Themes[i] || 'light';
-    await promo5Frames[i].evaluate((themeName, items, catClass) => {
-      document.documentElement.setAttribute('data-theme', themeName);
-      document.body.setAttribute('data-theme', themeName);
-
-      const list = document.getElementById('historyList');
-      const unreadCount = document.getElementById('unreadCount');
-
-      unreadCount.textContent = `${items.length} 条未读`;
-      unreadCount.classList.add('show');
-      document.getElementById('markAllRead').classList.add('visible');
-
-      const now = Date.now();
-      items.forEach((item, idx) => {
-        const div = document.createElement('div');
-        const isUnread = idx < 3;
-        div.className = `item ${isUnread ? 'unread' : 'read'}`;
-
-        const time = new Date(now - item.minutesAgo * 60 * 1000);
-        const timeStr = `${time.getHours().toString().padStart(2,'0')}:${time.getMinutes().toString().padStart(2,'0')}`;
-        const cls = catClass[item.category] || 'cat-default';
-
-        div.innerHTML = `
-          <div class="item-body">
-            <div class="item-title">${item.title}</div>
-            <div class="item-summary">${item.summary}</div>
-            <div class="item-meta">
-              <span class="cat-tag ${cls}">${item.category}</span>
-              <span class="sep"></span>
-              <span>${timeStr}</span>
-            </div>
-          </div>
-        `;
-        list.appendChild(div);
-      });
-    }, themeName, promo5Items, catClass);
-  }
-
-  await promo5Page.evaluate(() => document.fonts.ready);
-  await new Promise(r => setTimeout(r, 2000));
-
-  await promo5Page.screenshot({ path: resolve(STORE_DIR, 'promo-5themes.png') });
-  console.log('✓ promo-5themes.png');
-
-  await promo5Page.close();
-  unlinkSync(promo5WrapperPath);
-
   await browser.close();
-  console.log(`\nDone! ${themes.length} screenshots + 2 promo tiles saved to store/`);
+  console.log(`\nDone! ${themes.length} screenshots + 1 promo tile saved to store/`);
 })();
