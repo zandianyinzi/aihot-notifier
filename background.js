@@ -1,6 +1,7 @@
 const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
 const ALARM_NAME = 'aihot-poll';
 const DEFAULT_INTERVAL = 5;
+const MAX_HISTORY_DAYS = 5;
 
 
 async function getConfig() {
@@ -90,7 +91,7 @@ async function showNotification(items) {
   const newEntries = items
     .filter(i => !existingUrls.has(i.url))
     .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
-  const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
   const updated = [...newEntries, ...history]
     .filter(i => new Date(i.time).getTime() > cutoff)
     .sort((a, b) => new Date(b.time) - new Date(a.time));
@@ -106,7 +107,7 @@ async function manualPoll() {
   try {
     let allItems = [];
     let cursor = null;
-    const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const maxPages = 3;
 
     for (let page = 0; page < maxPages; page++) {
@@ -162,7 +163,7 @@ async function resetAndPoll(feedMode) {
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
     const { historyDays = 1 } = await chrome.storage.local.get('historyDays');
-    const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
 
     let allItems = [];
@@ -227,7 +228,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   console.log(`[AI HOT] extension ${details.reason}`);
   try {
     const { feedMode = 'selected', historyDays = 1 } = await chrome.storage.local.get(['feedMode', 'historyDays']);
-    const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const maxPages = 3;
     let allItems = [];
     let cursor = null;
