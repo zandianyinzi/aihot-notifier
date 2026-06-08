@@ -361,6 +361,36 @@
     .list::-webkit-scrollbar-track { background: transparent; }
     .list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; opacity: 0.5; }
 
+    .initial-skeleton {
+      pointer-events: none;
+    }
+
+    .skeleton-item {
+      padding: var(--item-pad, 12px) 18px;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .skeleton-line {
+      height: 10px;
+      border-radius: 4px;
+      background: color-mix(in srgb, var(--text-3) 14%, transparent);
+      animation: skeleton-pulse 1.2s ease-in-out infinite;
+    }
+
+    .skeleton-title { width: 78%; }
+    .skeleton-summary { width: 94%; margin-top: 12px; }
+    .skeleton-meta { width: 36%; margin-top: 12px; height: 8px; }
+
+    .skeleton-item:nth-child(2) .skeleton-title { width: 66%; }
+    .skeleton-item:nth-child(2) .skeleton-summary { width: 88%; }
+    .skeleton-item:nth-child(3) .skeleton-title { width: 72%; }
+    .skeleton-item:nth-child(3) .skeleton-summary { width: 82%; }
+
+    @keyframes skeleton-pulse {
+      0%, 100% { opacity: 0.32; }
+      50% { opacity: 0.62; }
+    }
+
     /* Floating date badge */
     .date-label {
       position: sticky;
@@ -592,7 +622,25 @@
     </div>
   </div>
 
-  <div class="list" id="historyList"></div>
+  <div class="list" id="historyList">
+    <div class="initial-skeleton" aria-hidden="true">
+      <div class="skeleton-item">
+        <div class="skeleton-line skeleton-title"></div>
+        <div class="skeleton-line skeleton-summary"></div>
+        <div class="skeleton-line skeleton-meta"></div>
+      </div>
+      <div class="skeleton-item">
+        <div class="skeleton-line skeleton-title"></div>
+        <div class="skeleton-line skeleton-summary"></div>
+        <div class="skeleton-line skeleton-meta"></div>
+      </div>
+      <div class="skeleton-item">
+        <div class="skeleton-line skeleton-title"></div>
+        <div class="skeleton-line skeleton-summary"></div>
+        <div class="skeleton-line skeleton-meta"></div>
+      </div>
+    </div>
+  </div>
 
   <script src="popup.js"></script>
 </body>
