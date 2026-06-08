@@ -2,6 +2,7 @@ const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
 const ALARM_NAME = 'aihot-poll';
 const DEFAULT_INTERVAL = 5;
 const MIN_INTERVAL = 2;
+const DEFAULT_HISTORY_DAYS = 2;
 const MAX_HISTORY_DAYS = 5;
 
 
@@ -111,7 +112,7 @@ async function showNotification(items) {
 
   await chrome.storage.local.set({ lastItems: items.slice(0, 5) });
 
-  const { history = [], historyDays = 1 } = await chrome.storage.local.get(['history', 'historyDays']);
+  const { history = [], historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['history', 'historyDays']);
   const existingUrls = new Set(history.map(i => i.url));
   const newEntries = items
     .filter(i => !existingUrls.has(i.url))
@@ -125,7 +126,7 @@ async function showNotification(items) {
 }
 
 async function manualPoll() {
-  const { history = [], historyDays = 1, feedMode = 'selected' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode = 'selected' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
   const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
   console.log(`[AI HOT] manual poll since=${sinceTime}`);
 
@@ -173,7 +174,7 @@ async function manualPoll() {
 
 async function updateBadge() {
   const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
-  const { history = [], readIds = [], historyDays = 1 } = data;
+  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS } = data;
   const readAllBefore = getReadAllBeforeForMode(data);
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const unread = history.filter(i => {
@@ -189,7 +190,7 @@ async function updateBadge() {
 async function resetAndPoll(feedMode) {
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
-    const { historyDays = 1 } = await chrome.storage.local.get('historyDays');
+    const { historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get('historyDays');
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
 
@@ -256,7 +257,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await migrateReadAllBefore();
   if (details.reason === 'install') {
     try {
-      const { feedMode = 'selected', historyDays = 1 } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+      const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
       const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
       const maxPages = 3;
       let allItems = [];

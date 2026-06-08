@@ -29,6 +29,7 @@ const FONT_FACE_MAP = {
 };
 
 const VALID_THEMES = new Set(['dark', 'green-dark']);
+const DEFAULT_HISTORY_DAYS = 2;
 
 let cachedReadIds = new Set();
 let fontLoadTimer = null;
@@ -159,7 +160,7 @@ function applyConfig(data) {
   const size = data.fontSize || 'medium';
   fontSizeEl.value = size;
   applyFontSize(size);
-  let days = data.historyDays || 1;
+  let days = data.historyDays || DEFAULT_HISTORY_DAYS;
   if (days > 5) days = 5;
   historyDaysEl.value = String(days);
 }
@@ -168,7 +169,7 @@ function renderHistory(data) {
   const rawHistory = data.history || [];
   const readIds = data.readIds || [];
   const readAllBefore = getReadAllBeforeForMode(data);
-  const historyDays = data.historyDays || 1;
+  const historyDays = data.historyDays || DEFAULT_HISTORY_DAYS;
 
   cachedReadIds = new Set(readIds);
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
@@ -248,7 +249,7 @@ function updateBadgeFromData(history, readIdSet, readAllBeforeTime) {
 
 async function updateBadge() {
   const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
-  const { history = [], readIds = [], historyDays = 1 } = data;
+  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS } = data;
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const readIdSet = new Set(readIds);
   const readAllBefore = getReadAllBeforeForMode(data);
