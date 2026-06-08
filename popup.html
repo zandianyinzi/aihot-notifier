@@ -8,7 +8,7 @@
       --bg-sub: #191919;
       --bg-hover: #242424;
       --bg-item-hover: #242424;
-      --bg-unread: #1a1710;
+      --bg-unread: #171717;
       --border: #2c2c2c;
       --border-light: #222222;
       --text: #f0f0f0;
@@ -17,9 +17,10 @@
       --text-unread: #f0f0f0;
       --text-unread-2: #b0b0b0;
       --text-unread-3: #808080;
-      --text-read: #6c6c6c;
+      --text-read: #7c7c7c;
+      --text-read-hover: #8e8e8e;
       --accent: #ff8c5a;
-      --accent-soft: rgba(255,140,90,0.12);
+      --accent-soft: rgba(255,140,90,0.10);
       --state-ok: #22c55e;
       --state-ok-soft: rgba(34,197,94,0.25);
       --state-ok-softer: rgba(34,197,94,0.15);
@@ -38,18 +39,19 @@
     [data-theme="green-dark"] {
       --bg: #101410;
       --bg-sub: #171d17;
-      --bg-hover: #202820;
-      --bg-item-hover: #1b211b;
-      --bg-unread: #17211f;
+      --bg-hover: #202420;
+      --bg-item-hover: #1f211f;
+      --bg-unread: #181f1c;
       --border: #2a3429;
-      --border-light: #202820;
-      --text: #edf4e8;
-      --text-2: #b7c5b0;
-      --text-3: #7f8d78;
-      --text-unread: #dcebe4;
-      --text-unread-2: #aabbb4;
-      --text-unread-3: #82958e;
-      --text-read: #74806e;
+      --border-light: #202620;
+      --text: #e8e8df;
+      --text-2: #b9b8ad;
+      --text-3: #88877d;
+      --text-unread: #eeeee6;
+      --text-unread-2: #c2c1b8;
+      --text-unread-3: #94928a;
+      --text-read: #7f7e75;
+      --text-read-hover: #99978f;
       --accent: #8fbdb2;
       --accent-soft: rgba(143,189,178,0.13);
       --state-ok: #8fbdb2;
@@ -63,7 +65,7 @@
       --cat-industry: #e8b830;
       --cat-paper: #40d8a0;
       --cat-tips: #fa8080;
-      --cat-default: #6a886a;
+      --cat-default: #838176;
       --shadow: 0 1px 3px rgba(0,0,0,0.35);
     }
 
@@ -377,7 +379,11 @@
 
     .item.unread {
       background: var(--bg-unread);
-      box-shadow: inset 3px 0 0 var(--accent);
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 56%, transparent);
+    }
+
+    .item.unread:hover {
+      background: color-mix(in srgb, var(--bg-unread) 74%, var(--bg-item-hover, var(--bg-hover)));
     }
 
     .item.read .item-title {
@@ -451,6 +457,12 @@
 
     .item.read .item-summary {
       color: var(--text-read);
+    }
+
+    .item.read:hover .item-title,
+    .item.read:hover .item-summary,
+    .item.read:hover .item-meta {
+      color: var(--text-read-hover, var(--text-read));
     }
 
     .item-meta {
