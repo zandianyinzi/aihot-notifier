@@ -36,8 +36,9 @@ let fontLoadTimer = null;
 let activeFontHref = '';
 
 function getFontHref(font) {
-  const fonts = ['Fraunces:opsz,wght@9..144,500'];
+  const fonts = [];
   if (FONT_FACE_MAP[font]) fonts.push(FONT_FACE_MAP[font]);
+  if (fonts.length === 0) return '';
   return 'https://fonts.googleapis.com/css2?' + fonts.map(family => `family=${family}`).join('&') + '&display=swap';
 }
 
@@ -47,6 +48,11 @@ function loadFontStylesheet(font) {
 
   activeFontHref = href;
   let link = document.getElementById('fontStylesheet');
+  if (!href) {
+    if (link) link.remove();
+    return;
+  }
+
   if (!link) {
     link = document.createElement('link');
     link.id = 'fontStylesheet';

@@ -8,6 +8,7 @@ zip -r aihot-notifier.zip \
   popup.html \
   popup-boot.js \
   popup.js \
+  fonts/ \
   icons/ \
   -x "*.DS_Store"
 echo "✓ 打包完成: aihot-notifier.zip"

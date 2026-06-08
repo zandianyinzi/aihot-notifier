@@ -3,6 +3,14 @@
 <head>
   <meta charset="utf-8">
   <style>
+    @font-face {
+      font-family: 'Fraunces Local';
+      font-style: normal;
+      font-display: block;
+      font-weight: 500;
+      src: url('fonts/fraunces-latin-500-normal.woff2') format('woff2');
+    }
+
     [data-theme="dark"] {
       --bg: #111111;
       --bg-sub: #191919;
@@ -118,7 +126,7 @@
     }
 
     .brand a {
-      font-family: 'Fraunces', serif;
+      font-family: 'Fraunces Local', serif;
       font-size: var(--fs-brand, 17px);
       font-weight: 500;
       color: var(--accent);
