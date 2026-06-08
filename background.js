@@ -1,6 +1,7 @@
 const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
 const ALARM_NAME = 'aihot-poll';
 const DEFAULT_INTERVAL = 5;
+const MIN_INTERVAL = 2;
 const MAX_HISTORY_DAYS = 5;
 
 
@@ -8,7 +9,7 @@ async function getConfig() {
   const data = await chrome.storage.local.get(['enabled', 'interval', 'lastCheck', 'feedMode']);
   return {
     enabled: data.enabled !== false,
-    interval: data.interval || DEFAULT_INTERVAL,
+    interval: Math.max(Number(data.interval) || DEFAULT_INTERVAL, MIN_INTERVAL),
     lastCheck: data.lastCheck || new Date().toISOString(),
     feedMode: data.feedMode || 'selected'
   };
@@ -16,6 +17,30 @@ async function getConfig() {
 
 function getApiUrl(mode) {
   return `${API_BASE}&mode=${mode}`;
+}
+
+function normalizeFeedMode(mode) {
+  return mode === 'all' ? 'all' : 'selected';
+}
+
+function getReadAllBeforeForMode(data) {
+  const mode = normalizeFeedMode(data.feedMode);
+  const byMode = data.readAllBeforeByMode || {};
+  return byMode[mode] || data.readAllBefore || '';
+}
+
+async function migrateReadAllBefore() {
+  const data = await chrome.storage.local.get(['readAllBefore', 'readAllBeforeByMode', 'feedMode']);
+  if (!data.readAllBefore) return;
+
+  const mode = normalizeFeedMode(data.feedMode);
+  await chrome.storage.local.set({
+    readAllBeforeByMode: {
+      ...(data.readAllBeforeByMode || {}),
+      [mode]: data.readAllBefore
+    },
+    readAllBefore: ''
+  });
 }
 
 async function pollForUpdates() {
@@ -147,7 +172,9 @@ async function manualPoll() {
 }
 
 async function updateBadge() {
-  const { history = [], readIds = [], readAllBefore = '', historyDays = 1 } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'historyDays']);
+  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
+  const { history = [], readIds = [], historyDays = 1 } = data;
+  const readAllBefore = getReadAllBeforeForMode(data);
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const unread = history.filter(i => {
     if (new Date(i.time).getTime() <= cutoff) return false;
@@ -226,6 +253,7 @@ async function setupAlarm() {
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log(`[AI HOT] extension ${details.reason}`);
+  await migrateReadAllBefore();
   if (details.reason === 'install') {
     try {
       const { feedMode = 'selected', historyDays = 1 } = await chrome.storage.local.get(['feedMode', 'historyDays']);
@@ -272,6 +300,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  await migrateReadAllBefore();
   await setupAlarm();
 });
 
@@ -292,7 +321,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // 数据变化时自动更新 badge
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.history || changes.readIds) {
+  if (changes.history || changes.readIds || changes.readAllBefore || changes.readAllBeforeByMode || changes.feedMode) {
     updateBadge();
   }
 });

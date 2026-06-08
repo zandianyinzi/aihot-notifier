@@ -99,6 +99,34 @@ function normalizeTheme(theme) {
   return VALID_THEMES.has(theme) ? theme : 'dark';
 }
 
+function normalizeFeedMode(mode) {
+  return mode === 'all' ? 'all' : 'selected';
+}
+
+function getReadAllBeforeForMode(data) {
+  const mode = normalizeFeedMode(data.feedMode);
+  const byMode = data.readAllBeforeByMode || {};
+  return byMode[mode] || data.readAllBefore || '';
+}
+
+async function migrateReadAllBefore(data) {
+  if (!data.readAllBefore) return;
+
+  const mode = normalizeFeedMode(data.feedMode);
+  await chrome.storage.local.set({
+    readAllBeforeByMode: {
+      ...(data.readAllBeforeByMode || {}),
+      [mode]: data.readAllBefore
+    },
+    readAllBefore: ''
+  });
+  data.readAllBeforeByMode = {
+    ...(data.readAllBeforeByMode || {}),
+    [mode]: data.readAllBefore
+  };
+  data.readAllBefore = '';
+}
+
 function applyTheme(theme) {
   theme = normalizeTheme(theme);
   document.documentElement.setAttribute('data-theme', theme);
@@ -119,9 +147,9 @@ function applyFontFamily(font) {
 function applyConfig(data) {
   enabledEl.checked = data.enabled !== false;
   let interval = data.interval || 5;
-  if (interval < 5) interval = 5;
+  if (interval < 2) interval = 2;
   intervalEl.value = String(interval);
-  feedModeEl.value = data.feedMode || 'selected';
+  feedModeEl.value = normalizeFeedMode(data.feedMode);
   const theme = normalizeTheme(data.theme);
   themeEl.value = theme;
   applyTheme(theme);
@@ -139,7 +167,7 @@ function applyConfig(data) {
 function renderHistory(data) {
   const rawHistory = data.history || [];
   const readIds = data.readIds || [];
-  const readAllBefore = data.readAllBefore || '';
+  const readAllBefore = getReadAllBeforeForMode(data);
   const historyDays = data.historyDays || 1;
 
   cachedReadIds = new Set(readIds);
@@ -219,9 +247,11 @@ function updateBadgeFromData(history, readIdSet, readAllBeforeTime) {
 }
 
 async function updateBadge() {
-  const { history = [], readIds = [], readAllBefore = '', historyDays = 1 } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'historyDays']);
+  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
+  const { history = [], readIds = [], historyDays = 1 } = data;
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const readIdSet = new Set(readIds);
+  const readAllBefore = getReadAllBeforeForMode(data);
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
   const filtered = history.filter(i => new Date(i.time).getTime() > cutoff);
   updateBadgeFromData(filtered, readIdSet, readAllBeforeTime);
@@ -250,7 +280,7 @@ async function saveConfig() {
 }
 
 async function loadHistory() {
-  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'historyDays']);
+  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
   renderHistory(data);
 }
 
@@ -286,7 +316,14 @@ historyList.addEventListener('click', async (e) => {
 });
 
 markAllReadBtn.addEventListener('click', async () => {
-  await chrome.storage.local.set({ readAllBefore: new Date().toISOString(), readIds: [] });
+  const { feedMode = 'selected', readAllBeforeByMode = {} } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode']);
+  const mode = normalizeFeedMode(feedMode);
+  await chrome.storage.local.set({
+    readAllBeforeByMode: {
+      ...readAllBeforeByMode,
+      [mode]: new Date().toISOString()
+    }
+  });
   markAllReadBtn.classList.add('done');
   setTimeout(() => markAllReadBtn.classList.remove('done'), 1500);
   await loadHistory();
@@ -342,8 +379,9 @@ pollBtn.addEventListener('click', async () => {
 (async function init() {
   const data = await chrome.storage.local.get([
     'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'historyDays',
-    'history', 'readIds', 'readAllBefore'
+    'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode'
   ]);
+  await migrateReadAllBefore(data);
   applyConfig(data);
   if (data.theme && data.theme !== normalizeTheme(data.theme)) {
     chrome.storage.local.set({ theme: 'dark' });

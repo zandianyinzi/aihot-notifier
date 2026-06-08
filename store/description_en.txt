@@ -20,8 +20,8 @@ Automatically monitors the latest AI industry updates from aihot.virxact.com and
 • 2 carefully crafted themes: Obsidian Night / Dark Forest
 • 4 premium fonts: Noto Sans SC / Noto Serif SC / LXGW WenKai / System Default
 • 4 font size levels: Small / Default / Large / Extra Large
-• Configurable polling interval: 1 / 2 / 3 / 5 / 7 / 15 / 30 / 60 minutes
-• Configurable display range: 1-7 days
+• Configurable polling interval: 2 / 5 / 15 / 30 / 60 minutes
+• Configurable display range: 1 / 2 / 3 / 5 days
 
 ✦ Technical Highlights
 

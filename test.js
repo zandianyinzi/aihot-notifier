@@ -311,6 +311,31 @@ console.log('\n[resetAndPoll-readIds保留]');
   assert(unread[0].url === 'https://a.com/3', '只有新URL是未读');
 })();
 
+console.log('\n[内容源-全部已读分别控制]');
+(function() {
+  const readAllBeforeByMode = {
+    selected: '2026-06-05T10:00:00Z',
+    all: ''
+  };
+  const item = { url: 'https://a.com/1', time: '2026-06-05T09:00:00Z' };
+  const getReadAllBeforeForMode = (mode) => readAllBeforeByMode[mode] || '';
+  const isRead = (mode) => {
+    const readAllBefore = getReadAllBeforeForMode(mode);
+    return readAllBefore && new Date(item.time) <= new Date(readAllBefore);
+  };
+
+  assert(isRead('selected'), 'selected 的全部已读只影响 selected');
+  assert(!isRead('all'), 'all 不受 selected 的全部已读影响');
+})();
+
+console.log('\n[内容源-单条已读全局共享]');
+(function() {
+  const readIds = ['https://a.com/1'];
+  const item = { url: 'https://a.com/1', time: '2026-06-05T09:00:00Z' };
+
+  assert(readIds.includes(item.url), '单条 URL 已读不区分 selected/all');
+})();
+
 console.log('\n[resetAndPoll-cutoff过滤]');
 (function() {
   // 重建时也应用 cutoff 过滤
