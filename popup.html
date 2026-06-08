@@ -7,15 +7,25 @@
       --bg: #111111;
       --bg-sub: #191919;
       --bg-hover: #242424;
+      --bg-item-hover: #242424;
       --bg-unread: #1a1710;
       --border: #2c2c2c;
       --border-light: #222222;
       --text: #f0f0f0;
       --text-2: #b0b0b0;
       --text-3: #808080;
-      --text-read: #606060;
+      --text-unread: #f0f0f0;
+      --text-unread-2: #b0b0b0;
+      --text-unread-3: #808080;
+      --text-read: #6c6c6c;
       --accent: #ff8c5a;
       --accent-soft: rgba(255,140,90,0.12);
+      --state-ok: #22c55e;
+      --state-ok-soft: rgba(34,197,94,0.25);
+      --state-ok-softer: rgba(34,197,94,0.15);
+      --state-fail: #ef4444;
+      --state-fail-soft: rgba(239,68,68,0.25);
+      --state-fail-softer: rgba(239,68,68,0.15);
       --cat-model: #a78bfa;
       --cat-products: #60a5fa;
       --cat-industry: #fbbf24;
@@ -26,18 +36,28 @@
     }
 
     [data-theme="green-dark"] {
-      --bg: #151a16;
-      --bg-sub: #1a201b;
-      --bg-hover: #232b24;
-      --bg-unread: #1b221c;
-      --border: #2f382f;
-      --border-light: #272e27;
-      --text: #e0e8de;
-      --text-2: #a8b4a6;
-      --text-3: #748272;
-      --text-read: #505c4e;
-      --accent: #5ccc6a;
-      --accent-soft: rgba(92,204,106,0.10);
+      --bg: #101410;
+      --bg-sub: #171d17;
+      --bg-hover: #202820;
+      --bg-item-hover: #1b211b;
+      --bg-unread: #17211f;
+      --border: #2a3429;
+      --border-light: #202820;
+      --text: #edf4e8;
+      --text-2: #b7c5b0;
+      --text-3: #7f8d78;
+      --text-unread: #dcebe4;
+      --text-unread-2: #aabbb4;
+      --text-unread-3: #82958e;
+      --text-read: #74806e;
+      --accent: #8fbdb2;
+      --accent-soft: rgba(143,189,178,0.13);
+      --state-ok: #8fbdb2;
+      --state-ok-soft: rgba(143,189,178,0.24);
+      --state-ok-softer: rgba(143,189,178,0.14);
+      --state-fail: #c9898e;
+      --state-fail-soft: rgba(201,137,142,0.23);
+      --state-fail-softer: rgba(201,137,142,0.13);
       --cat-model: #b49afa;
       --cat-products: #6cb0fa;
       --cat-industry: #e8b830;
@@ -161,13 +181,13 @@
     }
 
     .btn-mark-read.done {
-      color: #22c55e;
+      color: var(--state-ok);
       animation: mark-done 1.5s ease-out forwards;
     }
 
     @keyframes mark-done {
-      0% { color: #22c55e; transform: scale(1.1); }
-      30% { color: #22c55e; transform: scale(1); }
+      0% { color: var(--state-ok); transform: scale(1.1); }
+      30% { color: var(--state-ok); transform: scale(1); }
       100% { color: var(--text-3); transform: scale(1); }
     }
 
@@ -190,24 +210,24 @@
     }
 
     .btn-icon.poll-ok {
-      color: #22c55e;
+      color: var(--state-ok);
       animation: flash-ok 3s ease-out forwards;
     }
 
     .btn-icon.poll-fail {
-      color: #ef4444;
+      color: var(--state-fail);
       animation: flash-fail 3s ease-out forwards;
     }
 
     @keyframes flash-ok {
-      0% { background: rgba(34,197,94,0.25); color: #22c55e; }
-      40% { background: rgba(34,197,94,0.15); color: #22c55e; }
+      0% { background: var(--state-ok-soft); color: var(--state-ok); }
+      40% { background: var(--state-ok-softer); color: var(--state-ok); }
       100% { background: transparent; color: var(--text-3); }
     }
 
     @keyframes flash-fail {
-      0% { background: rgba(239,68,68,0.25); color: #ef4444; }
-      40% { background: rgba(239,68,68,0.15); color: #ef4444; }
+      0% { background: var(--state-fail-soft); color: var(--state-fail); }
+      40% { background: var(--state-fail-softer); color: var(--state-fail); }
       100% { background: transparent; color: var(--text-3); }
     }
 
@@ -352,7 +372,7 @@
     .item:last-child { border-bottom: none; }
 
     .item:hover {
-      background: var(--bg-hover);
+      background: var(--bg-item-hover, var(--bg-hover));
     }
 
     .item.unread {
@@ -406,7 +426,16 @@
     }
 
     .item.unread .item-title {
+      color: var(--text-unread, var(--text));
       font-weight: 500;
+    }
+
+    .item.unread .item-summary {
+      color: var(--text-unread-2, var(--text-2));
+    }
+
+    .item.unread .item-meta {
+      color: var(--text-unread-3, var(--text-3));
     }
 
     .item-summary {
