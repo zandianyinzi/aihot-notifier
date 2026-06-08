@@ -184,6 +184,29 @@ async function pollForUpdates() {
   }
 }
 
+async function manualPoll() {
+  const { history = [], historyDays = 1, feedMode = 'selected' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+  const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
+  const res = await fetch(`${getApiUrl(feedMode)}&since=${encodeURIComponent(sinceTime)}`);
+  if (!res.ok) return;
+
+  const json = await res.json();
+  const allItems = json.items || [];
+  if (allItems.length === 0) return;
+
+  const existingUrls = new Set(history.map(i => i.url));
+  const newEntries = allItems
+    .filter(i => !existingUrls.has(i.url))
+    .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
+  const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
+  const merged = [...newEntries, ...history]
+    .filter(i => new Date(i.time).getTime() > cutoff)
+    .sort((a, b) => new Date(b.time) - new Date(a.time));
+
+  await chrome.storage.local.set({ history: merged, lastCheck: new Date().toISOString(), failCount: 0 });
+  await updateBadge();
+}
+
 // ---- 测试 ----
 
 let passed = 0;
@@ -286,6 +309,18 @@ async function runTests() {
   await pollForUpdates();
 
   assert(notificationCreated === null, '关闭通知后不弹窗');
+
+  console.log('\n[场景7: 手动刷新不弹桌面通知]');
+
+  storageData.enabled = true;
+  storageData.history = [];
+  storageData.readIds = [];
+  notificationCreated = null;
+
+  await manualPoll();
+
+  assert(notificationCreated === null, '手动刷新只更新列表和角标，不弹通知');
+  assert(storageData.history.length === 2, `手动刷新写入 2 条 history: ${storageData.history.length}`);
 
   console.log(`\n========================================`);
   console.log(`结果: ${passed} passed, ${failed} failed`);

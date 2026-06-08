@@ -362,8 +362,7 @@ pollBtn.addEventListener('click', async () => {
   pollBtn.classList.add('spinning');
   pollBtn.disabled = true;
   try {
-    const { feedMode = 'selected' } = await chrome.storage.local.get('feedMode');
-    await chrome.runtime.sendMessage({ type: 'feedModeChanged', feedMode });
+    await chrome.runtime.sendMessage({ type: 'pollNow' });
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
     await loadHistory();
     pollBtn.classList.remove('spinning');
