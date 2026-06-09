@@ -210,14 +210,14 @@
     }
 
     .btn-mark-read.done {
-      color: var(--state-ok);
+      color: var(--accent);
       animation: mark-done 1.5s ease-out forwards;
     }
 
     @keyframes mark-done {
-      0% { color: var(--state-ok); transform: scale(1.1); }
-      30% { color: var(--state-ok); transform: scale(1); }
-      100% { color: var(--text-3); transform: scale(1); }
+      0% { background: var(--accent-soft); color: var(--accent); transform: scale(1.1); }
+      40% { background: var(--accent-soft); color: var(--accent); transform: scale(1); }
+      100% { background: transparent; color: var(--accent); transform: scale(1); }
     }
 
     .btn-icon svg {
