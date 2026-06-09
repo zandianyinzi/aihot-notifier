@@ -318,7 +318,7 @@ function renderHistory(data, options = {}) {
 
   const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
   if (unread > 0) {
-    unreadCountEl.textContent = `${unread} 条未读`;
+    setUnreadIndicator(unread);
     unreadCountEl.classList.add('show');
     markAllReadBtn.classList.add('visible');
   } else {
@@ -391,6 +391,11 @@ function isReadFast(item, readIdSet, readAllBeforeTime) {
   if (readIdSet.has(item.url)) return true;
   if (readAllBeforeTime && new Date(item.time).getTime() <= readAllBeforeTime) return true;
   return false;
+}
+
+function setUnreadIndicator(count) {
+  unreadCountEl.textContent = count > 999 ? '999+' : String(count);
+  unreadCountEl.title = `${count} 条未读`;
 }
 
 function updateBadgeFromData(history, readIdSet, readAllBeforeTime) {
@@ -467,7 +472,7 @@ historyList.addEventListener('click', async (e) => {
   const unreadEls = historyList.querySelectorAll('.item.unread');
   const unreadCount = unreadEls.length;
   if (unreadCount > 0) {
-    unreadCountEl.textContent = `${unreadCount} 条未读`;
+    setUnreadIndicator(unreadCount);
     unreadCountEl.classList.add('show');
     markAllReadBtn.classList.add('visible');
   } else {
