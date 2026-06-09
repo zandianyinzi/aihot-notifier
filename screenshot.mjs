@@ -144,7 +144,7 @@ function buildWrapperHtml(theme) {
     <ul class="features">
       <li>精选 + 全量两种模式</li>
       <li>桌面通知即时推送</li>
-      <li>双主题 / 字体可选</li>
+      <li>双主题 / 字体风格可选</li>
       <li>轻量无依赖，隐私友好</li>
     </ul>
   </div>
