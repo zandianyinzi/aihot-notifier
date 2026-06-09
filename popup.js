@@ -22,56 +22,74 @@ const CATEGORY_MAP = {
   'tips': { cls: 'cat-tips', label: '技巧' }
 };
 
-const FONT_FACE_MAP = {
-  'noto-sans': 'Noto+Sans+SC:wght@300;400;500',
-  'noto-serif': 'Noto+Serif+SC:wght@400;500',
-  lxgw: 'LXGW+WenKai+TC:wght@300;400'
-};
-
 const VALID_THEMES = new Set(['dark', 'green-dark']);
 const DEFAULT_HISTORY_DAYS = 2;
+const POPUP_CACHE_KEY = 'popupDataSnapshot';
+const POPUP_SESSION_KEY = 'popupWarmSession';
+const POPUP_CACHE_VERSION = 3;
+const POPUP_CACHE_TTL_MS = 5 * 60 * 1000;
 
 let cachedReadIds = new Set();
-let fontLoadTimer = null;
-let activeFontHref = '';
+let lastRenderSignature = '';
 
-function getFontHref(font) {
-  const fonts = [];
-  if (FONT_FACE_MAP[font]) fonts.push(FONT_FACE_MAP[font]);
-  if (fonts.length === 0) return '';
-  return 'https://fonts.googleapis.com/css2?' + fonts.map(family => `family=${family}`).join('&') + '&display=swap';
+function readPopupCache() {
+  try {
+    const raw = localStorage.getItem(POPUP_CACHE_KEY);
+    if (!raw) return null;
+
+    const cached = JSON.parse(raw);
+    if (!cached || cached.version !== POPUP_CACHE_VERSION || !cached.data) return null;
+    if (cached.extensionVersion !== chrome.runtime.getManifest().version) return null;
+    if (!cached.cachedAt || Date.now() - cached.cachedAt > POPUP_CACHE_TTL_MS) return null;
+    return cached.data;
+  } catch (_e) {
+    localStorage.removeItem(POPUP_CACHE_KEY);
+    return null;
+  }
 }
 
-function loadFontStylesheet(font) {
-  const href = getFontHref(font);
-  if (href === activeFontHref) return;
+async function readWarmPopupCache() {
+  if (!chrome.storage.session) return null;
 
-  activeFontHref = href;
-  let link = document.getElementById('fontStylesheet');
-  if (!href) {
-    if (link) link.remove();
-    return;
+  try {
+    const data = await chrome.storage.session.get(POPUP_SESSION_KEY);
+    const session = data[POPUP_SESSION_KEY];
+    if (!session || session.extensionVersion !== chrome.runtime.getManifest().version) return null;
+    return readPopupCache();
+  } catch (_e) {
+    return null;
   }
-
-  if (!link) {
-    link = document.createElement('link');
-    link.id = 'fontStylesheet';
-    link.rel = 'stylesheet';
-    document.head.appendChild(link);
-  }
-  link.href = href;
 }
 
-function scheduleFontStylesheet(font) {
-  clearTimeout(fontLoadTimer);
-  const run = () => {
-    fontLoadTimer = setTimeout(() => loadFontStylesheet(font), 0);
-  };
+async function markPopupSessionWarm() {
+  if (!chrome.storage.session) return;
 
-  if (window.requestAnimationFrame) {
-    requestAnimationFrame(run);
-  } else {
-    run();
+  try {
+    await chrome.storage.session.set({
+      [POPUP_SESSION_KEY]: {
+        extensionVersion: chrome.runtime.getManifest().version,
+        warmedAt: Date.now()
+      }
+    });
+  } catch (_e) {
+    // Session cache is an optimization only.
+  }
+}
+
+function writePopupCache(partialData) {
+  try {
+    const previous = readPopupCache() || {};
+    localStorage.setItem(POPUP_CACHE_KEY, JSON.stringify({
+      version: POPUP_CACHE_VERSION,
+      extensionVersion: chrome.runtime.getManifest().version,
+      cachedAt: Date.now(),
+      data: {
+        ...previous,
+        ...partialData
+      }
+    }));
+  } catch (_e) {
+    // Keep popup rendering fast even if localStorage is full or unavailable.
   }
 }
 
@@ -116,6 +134,33 @@ function getReadAllBeforeForMode(data) {
   return byMode[mode] || data.readAllBefore || '';
 }
 
+function mergeReadIds(current = [], cached = []) {
+  const merged = [...new Set([...current, ...cached])];
+  return merged.length > 100 ? merged.slice(merged.length - 100) : merged;
+}
+
+function sameStringArray(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}
+
+function reconcileCachedReadIds(data, cachedData) {
+  if (!cachedData || !cachedData.readIds) return { data, changed: false };
+
+  const mergedReadIds = mergeReadIds(data.readIds || [], cachedData.readIds || []);
+  if (sameStringArray(mergedReadIds, data.readIds || [])) {
+    return { data, changed: false };
+  }
+
+  return {
+    data: {
+      ...data,
+      readIds: mergedReadIds
+    },
+    changed: true
+  };
+}
+
 async function migrateReadAllBefore(data) {
   if (!data.readAllBefore) return;
 
@@ -148,7 +193,6 @@ function applyFontSize(size) {
 function applyFontFamily(font) {
   document.documentElement.setAttribute('data-font', font);
   localStorage.setItem('fontFamily', font);
-  scheduleFontStylesheet(font);
 }
 
 function applyConfig(data) {
@@ -171,17 +215,42 @@ function applyConfig(data) {
   historyDaysEl.value = String(days);
 }
 
-function renderHistory(data) {
+function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) {
+  return JSON.stringify({
+    historyDays,
+    items: history.map(item => [
+      item.url,
+      item.time,
+      item.title,
+      item.source || '',
+      item.category || '',
+      item.summary || '',
+      getDateLabel(item.time),
+      isReadFast(item, readIdSet, readAllBeforeTime) ? 1 : 0
+    ])
+  });
+}
+
+function renderHistory(data, options = {}) {
+  const shouldUpdateBadge = options.updateBadge !== false;
+  const skipUnchanged = options.skipUnchanged !== false;
   const rawHistory = data.history || [];
   const readIds = data.readIds || [];
   const readAllBefore = getReadAllBeforeForMode(data);
   const historyDays = data.historyDays || DEFAULT_HISTORY_DAYS;
 
-  cachedReadIds = new Set(readIds);
+  const readIdSet = new Set(readIds);
+  cachedReadIds = readIdSet;
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
 
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const history = rawHistory.filter(i => new Date(i.time).getTime() > cutoff);
+  const signature = getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays);
+
+  if (skipUnchanged && signature === lastRenderSignature) {
+    if (shouldUpdateBadge) updateBadgeFromData(history, readIdSet, readAllBeforeTime);
+    return;
+  }
 
   if (history.length === 0) {
     const tip = rawHistory.length > 0
@@ -190,11 +259,12 @@ function renderHistory(data) {
     historyList.innerHTML = `<div class="empty-state">${tip}</div>`;
     unreadCountEl.classList.remove('show');
     markAllReadBtn.classList.remove('visible');
-    updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
+    if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
+    lastRenderSignature = signature;
     return;
   }
 
-  const unread = history.filter(i => !isReadFast(i, cachedReadIds, readAllBeforeTime)).length;
+  const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
   if (unread > 0) {
     unreadCountEl.textContent = `${unread} 条未读`;
     unreadCountEl.classList.add('show');
@@ -238,7 +308,24 @@ function renderHistory(data) {
   });
 
   historyList.innerHTML = html;
-  updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
+  if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
+  lastRenderSignature = signature;
+}
+
+function cacheLoadedPopupData(data) {
+  writePopupCache({
+    enabled: data.enabled,
+    interval: data.interval,
+    feedMode: data.feedMode,
+    theme: data.theme,
+    fontFamily: data.fontFamily,
+    fontSize: data.fontSize,
+    historyDays: data.historyDays,
+    history: data.history || [],
+    readIds: data.readIds || [],
+    readAllBefore: data.readAllBefore || '',
+    readAllBeforeByMode: data.readAllBeforeByMode || {}
+  });
 }
 
 function isReadFast(item, readIdSet, readAllBeforeTime) {
@@ -270,10 +357,7 @@ async function saveConfig() {
   const fontSize = fontSizeEl.value;
   const historyDays = Number(historyDaysEl.value);
   const feedMode = feedModeEl.value;
-  applyTheme(theme);
-  applyFontFamily(fontFamily);
-  applyFontSize(fontSize);
-  await chrome.storage.local.set({
+  const config = {
     enabled: enabledEl.checked,
     interval: Number(intervalEl.value),
     feedMode,
@@ -281,14 +365,23 @@ async function saveConfig() {
     fontFamily,
     fontSize,
     historyDays
-  });
+  };
+  applyTheme(theme);
+  applyFontFamily(fontFamily);
+  applyFontSize(fontSize);
+  writePopupCache(config);
+  await chrome.storage.local.set(config);
   chrome.runtime.sendMessage({ type: 'configChanged' });
   loadHistory();
 }
 
 async function loadHistory() {
   const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
-  renderHistory(data);
+  const cachedData = await readWarmPopupCache();
+  const reconciled = reconcileCachedReadIds(data, cachedData);
+  renderHistory(reconciled.data);
+  writePopupCache(reconciled.data);
+  if (reconciled.changed) chrome.storage.local.set({ readIds: reconciled.data.readIds });
 }
 
 // Event delegation for item clicks
@@ -302,6 +395,8 @@ historyList.addEventListener('click', async (e) => {
     const arr = [...cachedReadIds];
     if (arr.length > 100) arr.splice(0, arr.length - 100);
     chrome.storage.local.set({ readIds: arr });
+    writePopupCache({ readIds: arr });
+    lastRenderSignature = '';
   }
 
   item.classList.remove('unread');
@@ -381,16 +476,28 @@ pollBtn.addEventListener('click', async () => {
   setTimeout(() => pollBtn.classList.remove('poll-ok', 'poll-fail'), 3000);
 });
 
-// Single storage read on init
+// Keep cold start on the skeleton; only use cached content after this browser session has warmed.
 (async function init() {
-  const data = await chrome.storage.local.get([
+  const storageDataPromise = chrome.storage.local.get([
     'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'historyDays',
     'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode'
   ]);
+  const cachedData = await readWarmPopupCache();
+  if (cachedData) {
+    applyConfig(cachedData);
+    renderHistory(cachedData, { updateBadge: false });
+  }
+
+  const storageData = await storageDataPromise;
+  const reconciled = reconcileCachedReadIds(storageData, cachedData);
+  const data = reconciled.data;
   await migrateReadAllBefore(data);
   applyConfig(data);
   if (data.theme && data.theme !== normalizeTheme(data.theme)) {
     chrome.storage.local.set({ theme: 'dark' });
   }
   renderHistory(data);
+  cacheLoadedPopupData(data);
+  markPopupSessionWarm();
+  if (reconciled.changed) chrome.storage.local.set({ readIds: data.readIds });
 })();
