@@ -82,6 +82,19 @@
     [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --item-pad: 16px; }
     [data-size="xlarge"] { --fs-base: 17px; --fs-title: 17px; --fs-meta: 14px; --item-pad: 18px; }
 
+    :root {
+      --control-size: 30px;
+      --control-radius: 6px;
+      --control-icon-size: 16px;
+      --control-icon-stroke: 1.6;
+      --control-active-scale: 0.9;
+      --motion-tap: 0.15s;
+      --motion-panel: 0.25s;
+      --motion-loading: 0.45s;
+      --motion-confirm: 0.6s;
+      --motion-result: 1.2s;
+    }
+
     * {
       box-sizing: border-box;
       margin: 0;
@@ -179,17 +192,20 @@
     }
 
     .btn-icon {
-      width: 30px;
-      height: 30px;
+      width: var(--control-size);
+      height: var(--control-size);
       display: flex;
       align-items: center;
       justify-content: center;
       border: none;
       background: none;
       color: var(--text-3);
-      border-radius: 6px;
+      border-radius: var(--control-radius);
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition:
+        background var(--motion-tap) ease,
+        color var(--motion-tap) ease,
+        transform var(--motion-tap) ease;
     }
 
     .btn-icon:hover {
@@ -198,7 +214,7 @@
     }
 
     .btn-icon:active {
-      transform: scale(0.9);
+      transform: scale(var(--control-active-scale));
     }
 
     .btn-mark-read {
@@ -209,66 +225,69 @@
       display: flex;
     }
 
-    .btn-mark-read.done {
+    .btn-mark-read.is-confirmed {
       display: flex;
       color: var(--accent);
-      animation: mark-done 1.5s ease-out forwards;
+      animation: control-confirm var(--motion-confirm) ease-out forwards;
     }
 
-    @keyframes mark-done {
-      0% { background: var(--accent-soft); color: var(--accent); transform: scale(1.1); }
-      40% { background: var(--accent-soft); color: var(--accent); transform: scale(1); }
-      100% { background: transparent; color: var(--accent); transform: scale(1); }
+    @keyframes control-confirm {
+      0% { background: var(--accent-soft); color: var(--accent); transform: scale(1.08); }
+      45% { background: var(--accent-soft); color: var(--accent); transform: scale(1); }
+      100% { background: transparent; color: var(--text-3); transform: scale(1); }
     }
 
     .btn-icon svg {
-      width: 16px;
-      height: 16px;
+      width: var(--control-icon-size);
+      height: var(--control-icon-size);
       stroke: currentColor;
-      stroke-width: 1.6;
+      stroke-width: var(--control-icon-stroke);
       fill: none;
       stroke-linecap: round;
       stroke-linejoin: round;
     }
 
-    .btn-icon.spinning svg {
-      animation: rotate 0.45s linear infinite;
+    .btn-icon.is-loading svg {
+      animation: rotate var(--motion-loading) linear infinite;
     }
 
     @keyframes rotate {
       to { transform: rotate(360deg); }
     }
 
-    .btn-icon.poll-ok {
+    .btn-icon.is-result-ok {
       color: var(--state-ok);
-      animation: flash-ok 3s ease-out forwards;
+      animation: control-result-ok var(--control-result-duration, var(--motion-result)) ease-out forwards;
     }
 
-    #pollNow.poll-ok {
+    #pollNow.is-result-accent {
       color: var(--accent);
-      animation: flash-poll-ok 3s ease-out forwards;
+      animation: control-result-accent var(--control-result-duration, var(--motion-result)) ease-out forwards;
     }
 
-    .btn-icon.poll-fail {
+    .btn-icon.is-result-danger {
       color: var(--state-fail);
-      animation: flash-fail 3s ease-out forwards;
+      animation: control-result-danger var(--control-result-duration, var(--motion-result)) ease-out forwards;
     }
 
-    @keyframes flash-ok {
+    @keyframes control-result-ok {
       0% { background: var(--state-ok-soft); color: var(--state-ok); }
-      40% { background: var(--state-ok-softer); color: var(--state-ok); }
+      45% { background: var(--state-ok-softer); color: var(--state-ok); }
+      82% { background: transparent; color: var(--text-3); }
       100% { background: transparent; color: var(--text-3); }
     }
 
-    @keyframes flash-poll-ok {
+    @keyframes control-result-accent {
       0% { background: var(--accent-soft); color: var(--accent); }
-      40% { background: var(--accent-soft); color: var(--accent); }
+      45% { background: var(--accent-soft); color: var(--accent); }
+      82% { background: transparent; color: var(--text-3); }
       100% { background: transparent; color: var(--text-3); }
     }
 
-    @keyframes flash-fail {
+    @keyframes control-result-danger {
       0% { background: var(--state-fail-soft); color: var(--state-fail); }
-      40% { background: var(--state-fail-softer); color: var(--state-fail); }
+      45% { background: var(--state-fail-softer); color: var(--state-fail); }
+      82% { background: transparent; color: var(--text-3); }
       100% { background: transparent; color: var(--text-3); }
     }
 
@@ -276,7 +295,7 @@
     .settings {
       overflow: hidden;
       max-height: 0;
-      transition: max-height 0.25s ease;
+      transition: max-height var(--motion-panel) ease;
       background: var(--bg-sub);
     }
 

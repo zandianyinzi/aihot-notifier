@@ -28,9 +28,59 @@ const POPUP_CACHE_KEY = 'popupDataSnapshot';
 const POPUP_SESSION_KEY = 'popupWarmSession';
 const POPUP_CACHE_VERSION = 3;
 const POPUP_CACHE_TTL_MS = 5 * 60 * 1000;
+const BUTTON_RESULT_CLASSES = ['is-result-accent', 'is-result-danger', 'is-result-ok'];
+const BUTTON_TRANSIENT_CLASSES = ['is-loading', ...BUTTON_RESULT_CLASSES];
+const BUTTON_RESULT_MIN_MS = 600;
+const BUTTON_RESULT_MAX_MS = 1400;
+const BUTTON_RESULT_TARGET_TOTAL_MS = 1800;
 
 let cachedReadIds = new Set();
 let lastRenderSignature = '';
+
+function clearButtonFeedback(button) {
+  button.classList.remove(...BUTTON_TRANSIENT_CLASSES);
+  button.style.removeProperty('--control-result-duration');
+}
+
+function getButtonResultDuration(elapsedMs) {
+  if (!Number.isFinite(elapsedMs)) return BUTTON_RESULT_MAX_MS;
+  return Math.round(Math.max(
+    BUTTON_RESULT_MIN_MS,
+    Math.min(BUTTON_RESULT_MAX_MS, BUTTON_RESULT_TARGET_TOTAL_MS - elapsedMs)
+  ));
+}
+
+function removeClassAfterAnimation(button, className, onCleanup) {
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    button.classList.remove(className);
+    if (onCleanup) onCleanup();
+  };
+
+  button.addEventListener('animationend', cleanup, { once: true });
+  requestAnimationFrame(() => {
+    if (getComputedStyle(button).animationName === 'none') cleanup();
+  });
+}
+
+function showButtonResult(button, className, elapsedMs) {
+  button.classList.remove(...BUTTON_TRANSIENT_CLASSES);
+  button.style.setProperty('--control-result-duration', `${getButtonResultDuration(elapsedMs)}ms`);
+  button.classList.add(className);
+  removeClassAfterAnimation(button, className, () => {
+    button.style.removeProperty('--control-result-duration');
+  });
+}
+
+function showButtonConfirm(button) {
+  button.classList.remove('is-confirmed');
+  // Restart the short confirmation pulse if this state is applied again quickly.
+  void button.offsetWidth;
+  button.classList.add('is-confirmed');
+  removeClassAfterAnimation(button, 'is-confirmed');
+}
 
 function readPopupCache() {
   try {
@@ -438,8 +488,7 @@ markAllReadBtn.addEventListener('click', async () => {
       [mode]: new Date().toISOString()
     }
   });
-  markAllReadBtn.classList.add('done');
-  setTimeout(() => markAllReadBtn.classList.remove('done'), 1500);
+  showButtonConfirm(markAllReadBtn);
   await loadHistory();
 });
 
@@ -450,27 +499,25 @@ settingsBtn.addEventListener('click', () => {
 enabledEl.addEventListener('change', () => saveConfig());
 intervalEl.addEventListener('change', () => saveConfig());
 feedModeEl.addEventListener('change', async () => {
+  const feedbackStartedAt = Date.now();
   const nextFeedMode = normalizeFeedMode(feedModeEl.value);
   const { feedMode = 'selected' } = await chrome.storage.local.get('feedMode');
   const previousFeedMode = normalizeFeedMode(feedMode);
 
-  pollBtn.classList.remove('poll-ok', 'poll-fail');
-  pollBtn.classList.add('spinning');
+  clearButtonFeedback(pollBtn);
+  pollBtn.classList.add('is-loading');
   try {
     const response = await chrome.runtime.sendMessage({ type: 'feedModeChanged', feedMode: nextFeedMode });
     if (!response || response.ok === false) throw new Error(response?.error || 'feed mode update failed');
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
     await loadHistory();
     writePopupCache({ feedMode: nextFeedMode });
-    pollBtn.classList.remove('spinning');
-    pollBtn.classList.add(failCount === 0 ? 'poll-ok' : 'poll-fail');
+    showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
   } catch (e) {
     feedModeEl.value = previousFeedMode;
     writePopupCache({ feedMode: previousFeedMode });
-    pollBtn.classList.remove('spinning');
-    pollBtn.classList.add('poll-fail');
+    showButtonResult(pollBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
   }
-  setTimeout(() => pollBtn.classList.remove('poll-ok', 'poll-fail'), 3000);
 });
 themeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
 fontFamilyEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
@@ -478,22 +525,20 @@ fontSizeEl.addEventListener('change', () => saveConfig({ notifyBackground: false
 historyDaysEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
 
 pollBtn.addEventListener('click', async () => {
-  pollBtn.classList.remove('poll-ok', 'poll-fail');
-  pollBtn.classList.add('spinning');
+  const feedbackStartedAt = Date.now();
+  clearButtonFeedback(pollBtn);
+  pollBtn.classList.add('is-loading');
   pollBtn.disabled = true;
   try {
     const response = await chrome.runtime.sendMessage({ type: 'pollNow' });
     if (!response || response.ok === false) throw new Error(response?.error || 'manual poll failed');
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
     await loadHistory();
-    pollBtn.classList.remove('spinning');
-    pollBtn.classList.add(failCount === 0 ? 'poll-ok' : 'poll-fail');
+    showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
   } catch (e) {
-    pollBtn.classList.remove('spinning');
-    pollBtn.classList.add('poll-fail');
+    showButtonResult(pollBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
   }
   pollBtn.disabled = false;
-  setTimeout(() => pollBtn.classList.remove('poll-ok', 'poll-fail'), 3000);
 });
 
 // Keep cold start on the skeleton; only use cached content after this browser session has warmed.

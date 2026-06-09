@@ -174,6 +174,7 @@ function buildWrapperHtml(theme) {
         const list = document.getElementById('historyList');
         const unreadCount = document.getElementById('unreadCount');
 
+        list.innerHTML = '';
         unreadCount.textContent = `${items.length} 条未读`;
         unreadCount.classList.add('show');
         document.getElementById('markAllRead').classList.add('visible');
@@ -227,7 +228,8 @@ function buildWrapperHtml(theme) {
   body {
     width: 440px;
     height: 280px;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0d1a12 100%);
+    background:
+      linear-gradient(112deg, #1a1a2e 0%, #16213e 49.8%, #1a2e1e 50%, #0d1a12 100%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -265,44 +267,12 @@ function buildWrapperHtml(theme) {
     transform: rotate(4deg);
     border: 1px solid rgba(255,255,255,0.12);
   }
-  .branding {
-    position: absolute;
-    bottom: 18px;
-    left: 0; right: 0;
-    text-align: center;
-    z-index: 10;
-  }
-  .branding h1 {
-    font-family: 'Georgia', serif;
-    font-size: 16px;
-    font-weight: 600;
-    color: #fff;
-    letter-spacing: 0.5px;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.5);
-  }
-  .branding h1 .dot {
-    display: inline-block;
-    width: 5px; height: 5px;
-    background: #e40012;
-    border-radius: 50%;
-    margin: 0 2px;
-    vertical-align: middle;
-  }
-  .branding p {
-    font-size: 9px;
-    color: rgba(255,255,255,0.6);
-    margin-top: 3px;
-  }
 </style>
 </head>
 <body>
   <div class="cards">
     <div class="card card-1"><iframe src="popup.html" data-theme="dark"></iframe></div>
     <div class="card card-2"><iframe src="popup.html" data-theme="green-dark"></iframe></div>
-  </div>
-  <div class="branding">
-    <h1>AI<span class="dot"></span>HOT Notifier</h1>
-    <p>实时 AI 资讯 · 桌面通知 · 双主题</p>
   </div>
 </body>
 </html>`;
@@ -329,6 +299,7 @@ function buildWrapperHtml(theme) {
       const list = document.getElementById('historyList');
       const unreadCount = document.getElementById('unreadCount');
 
+      list.innerHTML = '';
       unreadCount.textContent = `${items.length} 条未读`;
       unreadCount.classList.add('show');
       document.getElementById('markAllRead').classList.add('visible');
