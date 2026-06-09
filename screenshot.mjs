@@ -175,7 +175,8 @@ function buildWrapperHtml(theme) {
         const unreadCount = document.getElementById('unreadCount');
 
         list.innerHTML = '';
-        unreadCount.textContent = `${items.length} 条未读`;
+        unreadCount.textContent = items.length > 999 ? '999+' : String(items.length);
+        unreadCount.title = `${items.length} 条未读`;
         unreadCount.classList.add('show');
         document.getElementById('markAllRead').classList.add('visible');
 
@@ -300,7 +301,8 @@ function buildWrapperHtml(theme) {
       const unreadCount = document.getElementById('unreadCount');
 
       list.innerHTML = '';
-      unreadCount.textContent = `${items.length} 条未读`;
+      unreadCount.textContent = items.length > 999 ? '999+' : String(items.length);
+      unreadCount.title = `${items.length} 条未读`;
       unreadCount.classList.add('show');
       document.getElementById('markAllRead').classList.add('visible');
 
