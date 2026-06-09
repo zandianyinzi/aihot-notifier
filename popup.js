@@ -10,7 +10,6 @@ const pollBtn = document.getElementById('pollNow');
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsPanel = document.getElementById('settingsPanel');
 const historyList = document.getElementById('historyList');
-const unreadCountEl = document.getElementById('unreadCount');
 
 const CATEGORY_MAP = {
   'ai-models': { cls: 'cat-model', label: '模型' },
@@ -309,7 +308,6 @@ function renderHistory(data, options = {}) {
       ? `当前${historyDays}天内无记录，记录会随轮询逐步积累`
       : '暂无内容，等待下一次推送';
     historyList.innerHTML = `<div class="empty-state">${tip}</div>`;
-    unreadCountEl.classList.remove('show');
     markAllReadBtn.classList.remove('visible');
     if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
     lastRenderSignature = signature;
@@ -318,11 +316,8 @@ function renderHistory(data, options = {}) {
 
   const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
   if (unread > 0) {
-    setUnreadIndicator(unread);
-    unreadCountEl.classList.add('show');
     markAllReadBtn.classList.add('visible');
   } else {
-    unreadCountEl.classList.remove('show');
     markAllReadBtn.classList.remove('visible');
   }
 
@@ -393,15 +388,10 @@ function isReadFast(item, readIdSet, readAllBeforeTime) {
   return false;
 }
 
-function setUnreadIndicator(count) {
-  unreadCountEl.textContent = count > 99 ? '99+' : String(count);
-  unreadCountEl.title = `${count} 条未读`;
-}
-
 function updateBadgeFromData(history, readIdSet, readAllBeforeTime) {
   const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
   chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: '#ff6b35' });
+  chrome.action.setBadgeBackgroundColor({ color: '#e40012' });
 }
 
 async function updateBadge() {
@@ -472,11 +462,8 @@ historyList.addEventListener('click', async (e) => {
   const unreadEls = historyList.querySelectorAll('.item.unread');
   const unreadCount = unreadEls.length;
   if (unreadCount > 0) {
-    setUnreadIndicator(unreadCount);
-    unreadCountEl.classList.add('show');
     markAllReadBtn.classList.add('visible');
   } else {
-    unreadCountEl.classList.remove('show');
     markAllReadBtn.classList.remove('visible');
   }
   chrome.action.setBadgeText({ text: unreadCount > 0 ? String(unreadCount) : '' });

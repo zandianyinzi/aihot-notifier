@@ -178,7 +178,7 @@
 
     @keyframes logo-dot-breathe {
       0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.55; transform: scale(0.78); }
+      50% { opacity: 0.32; transform: scale(0.72); }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -190,7 +190,7 @@
     .actions {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 2px;
     }
 
     .btn-icon {
@@ -251,6 +251,10 @@
 
     .btn-icon.is-loading svg {
       animation: rotate var(--motion-loading) linear infinite;
+    }
+
+    #pollNow.is-loading {
+      color: var(--accent);
     }
 
     @keyframes rotate {
@@ -376,40 +380,6 @@
     .select-mini:focus {
       border-color: var(--accent);
     }
-
-    .badge {
-      font-size: 10px;
-      font-weight: 500;
-      color: var(--accent);
-      width: var(--control-size);
-      height: var(--control-size);
-      padding: 0;
-      border: none;
-      border-radius: var(--control-radius);
-      background: transparent;
-      box-shadow:
-        inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent),
-        inset 0 1px 0 rgba(255,255,255,0.04),
-        0 1px 2px rgba(0,0,0,0.12);
-      box-sizing: border-box;
-      display: none;
-      line-height: 1;
-      align-items: center;
-      justify-content: center;
-      flex: none;
-      white-space: nowrap;
-      transition:
-        background var(--motion-tap) ease,
-        color var(--motion-tap) ease;
-    }
-
-    .badge.show { display: inline-flex; }
-
-    .badge.show:hover {
-      background: var(--bg-hover);
-      color: var(--text-2);
-    }
-
 
     /* ---- List ---- */
     .list {
@@ -613,12 +583,11 @@
             <path d="M85.76 115.2 H93.44" stroke-width="3"></path>
             <path d="M48.64 66.56 H81.92" stroke-width="2"></path>
           </g>
-          <circle class="brand-logo-dot" cx="89.6" cy="15.36" r="8"></circle>
+          <circle class="brand-logo-dot" cx="89.6" cy="15.36" r="8.4"></circle>
         </svg>
       </a>
     </div>
     <div class="actions">
-      <span class="badge" id="unreadCount"></span>
       <button class="btn-icon btn-mark-read" id="markAllRead" title="全部已读">
         <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><path d="M4 20L20 4"/></svg>
       </button>

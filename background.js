@@ -188,7 +188,7 @@ async function updateBadge() {
     return true;
   }).length;
   chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: '#ff6b35' });
+  chrome.action.setBadgeBackgroundColor({ color: '#e40012' });
 }
 
 async function resetAndPoll(feedMode) {
