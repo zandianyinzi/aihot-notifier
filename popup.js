@@ -234,6 +234,7 @@ function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) 
 function renderHistory(data, options = {}) {
   const shouldUpdateBadge = options.updateBadge !== false;
   const skipUnchanged = options.skipUnchanged !== false;
+  const shouldScrollToFirstUnread = options.scrollToFirstUnread === true;
   const rawHistory = data.history || [];
   const readIds = data.readIds || [];
   const readAllBefore = getReadAllBeforeForMode(data);
@@ -249,6 +250,7 @@ function renderHistory(data, options = {}) {
 
   if (skipUnchanged && signature === lastRenderSignature) {
     if (shouldUpdateBadge) updateBadgeFromData(history, readIdSet, readAllBeforeTime);
+    if (shouldScrollToFirstUnread) scrollToFirstUnread();
     return;
   }
 
@@ -308,8 +310,15 @@ function renderHistory(data, options = {}) {
   });
 
   historyList.innerHTML = html;
+  if (shouldScrollToFirstUnread) scrollToFirstUnread();
   if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
   lastRenderSignature = signature;
+}
+
+function scrollToFirstUnread() {
+  const firstUnread = historyList.querySelector('.item.unread');
+  if (!firstUnread) return;
+  historyList.scrollTop = Math.max(firstUnread.offsetTop - historyList.offsetTop - 6, 0);
 }
 
 function cacheLoadedPopupData(data) {
@@ -496,7 +505,7 @@ pollBtn.addEventListener('click', async () => {
   const cachedData = await readWarmPopupCache();
   if (cachedData) {
     applyConfig(cachedData);
-    renderHistory(cachedData, { updateBadge: false });
+    renderHistory(cachedData, { updateBadge: false, scrollToFirstUnread: true });
   }
 
   const storageData = await storageDataPromise;
@@ -507,7 +516,7 @@ pollBtn.addEventListener('click', async () => {
   if (data.theme && data.theme !== normalizeTheme(data.theme)) {
     chrome.storage.local.set({ theme: 'dark' });
   }
-  renderHistory(data);
+  renderHistory(data, { scrollToFirstUnread: true });
   cacheLoadedPopupData(data);
   markPopupSessionWarm();
   if (reconciled.changed) chrome.storage.local.set({ readIds: data.readIds });
