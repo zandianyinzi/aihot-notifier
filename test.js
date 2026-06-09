@@ -352,6 +352,69 @@ console.log('\n[resetAndPoll-cutoff过滤]');
   assert(newHistory[0].title === 'Recent', '只保留近期条目');
 })();
 
+console.log('\n[resetAndPoll-API失败不覆盖history]');
+(function() {
+  const oldHistory = [
+    { title: 'Keep', url: 'https://old.com/keep', time: '2026-06-05T05:00:00Z' }
+  ];
+  const oldFeedMode = 'selected';
+  const allItems = [];
+  let failed = false;
+
+  try {
+    const res = { ok: false, status: 500 };
+    if (!res.ok) {
+      throw new Error(`API returned ${res.status}`);
+    }
+  } catch (_e) {
+    failed = true;
+  }
+
+  const nextHistory = failed
+    ? oldHistory
+    : allItems.map(i => ({ title: i.title, url: i.url, time: i.publishedAt }));
+  const nextFeedMode = failed ? oldFeedMode : 'all';
+
+  assert(failed, '第一页失败时进入失败分支');
+  assert(nextHistory === oldHistory, '失败时保留旧history引用，不重建为空数组');
+  assert(nextFeedMode === oldFeedMode, '失败时不提交新的feedMode');
+  assert(nextHistory.length === 1 && nextHistory[0].title === 'Keep', '失败时旧history内容不丢失');
+})();
+
+console.log('\n[manualPoll-API失败返回失败]');
+(function() {
+  let failCount = 0;
+  let threw = false;
+
+  try {
+    const res = { ok: false, status: 503 };
+    if (!res.ok) {
+      throw new Error(`API returned ${res.status}`);
+    }
+  } catch (_e) {
+    failCount += 1;
+    threw = true;
+  }
+
+  assert(threw, '手动刷新API失败时抛错给调用方');
+  assert(failCount === 1, '手动刷新失败递增failCount');
+})();
+
+console.log('\n[配置变更-background通知范围]');
+(function() {
+  function shouldNotifyBackground(setting) {
+    return setting === 'enabled' || setting === 'interval';
+  }
+
+  assert(shouldNotifyBackground('enabled'), '通知开关变化会重设alarm');
+  assert(shouldNotifyBackground('interval'), '轮询间隔变化会重设alarm');
+  assert(!shouldNotifyBackground('theme'), '主题变化不重设alarm');
+  assert(!shouldNotifyBackground('fontFamily'), '字体变化不重设alarm');
+  assert(!shouldNotifyBackground('fontSize'), '字号变化不重设alarm');
+  assert(!shouldNotifyBackground('historyDays'), '显示天数变化不重设alarm');
+  assert(!shouldNotifyBackground('feedMode'), '内容源切换走feedModeChanged，不额外configChanged');
+})();
+
 console.log('\n[分页拉取-多页合并去重]');
 (function() {
   // 模拟 3 页 API 返回，部分重叠

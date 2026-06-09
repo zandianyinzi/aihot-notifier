@@ -185,26 +185,79 @@ async function pollForUpdates() {
 }
 
 async function manualPoll() {
-  const { history = [], historyDays = 1, feedMode = 'selected' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
-  const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
-  const res = await fetch(`${getApiUrl(feedMode)}&since=${encodeURIComponent(sinceTime)}`);
-  if (!res.ok) return;
+  try {
+    const { history = [], historyDays = 1, feedMode = 'selected' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+    const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
+    const res = await fetch(`${getApiUrl(feedMode)}&since=${encodeURIComponent(sinceTime)}`);
+    if (!res.ok) {
+      throw new Error(`API returned ${res.status}`);
+    }
 
-  const json = await res.json();
-  const allItems = json.items || [];
-  if (allItems.length === 0) return;
+    const json = await res.json();
+    const allItems = json.items || [];
+    if (allItems.length === 0) return;
 
-  const existingUrls = new Set(history.map(i => i.url));
-  const newEntries = allItems
-    .filter(i => !existingUrls.has(i.url))
-    .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
-  const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
-  const merged = [...newEntries, ...history]
-    .filter(i => new Date(i.time).getTime() > cutoff)
-    .sort((a, b) => new Date(b.time) - new Date(a.time));
+    const existingUrls = new Set(history.map(i => i.url));
+    const newEntries = allItems
+      .filter(i => !existingUrls.has(i.url))
+      .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
+    const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
+    const merged = [...newEntries, ...history]
+      .filter(i => new Date(i.time).getTime() > cutoff)
+      .sort((a, b) => new Date(b.time) - new Date(a.time));
 
-  await chrome.storage.local.set({ history: merged, lastCheck: new Date().toISOString(), failCount: 0 });
-  await updateBadge();
+    await chrome.storage.local.set({ history: merged, lastCheck: new Date().toISOString(), failCount: 0 });
+    await updateBadge();
+  } catch (e) {
+    await incrementFailCount();
+    throw e;
+  }
+}
+
+async function incrementFailCount() {
+  const { failCount = 0 } = await chrome.storage.local.get('failCount');
+  await chrome.storage.local.set({ failCount: failCount + 1 });
+}
+
+async function resetAndPoll(feedMode) {
+  try {
+    const { historyDays = 1 } = await chrome.storage.local.get('historyDays');
+    const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
+    const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
+    let allItems = [];
+    let cursor = null;
+    const maxPages = 3;
+
+    for (let page = 0; page < maxPages; page++) {
+      let url = `${getApiUrl(feedMode)}&since=${encodeURIComponent(sinceTime)}`;
+      if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`API returned ${res.status}`);
+      }
+      const json = await res.json();
+      if (!json.items || json.items.length === 0) break;
+
+      allItems = allItems.concat(json.items);
+
+      if (!json.hasNext || !json.nextCursor) break;
+      const oldest = json.items[json.items.length - 1];
+      if (new Date(oldest.publishedAt).getTime() < cutoff) break;
+      cursor = json.nextCursor;
+    }
+
+    const history = allItems
+      .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }))
+      .filter(i => new Date(i.time).getTime() > cutoff)
+      .sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    await chrome.storage.local.set({ history, feedMode, lastCheck: new Date().toISOString(), failCount: 0 });
+    await updateBadge();
+  } catch (e) {
+    await incrementFailCount();
+    throw e;
+  }
 }
 
 // ---- 测试 ----
@@ -321,6 +374,48 @@ async function runTests() {
 
   assert(notificationCreated === null, '手动刷新只更新列表和角标，不弹通知');
   assert(storageData.history.length === 2, `手动刷新写入 2 条 history: ${storageData.history.length}`);
+
+  console.log('\n[场景8: 内容源重建失败不清空history]');
+
+  const oldHistory = [{ title: '旧内容', url: 'https://example.com/old', time: new Date().toISOString() }];
+  storageData.history = oldHistory;
+  storageData.feedMode = 'selected';
+  storageData.failCount = 0;
+  const okFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve({ ok: false, status: 500 });
+
+  let threw = false;
+  try {
+    await resetAndPoll('all');
+  } catch (_e) {
+    threw = true;
+  }
+
+  assert(threw, 'resetAndPoll失败会向调用方抛错');
+  assert(storageData.history === oldHistory, 'resetAndPoll失败不覆盖旧history');
+  assert(storageData.feedMode === 'selected', `resetAndPoll失败不提交新feedMode: ${storageData.feedMode}`);
+  assert(storageData.failCount === 1, `resetAndPoll失败递增failCount: ${storageData.failCount}`);
+
+  globalThis.fetch = okFetch;
+
+  console.log('\n[场景9: 手动刷新失败返回失败态]');
+
+  storageData.history = oldHistory;
+  storageData.failCount = 0;
+  globalThis.fetch = () => Promise.resolve({ ok: false, status: 503 });
+
+  let manualThrew = false;
+  try {
+    await manualPoll();
+  } catch (_e) {
+    manualThrew = true;
+  }
+
+  assert(manualThrew, 'manualPoll失败会向调用方抛错');
+  assert(storageData.history === oldHistory, 'manualPoll失败不覆盖旧history');
+  assert(storageData.failCount === 1, `manualPoll失败递增failCount: ${storageData.failCount}`);
+
+  globalThis.fetch = okFetch;
 
   console.log(`\n========================================`);
   console.log(`结果: ${passed} passed, ${failed} failed`);

@@ -351,7 +351,8 @@ async function updateBadge() {
   updateBadgeFromData(filtered, readIdSet, readAllBeforeTime);
 }
 
-async function saveConfig() {
+async function saveConfig(options = {}) {
+  const shouldNotifyBackground = options.notifyBackground !== false;
   const theme = themeEl.value;
   const fontFamily = fontFamilyEl.value;
   const fontSize = fontSizeEl.value;
@@ -371,7 +372,9 @@ async function saveConfig() {
   applyFontSize(fontSize);
   writePopupCache(config);
   await chrome.storage.local.set(config);
-  chrome.runtime.sendMessage({ type: 'configChanged' });
+  if (shouldNotifyBackground) {
+    chrome.runtime.sendMessage({ type: 'configChanged' });
+  }
   loadHistory();
 }
 
@@ -435,35 +438,43 @@ settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.toggle('open');
 });
 
-enabledEl.addEventListener('change', saveConfig);
-intervalEl.addEventListener('change', saveConfig);
+enabledEl.addEventListener('change', () => saveConfig());
+intervalEl.addEventListener('change', () => saveConfig());
 feedModeEl.addEventListener('change', async () => {
-  await saveConfig();
+  const nextFeedMode = normalizeFeedMode(feedModeEl.value);
+  const { feedMode = 'selected' } = await chrome.storage.local.get('feedMode');
+  const previousFeedMode = normalizeFeedMode(feedMode);
+
   pollBtn.classList.remove('poll-ok', 'poll-fail');
   pollBtn.classList.add('spinning');
   try {
-    await chrome.runtime.sendMessage({ type: 'feedModeChanged', feedMode: feedModeEl.value });
+    const response = await chrome.runtime.sendMessage({ type: 'feedModeChanged', feedMode: nextFeedMode });
+    if (!response || response.ok === false) throw new Error(response?.error || 'feed mode update failed');
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
     await loadHistory();
+    writePopupCache({ feedMode: nextFeedMode });
     pollBtn.classList.remove('spinning');
     pollBtn.classList.add(failCount === 0 ? 'poll-ok' : 'poll-fail');
   } catch (e) {
+    feedModeEl.value = previousFeedMode;
+    writePopupCache({ feedMode: previousFeedMode });
     pollBtn.classList.remove('spinning');
     pollBtn.classList.add('poll-fail');
   }
   setTimeout(() => pollBtn.classList.remove('poll-ok', 'poll-fail'), 3000);
 });
-themeEl.addEventListener('change', saveConfig);
-fontFamilyEl.addEventListener('change', saveConfig);
-fontSizeEl.addEventListener('change', saveConfig);
-historyDaysEl.addEventListener('change', saveConfig);
+themeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
+fontFamilyEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
+fontSizeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
+historyDaysEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
 
 pollBtn.addEventListener('click', async () => {
   pollBtn.classList.remove('poll-ok', 'poll-fail');
   pollBtn.classList.add('spinning');
   pollBtn.disabled = true;
   try {
-    await chrome.runtime.sendMessage({ type: 'pollNow' });
+    const response = await chrome.runtime.sendMessage({ type: 'pollNow' });
+    if (!response || response.ok === false) throw new Error(response?.error || 'manual poll failed');
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
     await loadHistory();
     pollBtn.classList.remove('spinning');

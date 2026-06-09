@@ -141,7 +141,9 @@ async function manualPoll() {
       if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
       const res = await fetch(url);
-      if (!res.ok) break;
+      if (!res.ok) {
+        throw new Error(`API returned ${res.status}`);
+      }
       const json = await res.json();
       if (!json.items || json.items.length === 0) break;
 
@@ -169,6 +171,8 @@ async function manualPoll() {
     console.log(`[AI HOT] manual poll done, ${merged.length} total items (fetched ${allItems.length})`);
   } catch (e) {
     console.error(`[AI HOT] manual poll error:`, e);
+    await incrementFailCount();
+    throw e;
   }
 }
 
@@ -203,7 +207,9 @@ async function resetAndPoll(feedMode) {
       if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
       const res = await fetch(url);
-      if (!res.ok) break;
+      if (!res.ok) {
+        throw new Error(`API returned ${res.status}`);
+      }
       const json = await res.json();
       if (!json.items || json.items.length === 0) break;
 
@@ -220,12 +226,13 @@ async function resetAndPoll(feedMode) {
       .filter(i => new Date(i.time).getTime() > cutoff)
       .sort((a, b) => new Date(b.time) - new Date(a.time));
 
-    await chrome.storage.local.set({ history, lastCheck: new Date().toISOString(), failCount: 0 });
+    await chrome.storage.local.set({ history, feedMode: normalizeFeedMode(feedMode), lastCheck: new Date().toISOString(), failCount: 0 });
     await updateBadge();
     console.log(`[AI HOT] resetAndPoll done, ${history.length} items from ${allItems.length} fetched`);
   } catch (e) {
     console.error(`[AI HOT] resetAndPoll error:`, e);
     await incrementFailCount();
+    throw e;
   }
 }
 
@@ -311,11 +318,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     sendResponse({ ok: true });
   }
   if (msg.type === 'pollNow') {
-    manualPoll().then(() => sendResponse({ ok: true }));
+    manualPoll()
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
   if (msg.type === 'feedModeChanged') {
-    resetAndPoll(msg.feedMode).then(() => sendResponse({ ok: true }));
+    resetAndPoll(msg.feedMode)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
 });

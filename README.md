@@ -9,7 +9,7 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
 - 资讯列表带标题 + 摘要，按日期分组
 - 已读/未读状态持久化，重启不丢失
 - 支持双深色主题（墨夜/暗森）
-- 支持字体切换（思源黑体/思源宋体/霞鹜文楷/系统默认）
+- 支持字体风格切换（黑体/宋体/楷体/默认）
 - 支持字号调节（小/默认/大/特大）
 - 可配置轮询间隔和显示天数
 
@@ -37,7 +37,7 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
   - **通知推送**：开关桌面通知
   - **检查频率**：2 / 5 / 15 / 30 / 60 分钟
   - **外观**：墨夜 / 暗森
-  - **字体**：思源黑体 / 思源宋体 / 霞鹜文楷 / 系统默认
+  - **字体**：黑体 / 宋体 / 楷体 / 默认（优先使用本机已安装字体）
   - **字号**：小 / 默认 / 大 / 特大
   - **显示天数**：1 / 2 / 3 / 5 天（默认 2 天）
 
@@ -51,8 +51,15 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
 
 - Manifest V3，Service Worker 后台运行
 - 使用 `chrome.alarms` 定时轮询，系统重启后自动恢复
-- 数据存储在 `chrome.storage.local`，本地持久化
+- 数据存储在浏览器本地存储中，主要使用 `chrome.storage.local`
 - API：`GET https://aihot.virxact.com/api/public/items?mode=selected&since=<ISO-8601>`
+
+## 测试
+
+- `node test.js`：运行纯逻辑测试，覆盖去重、排序、时间窗口和 API URL。
+- `node test-notification.js`：使用 mock 的 Chrome API 验证通知和 badge 逻辑。
+- `node test-background.js`：直接加载真实 `background.js`，验证消息通道和失败语义。
+- `node test-e2e.js`：请求 `https://aihot.virxact.com`，验证线上 API 数据假设。
 
 ## 文件结构
 

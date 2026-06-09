@@ -22,7 +22,7 @@ node test-e2e.js
 ## 架构
 
 - **background.js** — Service Worker。定时轮询 API、去重、存储 history、发通知、管理 badge 计数。核心函数：`pollForUpdates()`（定时触发）、`manualPoll()`（用户手动刷新）、`resetAndPoll()`（切换 feedMode 时全量重拉）、`updateBadge()`（badge 未读数）。
-- **popup.html + popup.js** — 弹窗 UI。读取 storage 渲染资讯列表，管理已读状态和设置面板。配置变更通过 `chrome.runtime.sendMessage` 通知 background。
+- **popup.html + popup.js** — 弹窗 UI。读取 storage 渲染资讯列表，管理已读状态和设置面板。通知开关/轮询间隔变更通过 `chrome.runtime.sendMessage` 通知 background；外观类设置仅本地保存和重渲染。
 - **manifest.json** — 权限：alarms、notifications、storage。host_permissions 限制为 aihot.virxact.com。
 
 ## 关键设计决策
@@ -30,7 +30,7 @@ node test-e2e.js
 - **已读状态**：`readIds`（单条标记）+ `readAllBefore` 时间戳（批量清除）。两者共同决定是否已读。
 - **存储 vs 显示**：storage 保留 `Math.max(historyDays, 7)` 天数据避免切换天数时丢失；UI 和 badge 按用户设置的 `historyDays` 过滤显示。
 - **API 轮询缓冲**：定时轮询回退 2 倍间隔时间（`bufferMs`），避免 API 入库延迟导致漏条目。
-- **feedMode 切换**：调用 `resetAndPoll()` 清空 history 重新拉取，而非增量合并，保证数据一致。
+- **feedMode 切换**：调用 `resetAndPoll()` 全量重拉并替换 history，成功后才提交新的 feedMode；失败时保留旧 history 和旧 feedMode，避免状态不一致。
 
 ## API
 
