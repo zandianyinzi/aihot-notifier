@@ -77,10 +77,10 @@
       --shadow: 0 1px 3px rgba(0,0,0,0.35);
     }
 
-    [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --fs-brand: 16px; --item-pad: 12px; }
-    [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --fs-brand: 18px; --item-pad: 14px; }
-    [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --fs-brand: 20px; --item-pad: 16px; }
-    [data-size="xlarge"] { --fs-base: 17px; --fs-title: 17px; --fs-meta: 14px; --fs-brand: 22px; --item-pad: 18px; }
+    [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --item-pad: 12px; }
+    [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --item-pad: 14px; }
+    [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --item-pad: 16px; }
+    [data-size="xlarge"] { --fs-base: 17px; --fs-title: 17px; --fs-meta: 14px; --item-pad: 18px; }
 
     * {
       box-sizing: border-box;
@@ -125,32 +125,52 @@
     }
 
     .brand a {
-      font-family: 'Fraunces Local', serif;
-      font-size: var(--fs-brand, 17px);
-      font-weight: 500;
-      color: var(--accent);
+      width: 38px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       text-decoration: none;
-      letter-spacing: -0.03em;
+      line-height: 0;
+      transition: opacity 0.15s ease;
     }
 
     .brand a:hover {
       opacity: 0.8;
     }
 
-    .brand .live {
-      display: inline-block;
-      width: 5px;
-      height: 5px;
-      margin: 0 4px;
-      vertical-align: middle;
-      background: #e40012;
-      border-radius: 50%;
-      animation: blink 2s ease-in-out infinite;
+    .brand-logo {
+      width: 32px;
+      height: 30px;
+      display: block;
+      flex: none;
+      overflow: visible;
     }
 
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
+    .brand-logo-mark {
+      fill: none;
+      stroke: #e85500;
+      stroke-linecap: butt;
+      stroke-linejoin: miter;
+    }
+
+    .brand-logo-dot {
+      fill: #e40012;
+      filter: drop-shadow(0 0 3px rgba(228,0,18,0.45));
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: logo-dot-breathe 2.2s ease-in-out infinite;
+    }
+
+    @keyframes logo-dot-breathe {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.55; transform: scale(0.78); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .brand-logo-dot {
+        animation: none;
+      }
     }
 
     .actions {
@@ -543,7 +563,18 @@
 <body>
   <div class="header">
     <div class="brand">
-      <a href="https://aihot.virxact.com/" target="_blank" rel="noopener noreferrer">AI<span class="live"></span></a>
+      <a href="https://aihot.virxact.com/" target="_blank" rel="noopener noreferrer" aria-label="AI HOT">
+        <svg class="brand-logo" viewBox="24 0 90 128" aria-hidden="true" focusable="false">
+          <g class="brand-logo-mark">
+            <path d="M35.84 115.2 L62.72 12.8" stroke-width="7"></path>
+            <path d="M29.44 115.2 H42.24" stroke-width="3"></path>
+            <path d="M89.6 115.2 V30.72" stroke-width="4"></path>
+            <path d="M85.76 115.2 H93.44" stroke-width="3"></path>
+            <path d="M48.64 66.56 H81.92" stroke-width="2"></path>
+          </g>
+          <circle class="brand-logo-dot" cx="89.6" cy="15.36" r="8"></circle>
+        </svg>
+      </a>
     </div>
     <div class="actions">
       <span class="badge" id="unreadCount"></span>
