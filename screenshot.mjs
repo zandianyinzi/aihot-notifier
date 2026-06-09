@@ -43,6 +43,7 @@ const themes = [
   {
     name: 'dark',
     filename: 'screenshot-dark.png',
+    unreadCount: 128,
     bg: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
     textColor: '#f0f0f0',
     textColor2: '#aaa',
@@ -55,6 +56,7 @@ const themes = [
   {
     name: 'green-dark',
     filename: 'screenshot-green-dark.png',
+    unreadCount: 8,
     bg: 'linear-gradient(135deg, #0d1a12 0%, #1a2e1e 100%)',
     textColor: '#e0e8de',
     textColor2: '#8a9e88',
@@ -167,7 +169,7 @@ function buildWrapperHtml(theme) {
 
     const frame = page.frames().find(f => f.url().includes('popup.html'));
     if (frame) {
-      await frame.evaluate((themeName, items, catClass) => {
+      await frame.evaluate((themeName, items, catClass, unreadTotal) => {
         document.documentElement.setAttribute('data-theme', themeName);
         document.body.setAttribute('data-theme', themeName);
 
@@ -175,8 +177,8 @@ function buildWrapperHtml(theme) {
         const unreadCount = document.getElementById('unreadCount');
 
         list.innerHTML = '';
-        unreadCount.textContent = items.length > 999 ? '999+' : String(items.length);
-        unreadCount.title = `${items.length} 条未读`;
+        unreadCount.textContent = unreadTotal > 99 ? '99+' : String(unreadTotal);
+        unreadCount.title = `${unreadTotal} 条未读`;
         unreadCount.classList.add('show');
         document.getElementById('markAllRead').classList.add('visible');
 
@@ -203,7 +205,7 @@ function buildWrapperHtml(theme) {
           `;
           list.appendChild(div);
         });
-      }, theme.name, mockItems, catClass);
+      }, theme.name, mockItems, catClass, theme.unreadCount);
     }
 
     await page.evaluate(() => document.fonts.ready);
@@ -279,6 +281,7 @@ function buildWrapperHtml(theme) {
 </html>`;
 
   const promoThemes = ['dark', 'green-dark'];
+  const promoUnreadCounts = [128, 5];
   const promoItems = mockItems.slice(0, 5);
 
   const promoPage = await browser.newPage();
@@ -293,7 +296,8 @@ function buildWrapperHtml(theme) {
   const promoFrames = promoPage.frames().filter(f => f.url().includes('popup.html'));
   for (let i = 0; i < promoFrames.length; i++) {
     const themeName = promoThemes[i] || 'dark';
-    await promoFrames[i].evaluate((themeName, items, catClass) => {
+    const unreadTotal = promoUnreadCounts[i] || promoItems.length;
+    await promoFrames[i].evaluate((themeName, items, catClass, unreadTotal) => {
       document.documentElement.setAttribute('data-theme', themeName);
       document.body.setAttribute('data-theme', themeName);
 
@@ -301,8 +305,8 @@ function buildWrapperHtml(theme) {
       const unreadCount = document.getElementById('unreadCount');
 
       list.innerHTML = '';
-      unreadCount.textContent = items.length > 999 ? '999+' : String(items.length);
-      unreadCount.title = `${items.length} 条未读`;
+      unreadCount.textContent = unreadTotal > 99 ? '99+' : String(unreadTotal);
+      unreadCount.title = `${unreadTotal} 条未读`;
       unreadCount.classList.add('show');
       document.getElementById('markAllRead').classList.add('visible');
 
@@ -329,7 +333,7 @@ function buildWrapperHtml(theme) {
         `;
         list.appendChild(div);
       });
-    }, themeName, promoItems, catClass);
+    }, themeName, promoItems, catClass, unreadTotal);
   }
 
   await promoPage.evaluate(() => document.fonts.ready);

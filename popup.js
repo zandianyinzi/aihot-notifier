@@ -394,7 +394,7 @@ function isReadFast(item, readIdSet, readAllBeforeTime) {
 }
 
 function setUnreadIndicator(count) {
-  unreadCountEl.textContent = count > 999 ? '999+' : String(count);
+  unreadCountEl.textContent = count > 99 ? '99+' : String(count);
   unreadCountEl.title = `${count} 条未读`;
 }
 
