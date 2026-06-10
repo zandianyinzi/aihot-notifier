@@ -19,15 +19,28 @@ function dedup(apiItems, history) {
 function mapEntries(items) {
   return items.map(i => ({
     title: i.title, url: i.url, source: i.source || '',
-    category: i.category || '', summary: i.summary || '', time: i.publishedAt
+    category: i.category || '', summary: i.summary || '', time: i.publishedAt,
+    discoveredAt: i.discoveredAt
   }));
 }
 
+function getItemTime(item) {
+  return new Date(item.time).getTime();
+}
+
+function getUnreadReferenceTime(item) {
+  return Math.max(getItemTime(item) || 0, new Date(item.discoveredAt || item.time).getTime() || 0);
+}
+
+function isWithinHistoryWindow(item, cutoff) {
+  return getUnreadReferenceTime(item) > cutoff;
+}
+
 function mergeAndSort(newEntries, history, cutoffDays) {
-  const cutoff = Date.now() - cutoffDays * 24 * 60 * 60 * 1000;
+  const cutoff = cutoffDays === Infinity ? -Infinity : Date.now() - cutoffDays * 24 * 60 * 60 * 1000;
   return [...newEntries, ...history]
-    .filter(i => new Date(i.time).getTime() > cutoff)
-    .sort((a, b) => new Date(b.time) - new Date(a.time));
+    .filter(i => isWithinHistoryWindow(i, cutoff))
+    .sort((a, b) => getItemTime(b) - getItemTime(a));
 }
 
 function calcSinceTime(lastCheck, intervalMinutes) {
@@ -84,7 +97,7 @@ console.log('\n[排序]');
     { title: 'A', time: '2026-06-05T12:00:00Z' },
     { title: 'B', time: '2026-06-04T06:00:00Z' },
   ];
-  const sorted = mergeAndSort(entries, [], 7);
+  const sorted = mergeAndSort(entries, [], Infinity);
   assert(sorted[0].title === 'A', '最新的排第一');
   assert(sorted[1].title === 'B', '次新排第二');
   assert(sorted[2].title === 'C', '最旧排第三');
@@ -100,7 +113,7 @@ console.log('\n[排序-合并新旧条目]');
     { title: 'Old1', url: 'u3', time: '2026-06-05T06:00:00Z' },
     { title: 'Old2', url: 'u4', time: '2026-06-04T20:00:00Z' },
   ];
-  const merged = mergeAndSort(newEntries, history, 7);
+  const merged = mergeAndSort(newEntries, history, Infinity);
   assert(merged.length === 4, '合并后共4条');
   assert(merged[0].title === 'New1', 'New1(10:00)排第一');
   assert(merged[1].title === 'Old1', 'Old1(06:00)排第二');
@@ -117,6 +130,49 @@ console.log('\n[cutoff过滤]');
   const result = mergeAndSort(entries, [], 7);
   assert(result.length === 1, '超过7天的条目被过滤');
   assert(result[0].title === 'Recent', '保留近期条目');
+})();
+
+console.log('\n[新发现旧内容-按发现时间保留]');
+(function() {
+  const discoveredAt = new Date().toISOString();
+  const oldPublished = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const entries = [
+    { title: '新发现旧内容', url: 'u-old', time: oldPublished, discoveredAt },
+  ];
+  const result = mergeAndSort(entries, [], 1);
+
+  assert(result.length === 1, '发布时间超出显示天数但发现时间在窗口内时保留');
+  assert(result[0].title === '新发现旧内容', '保留已通知的新发现条目');
+})();
+
+console.log('\n[新发现旧内容-排序仍按发布时间]');
+(function() {
+  const discoveredAt = new Date().toISOString();
+  const entries = [
+    { title: '较新的正常内容', url: 'u-recent', time: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+    { title: '新发现旧内容', url: 'u-old', time: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), discoveredAt },
+    { title: '较旧的正常内容', url: 'u-older', time: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(), discoveredAt },
+  ];
+  const result = mergeAndSort(entries, [], 1);
+
+  assert(result.length === 3, '发现时间在窗口内的旧内容都保留');
+  assert(result[0].title === '较新的正常内容', '正常新内容排在前面');
+  assert(result[1].title === '新发现旧内容', '旧内容按原发布时间插入正确位置');
+  assert(result[2].title === '较旧的正常内容', '更旧内容仍排在后面');
+})();
+
+console.log('\n[新发现旧内容-旧全部已读不吞掉]');
+(function() {
+  const readAllBeforeTime = Date.now() - 60 * 60 * 1000;
+  const item = {
+    title: '新发现旧内容',
+    url: 'u-old',
+    time: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    discoveredAt: new Date().toISOString()
+  };
+  const isRead = getUnreadReferenceTime(item) <= readAllBeforeTime;
+
+  assert(!isRead, '发现时间晚于全部已读时仍算未读');
 })();
 
 console.log('\n[回退时间-自动poll]');

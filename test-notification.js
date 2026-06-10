@@ -98,9 +98,34 @@ globalThis.fetch = (url) => {
 
 // 加载 background.js 的核心函数（提取逻辑）
 const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
+const BADGE_COLOR = '#e2231a';
 
 function getApiUrl(mode) {
   return `${API_BASE}&mode=${mode}`;
+}
+
+function getItemTime(item) {
+  return new Date(item.time).getTime();
+}
+
+function getUnreadReferenceTime(item) {
+  return Math.max(getItemTime(item) || 0, new Date(item.discoveredAt || item.time).getTime() || 0);
+}
+
+function isWithinHistoryWindow(item, cutoff) {
+  return getUnreadReferenceTime(item) > cutoff;
+}
+
+function toHistoryEntry(item, discoveredAt) {
+  return {
+    title: item.title,
+    url: item.url,
+    source: item.source || '',
+    category: item.category || '',
+    summary: item.summary || '',
+    time: item.publishedAt,
+    discoveredAt
+  };
 }
 
 async function getConfig() {
@@ -117,17 +142,18 @@ async function updateBadge() {
   const { history = [], readIds = [], readAllBefore = '', historyDays = 1 } = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'historyDays']);
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const unread = history.filter(i => {
-    if (new Date(i.time).getTime() <= cutoff) return false;
+    if (!isWithinHistoryWindow(i, cutoff)) return false;
     if (readIds.includes(i.url)) return false;
-    if (readAllBefore && new Date(i.time) <= new Date(readAllBefore)) return false;
+    if (readAllBefore && getUnreadReferenceTime(i) <= new Date(readAllBefore).getTime()) return false;
     return true;
   }).length;
   chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: '#e40012' });
+  chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
 }
 
 async function showNotification(items) {
   const count = items.length;
+  const discoveredAt = new Date().toISOString();
   if (count === 1) {
     chrome.notifications.create('aihot-new', {
       type: 'basic',
@@ -151,11 +177,11 @@ async function showNotification(items) {
   const existingUrls = new Set(history.map(i => i.url));
   const newEntries = items
     .filter(i => !existingUrls.has(i.url))
-    .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
+    .map(i => toHistoryEntry(i, discoveredAt));
   const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
   const updated = [...newEntries, ...history]
-    .filter(i => new Date(i.time).getTime() > cutoff)
-    .sort((a, b) => new Date(b.time) - new Date(a.time));
+    .filter(i => isWithinHistoryWindow(i, cutoff))
+    .sort((a, b) => getItemTime(b) - getItemTime(a));
   await chrome.storage.local.set({ history: updated });
   await updateBadge();
 }
@@ -198,13 +224,14 @@ async function manualPoll() {
     if (allItems.length === 0) return;
 
     const existingUrls = new Set(history.map(i => i.url));
+    const discoveredAt = new Date().toISOString();
     const newEntries = allItems
       .filter(i => !existingUrls.has(i.url))
-      .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
+      .map(i => toHistoryEntry(i, discoveredAt));
     const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
     const merged = [...newEntries, ...history]
-      .filter(i => new Date(i.time).getTime() > cutoff)
-      .sort((a, b) => new Date(b.time) - new Date(a.time));
+      .filter(i => isWithinHistoryWindow(i, cutoff))
+      .sort((a, b) => getItemTime(b) - getItemTime(a));
 
     await chrome.storage.local.set({ history: merged, lastCheck: new Date().toISOString(), failCount: 0 });
     await updateBadge();
@@ -248,9 +275,9 @@ async function resetAndPoll(feedMode) {
     }
 
     const history = allItems
-      .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }))
-      .filter(i => new Date(i.time).getTime() > cutoff)
-      .sort((a, b) => new Date(b.time) - new Date(a.time));
+      .map(i => toHistoryEntry(i, i.publishedAt))
+      .filter(i => isWithinHistoryWindow(i, cutoff))
+      .sort((a, b) => getItemTime(b) - getItemTime(a));
 
     await chrome.storage.local.set({ history, feedMode, lastCheck: new Date().toISOString(), failCount: 0 });
     await updateBadge();
@@ -414,6 +441,41 @@ async function runTests() {
   assert(manualThrew, 'manualPoll失败会向调用方抛错');
   assert(storageData.history === oldHistory, 'manualPoll失败不覆盖旧history');
   assert(storageData.failCount === 1, `manualPoll失败递增failCount: ${storageData.failCount}`);
+
+  globalThis.fetch = okFetch;
+
+  console.log('\n[场景10: all模式新发现旧发布时间仍入列表和角标]');
+
+  storageData.enabled = true;
+  storageData.feedMode = 'all';
+  storageData.history = [];
+  storageData.readIds = [];
+  storageData.readAllBefore = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  storageData.historyDays = 1;
+  notificationCreated = null;
+  badgeText = null;
+  globalThis.fetch = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({
+      items: [{
+        id: 'old-new',
+        title: '新发现旧发布时间内容',
+        url: 'https://example.com/old-new',
+        source: 'AI HOT',
+        category: '全部',
+        summary: '发布时间较早但刚被插件发现',
+        publishedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+      }],
+      hasNext: false
+    })
+  });
+
+  await pollForUpdates();
+
+  assert(notificationCreated !== null, '旧发布时间的新URL仍触发通知');
+  assert(storageData.history.length === 1, `已通知条目写入history: ${storageData.history.length}`);
+  assert(Boolean(storageData.history[0].discoveredAt), 'history记录发现时间');
+  assert(badgeText === '1', `旧全部已读不吞掉新发现条目角标: "${badgeText}"`);
 
   globalThis.fetch = okFetch;
 

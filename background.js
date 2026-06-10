@@ -4,6 +4,7 @@ const DEFAULT_INTERVAL = 5;
 const MIN_INTERVAL = 2;
 const DEFAULT_HISTORY_DAYS = 2;
 const MAX_HISTORY_DAYS = 5;
+const BADGE_COLOR = '#e2231a';
 
 
 async function getConfig() {
@@ -28,6 +29,30 @@ function getReadAllBeforeForMode(data) {
   const mode = normalizeFeedMode(data.feedMode);
   const byMode = data.readAllBeforeByMode || {};
   return byMode[mode] || data.readAllBefore || '';
+}
+
+function getItemTime(item) {
+  return new Date(item.time).getTime();
+}
+
+function getUnreadReferenceTime(item) {
+  return Math.max(getItemTime(item) || 0, new Date(item.discoveredAt || item.time).getTime() || 0);
+}
+
+function isWithinHistoryWindow(item, cutoff) {
+  return getUnreadReferenceTime(item) > cutoff;
+}
+
+function toHistoryEntry(item, discoveredAt) {
+  return {
+    title: item.title,
+    url: item.url,
+    source: item.source || '',
+    category: item.category || '',
+    summary: item.summary || '',
+    time: item.publishedAt,
+    discoveredAt
+  };
 }
 
 async function migrateReadAllBefore() {
@@ -92,6 +117,7 @@ async function incrementFailCount() {
 
 async function showNotification(items) {
   const count = items.length;
+  const discoveredAt = new Date().toISOString();
 
   if (count === 1) {
     chrome.notifications.create('aihot-new', {
@@ -116,11 +142,11 @@ async function showNotification(items) {
   const existingUrls = new Set(history.map(i => i.url));
   const newEntries = items
     .filter(i => !existingUrls.has(i.url))
-    .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
+    .map(i => toHistoryEntry(i, discoveredAt));
   const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
   const updated = [...newEntries, ...history]
-    .filter(i => new Date(i.time).getTime() > cutoff)
-    .sort((a, b) => new Date(b.time) - new Date(a.time));
+    .filter(i => isWithinHistoryWindow(i, cutoff))
+    .sort((a, b) => getItemTime(b) - getItemTime(a));
   await chrome.storage.local.set({ history: updated });
   await updateBadge();
 }
@@ -158,13 +184,14 @@ async function manualPoll() {
     if (allItems.length === 0) return;
 
     const existingUrls = new Set(history.map(i => i.url));
+    const discoveredAt = new Date().toISOString();
     const newEntries = allItems
       .filter(i => !existingUrls.has(i.url))
-      .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
+      .map(i => toHistoryEntry(i, discoveredAt));
 
     const merged = [...newEntries, ...history]
-      .filter(i => new Date(i.time).getTime() > cutoff)
-      .sort((a, b) => new Date(b.time) - new Date(a.time));
+      .filter(i => isWithinHistoryWindow(i, cutoff))
+      .sort((a, b) => getItemTime(b) - getItemTime(a));
 
     await chrome.storage.local.set({ history: merged, lastCheck: new Date().toISOString(), failCount: 0 });
     await updateBadge();
@@ -182,13 +209,13 @@ async function updateBadge() {
   const readAllBefore = getReadAllBeforeForMode(data);
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const unread = history.filter(i => {
-    if (new Date(i.time).getTime() <= cutoff) return false;
+    if (!isWithinHistoryWindow(i, cutoff)) return false;
     if (readIds.includes(i.url)) return false;
-    if (readAllBefore && new Date(i.time) <= new Date(readAllBefore)) return false;
+    if (readAllBefore && getUnreadReferenceTime(i) <= new Date(readAllBefore).getTime()) return false;
     return true;
   }).length;
   chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: '#e40012' });
+  chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
 }
 
 async function resetAndPoll(feedMode) {
@@ -222,9 +249,9 @@ async function resetAndPoll(feedMode) {
     }
 
     const history = allItems
-      .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }))
-      .filter(i => new Date(i.time).getTime() > cutoff)
-      .sort((a, b) => new Date(b.time) - new Date(a.time));
+      .map(i => toHistoryEntry(i, i.publishedAt))
+      .filter(i => isWithinHistoryWindow(i, cutoff))
+      .sort((a, b) => getItemTime(b) - getItemTime(a));
 
     await chrome.storage.local.set({ history, feedMode: normalizeFeedMode(feedMode), lastCheck: new Date().toISOString(), failCount: 0 });
     await updateBadge();
@@ -292,10 +319,10 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         const existingUrls = new Set(history.map(i => i.url));
         const newEntries = allItems
           .filter(i => !existingUrls.has(i.url))
-          .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }));
+          .map(i => toHistoryEntry(i, i.publishedAt));
         const merged = [...newEntries, ...history]
-          .filter(i => new Date(i.time).getTime() > cutoff)
-          .sort((a, b) => new Date(b.time) - new Date(a.time));
+          .filter(i => isWithinHistoryWindow(i, cutoff))
+          .sort((a, b) => getItemTime(b) - getItemTime(a));
         await chrome.storage.local.set({ history: merged });
       }
     } catch (e) {

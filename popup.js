@@ -23,6 +23,7 @@ const CATEGORY_MAP = {
 
 const VALID_THEMES = new Set(['dark', 'green-dark']);
 const DEFAULT_HISTORY_DAYS = 2;
+const BADGE_COLOR = '#e2231a';
 const POPUP_CACHE_KEY = 'popupDataSnapshot';
 const POPUP_SESSION_KEY = 'popupWarmSession';
 const POPUP_CACHE_VERSION = 3;
@@ -183,6 +184,18 @@ function getReadAllBeforeForMode(data) {
   return byMode[mode] || data.readAllBefore || '';
 }
 
+function getItemTime(item) {
+  return new Date(item.time).getTime();
+}
+
+function getUnreadReferenceTime(item) {
+  return Math.max(getItemTime(item) || 0, new Date(item.discoveredAt || item.time).getTime() || 0);
+}
+
+function isWithinHistoryWindow(item, cutoff) {
+  return getUnreadReferenceTime(item) > cutoff;
+}
+
 function mergeReadIds(current = [], cached = []) {
   const merged = [...new Set([...current, ...cached])];
   return merged.length > 100 ? merged.slice(merged.length - 100) : merged;
@@ -275,6 +288,7 @@ function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) 
       item.category || '',
       item.summary || '',
       getDateLabel(item.time),
+      item.discoveredAt || '',
       isReadFast(item, readIdSet, readAllBeforeTime) ? 1 : 0
     ])
   });
@@ -294,7 +308,7 @@ function renderHistory(data, options = {}) {
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
 
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
-  const history = rawHistory.filter(i => new Date(i.time).getTime() > cutoff);
+  const history = rawHistory.filter(i => isWithinHistoryWindow(i, cutoff));
   const signature = getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays);
 
   if (skipUnchanged && signature === lastRenderSignature) {
@@ -384,14 +398,14 @@ function cacheLoadedPopupData(data) {
 
 function isReadFast(item, readIdSet, readAllBeforeTime) {
   if (readIdSet.has(item.url)) return true;
-  if (readAllBeforeTime && new Date(item.time).getTime() <= readAllBeforeTime) return true;
+  if (readAllBeforeTime && getUnreadReferenceTime(item) <= readAllBeforeTime) return true;
   return false;
 }
 
 function updateBadgeFromData(history, readIdSet, readAllBeforeTime) {
   const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
   chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: '#e40012' });
+  chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
 }
 
 async function updateBadge() {
@@ -401,7 +415,7 @@ async function updateBadge() {
   const readIdSet = new Set(readIds);
   const readAllBefore = getReadAllBeforeForMode(data);
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
-  const filtered = history.filter(i => new Date(i.time).getTime() > cutoff);
+  const filtered = history.filter(i => isWithinHistoryWindow(i, cutoff));
   updateBadgeFromData(filtered, readIdSet, readAllBeforeTime);
 }
 
