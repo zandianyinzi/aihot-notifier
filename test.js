@@ -57,6 +57,10 @@ function getApiUrl(mode) {
   return `${API_BASE}&mode=${mode}`;
 }
 
+function daysAgo(days) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 // ===== 测试用例 =====
 
 console.log('\n[去重]');
@@ -230,11 +234,11 @@ console.log('\n[mapEntries缺失字段]');
 console.log('\n[onInstalled合并-更新不覆盖]');
 (function() {
   const existingHistory = [
-    { title: 'UserRead', url: 'https://old.com/1', time: '2026-06-03T12:00:00Z' },
+    { title: 'UserRead', url: 'https://old.com/1', time: daysAgo(2) },
   ];
   const apiItems = [
-    { url: 'https://new.com/1', title: 'Fresh', publishedAt: '2026-06-05T08:00:00Z' },
-    { url: 'https://old.com/1', title: 'UserRead-dup', publishedAt: '2026-06-03T12:00:00Z' },
+    { url: 'https://new.com/1', title: 'Fresh', publishedAt: daysAgo(1) },
+    { url: 'https://old.com/1', title: 'UserRead-dup', publishedAt: daysAgo(2) },
   ];
   const existingUrls = new Set(existingHistory.map(i => i.url));
   const newEntries = apiItems
