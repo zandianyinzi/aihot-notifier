@@ -66,10 +66,15 @@ function hoursAgo(hours) {
 }
 
 const VALID_FONTS = new Set(['system', 'noto-serif', 'lxgw']);
+const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
 
 function normalizeFontFamily(font) {
   if (font === 'noto-sans') return 'system';
   return VALID_FONTS.has(font) ? font : 'system';
+}
+
+function normalizeOpenPositionMode(mode) {
+  return VALID_OPEN_POSITION_MODES.has(mode) ? mode : 'free';
 }
 
 // ===== 测试用例 =====
@@ -482,6 +487,7 @@ console.log('\n[配置变更-background通知范围]');
   assert(!shouldNotifyBackground('theme'), '主题变化不重设alarm');
   assert(!shouldNotifyBackground('fontFamily'), '字体变化不重设alarm');
   assert(!shouldNotifyBackground('fontSize'), '字号变化不重设alarm');
+  assert(!shouldNotifyBackground('openPositionMode'), '定位变化不重设alarm');
   assert(!shouldNotifyBackground('historyDays'), '显示天数变化不重设alarm');
   assert(!shouldNotifyBackground('feedMode'), '内容源切换走feedModeChanged，不额外configChanged');
 })();
@@ -493,6 +499,13 @@ console.log('\n[字体默认值]');
   assert(normalizeFontFamily('noto-sans') === 'system', '旧黑体配置迁移到system');
   assert(normalizeFontFamily('noto-serif') === 'noto-serif', '保留宋体选项');
   assert(normalizeFontFamily('lxgw') === 'lxgw', '保留楷体选项');
+})();
+
+console.log('\n[定位默认值]');
+(function() {
+  assert(normalizeOpenPositionMode(undefined) === 'free', '未设置定位时默认free');
+  assert(normalizeOpenPositionMode('bad-mode') === 'free', '异常定位值回退free');
+  assert(normalizeOpenPositionMode('unread') === 'unread', '保留未读定位选项');
 })();
 
 console.log('\n[分页拉取-多页合并去重]');

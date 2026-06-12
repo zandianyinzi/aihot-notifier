@@ -4,6 +4,7 @@ const feedModeEl = document.getElementById('feedMode');
 const themeEl = document.getElementById('theme');
 const fontFamilyEl = document.getElementById('fontFamily');
 const fontSizeEl = document.getElementById('fontSize');
+const openPositionModeEl = document.getElementById('openPositionMode');
 const historyDaysEl = document.getElementById('historyDays');
 const markAllReadBtn = document.getElementById('markAllRead');
 const pollBtn = document.getElementById('pollNow');
@@ -26,17 +27,22 @@ const DEFAULT_HISTORY_DAYS = 2;
 const BADGE_COLOR = '#e2231a';
 const POPUP_CACHE_KEY = 'popupDataSnapshot';
 const POPUP_SESSION_KEY = 'popupWarmSession';
+const POPUP_SCROLL_KEY = 'popupScrollPosition';
 const POPUP_CACHE_VERSION = 3;
 const POPUP_CACHE_TTL_MS = 5 * 60 * 1000;
+const POPUP_SCROLL_TTL_MS = 30 * 60 * 1000;
+const POPUP_SCROLL_SAVE_DELAY_MS = 200;
 const BUTTON_RESULT_CLASSES = ['is-result-accent', 'is-result-danger', 'is-result-ok'];
 const BUTTON_TRANSIENT_CLASSES = ['is-loading', ...BUTTON_RESULT_CLASSES];
 const BUTTON_RESULT_MIN_MS = 600;
 const BUTTON_RESULT_MAX_MS = 1400;
 const BUTTON_RESULT_TARGET_TOTAL_MS = 1800;
 const VALID_FONTS = new Set(['system', 'noto-serif', 'lxgw']);
+const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
 
 let cachedReadIds = new Set();
 let lastRenderSignature = '';
+let scrollSaveTimer = 0;
 
 function clearButtonFeedback(button) {
   button.classList.remove(...BUTTON_TRANSIENT_CLASSES);
@@ -180,8 +186,105 @@ function normalizeFontFamily(font) {
   return VALID_FONTS.has(font) ? font : 'system';
 }
 
+function normalizeOpenPositionMode(mode) {
+  return VALID_OPEN_POSITION_MODES.has(mode) ? mode : 'free';
+}
+
 function normalizeFeedMode(mode) {
   return mode === 'all' ? 'all' : 'selected';
+}
+
+function getScrollContext(data) {
+  return {
+    feedMode: normalizeFeedMode(data.feedMode),
+    historyDays: Number(data.historyDays || DEFAULT_HISTORY_DAYS)
+  };
+}
+
+function readScrollPosition() {
+  try {
+    const raw = localStorage.getItem(POPUP_SCROLL_KEY);
+    if (!raw) return null;
+    const position = JSON.parse(raw);
+    if (!position || !position.savedAt || Date.now() - position.savedAt > POPUP_SCROLL_TTL_MS) {
+      localStorage.removeItem(POPUP_SCROLL_KEY);
+      return null;
+    }
+    return position;
+  } catch (_e) {
+    localStorage.removeItem(POPUP_SCROLL_KEY);
+    return null;
+  }
+}
+
+function writeScrollPosition(data = {}) {
+  if (normalizeOpenPositionMode(openPositionModeEl.value) !== 'free') return;
+  const firstVisible = getFirstVisibleItem();
+  const context = getScrollContext(data);
+  try {
+    localStorage.setItem(POPUP_SCROLL_KEY, JSON.stringify({
+      ...context,
+      scrollTop: historyList.scrollTop,
+      anchorUrl: firstVisible ? firstVisible.dataset.url : '',
+      savedAt: Date.now()
+    }));
+  } catch (_e) {
+    // Scroll position is a convenience only.
+  }
+}
+
+function clearScrollPosition() {
+  if (scrollSaveTimer) {
+    clearTimeout(scrollSaveTimer);
+    scrollSaveTimer = 0;
+  }
+  localStorage.removeItem(POPUP_SCROLL_KEY);
+}
+
+function scheduleScrollPositionWrite(data = {}) {
+  if (normalizeOpenPositionMode(openPositionModeEl.value) !== 'free') return;
+  if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+  scrollSaveTimer = setTimeout(() => {
+    scrollSaveTimer = 0;
+    writeScrollPosition(data);
+  }, POPUP_SCROLL_SAVE_DELAY_MS);
+}
+
+function getFirstVisibleItem() {
+  const listTop = historyList.getBoundingClientRect().top;
+  const items = historyList.querySelectorAll('.item');
+  for (const item of items) {
+    if (item.getBoundingClientRect().bottom >= listTop) return item;
+  }
+  return items[0] || null;
+}
+
+function restoreScrollPosition(data) {
+  const position = readScrollPosition();
+  if (!position) return false;
+
+  const context = getScrollContext(data);
+  if (position.feedMode !== context.feedMode || position.historyDays !== context.historyDays) return false;
+
+  if (position.anchorUrl) {
+    const anchor = historyList.querySelector(`.item[data-url="${CSS.escape(position.anchorUrl)}"]`);
+    if (anchor) {
+      historyList.scrollTop = Math.max(anchor.offsetTop - historyList.offsetTop, 0);
+      return true;
+    }
+  }
+
+  if (Number.isFinite(position.scrollTop)) {
+    historyList.scrollTop = Math.max(position.scrollTop, 0);
+    return true;
+  }
+
+  return false;
+}
+
+function applyInitialPosition(data) {
+  if (normalizeOpenPositionMode(data.openPositionMode) === 'free' && restoreScrollPosition(data)) return;
+  scrollToFirstUnread();
 }
 
 function getReadAllBeforeForMode(data) {
@@ -279,6 +382,7 @@ function applyConfig(data) {
   const size = data.fontSize || 'medium';
   fontSizeEl.value = size;
   applyFontSize(size);
+  openPositionModeEl.value = normalizeOpenPositionMode(data.openPositionMode);
   let days = data.historyDays || DEFAULT_HISTORY_DAYS;
   if (days > 5) days = 5;
   historyDaysEl.value = String(days);
@@ -304,7 +408,7 @@ function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) 
 function renderHistory(data, options = {}) {
   const shouldUpdateBadge = options.updateBadge !== false;
   const skipUnchanged = options.skipUnchanged !== false;
-  const shouldScrollToFirstUnread = options.scrollToFirstUnread === true;
+  const shouldApplyInitialPosition = options.applyInitialPosition === true;
   const rawHistory = data.history || [];
   const readIds = data.readIds || [];
   const readAllBefore = getReadAllBeforeForMode(data);
@@ -320,7 +424,7 @@ function renderHistory(data, options = {}) {
 
   if (skipUnchanged && signature === lastRenderSignature) {
     if (shouldUpdateBadge) updateBadgeFromData(history, readIdSet, readAllBeforeTime);
-    if (shouldScrollToFirstUnread) scrollToFirstUnread();
+    if (shouldApplyInitialPosition) applyInitialPosition(data);
     return;
   }
 
@@ -376,7 +480,7 @@ function renderHistory(data, options = {}) {
   });
 
   historyList.innerHTML = html;
-  if (shouldScrollToFirstUnread) scrollToFirstUnread();
+  if (shouldApplyInitialPosition) applyInitialPosition(data);
   if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
   lastRenderSignature = signature;
 }
@@ -395,6 +499,7 @@ function cacheLoadedPopupData(data) {
     theme: data.theme,
     fontFamily: normalizeFontFamily(data.fontFamily),
     fontSize: data.fontSize,
+    openPositionMode: normalizeOpenPositionMode(data.openPositionMode),
     historyDays: data.historyDays,
     history: data.history || [],
     readIds: data.readIds || [],
@@ -431,6 +536,7 @@ async function saveConfig(options = {}) {
   const theme = themeEl.value;
   const fontFamily = normalizeFontFamily(fontFamilyEl.value);
   const fontSize = fontSizeEl.value;
+  const openPositionMode = normalizeOpenPositionMode(openPositionModeEl.value);
   const historyDays = Number(historyDaysEl.value);
   const feedMode = feedModeEl.value;
   const config = {
@@ -440,11 +546,13 @@ async function saveConfig(options = {}) {
     theme,
     fontFamily,
     fontSize,
+    openPositionMode,
     historyDays
   };
   applyTheme(theme);
   applyFontFamily(fontFamily);
   applyFontSize(fontSize);
+  if (openPositionMode === 'unread') clearScrollPosition();
   writePopupCache(config);
   await chrome.storage.local.set(config);
   if (shouldNotifyBackground) {
@@ -454,7 +562,7 @@ async function saveConfig(options = {}) {
 }
 
 async function loadHistory() {
-  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
+  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode', 'openPositionMode']);
   const cachedData = await readWarmPopupCache();
   const reconciled = reconcileCachedReadIds(data, cachedData);
   renderHistory(reconciled.data);
@@ -467,6 +575,9 @@ historyList.addEventListener('click', async (e) => {
   const item = e.target.closest('.item');
   if (!item) return;
   const url = item.dataset.url;
+
+  const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+  writeScrollPosition({ feedMode, historyDays });
 
   if (!cachedReadIds.has(url)) {
     cachedReadIds.add(url);
@@ -502,6 +613,7 @@ markAllReadBtn.addEventListener('click', async () => {
     }
   });
   showButtonConfirm(markAllReadBtn);
+  clearScrollPosition();
   await loadHistory();
 });
 
@@ -523,6 +635,7 @@ feedModeEl.addEventListener('change', async () => {
     const response = await chrome.runtime.sendMessage({ type: 'feedModeChanged', feedMode: nextFeedMode });
     if (!response || response.ok === false) throw new Error(response?.error || 'feed mode update failed');
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
+    clearScrollPosition();
     await loadHistory();
     writePopupCache({ feedMode: nextFeedMode });
     showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
@@ -535,7 +648,19 @@ feedModeEl.addEventListener('change', async () => {
 themeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
 fontFamilyEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
 fontSizeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
-historyDaysEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
+openPositionModeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
+historyDaysEl.addEventListener('change', () => {
+  clearScrollPosition();
+  saveConfig({ notifyBackground: false });
+});
+
+historyList.addEventListener('scroll', () => {
+  const data = {
+    feedMode: feedModeEl.value,
+    historyDays: Number(historyDaysEl.value)
+  };
+  scheduleScrollPositionWrite(data);
+}, { passive: true });
 
 pollBtn.addEventListener('click', async () => {
   const feedbackStartedAt = Date.now();
@@ -546,6 +671,7 @@ pollBtn.addEventListener('click', async () => {
     const response = await chrome.runtime.sendMessage({ type: 'pollNow' });
     if (!response || response.ok === false) throw new Error(response?.error || 'manual poll failed');
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
+    clearScrollPosition();
     await loadHistory();
     showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
   } catch (e) {
@@ -557,13 +683,13 @@ pollBtn.addEventListener('click', async () => {
 // Keep cold start on the skeleton; only use cached content after this browser session has warmed.
 (async function init() {
   const storageDataPromise = chrome.storage.local.get([
-    'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'historyDays',
+    'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'openPositionMode', 'historyDays',
     'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode'
   ]);
   const cachedData = await readWarmPopupCache();
   if (cachedData) {
     applyConfig(cachedData);
-    renderHistory(cachedData, { updateBadge: false, scrollToFirstUnread: true });
+    renderHistory(cachedData, { updateBadge: false, applyInitialPosition: true });
   }
 
   const storageData = await storageDataPromise;
@@ -577,7 +703,7 @@ pollBtn.addEventListener('click', async () => {
   if (data.fontFamily && data.fontFamily !== normalizeFontFamily(data.fontFamily)) {
     chrome.storage.local.set({ fontFamily: 'system' });
   }
-  renderHistory(data, { scrollToFirstUnread: true });
+  renderHistory(data, { applyInitialPosition: true });
   cacheLoadedPopupData(data);
   markPopupSessionWarm();
   if (reconciled.changed) chrome.storage.local.set({ readIds: data.readIds });
