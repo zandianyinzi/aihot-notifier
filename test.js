@@ -65,9 +65,10 @@ function hoursAgo(hours) {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 }
 
-const VALID_FONTS = new Set(['system', 'noto-sans', 'noto-serif', 'lxgw']);
+const VALID_FONTS = new Set(['system', 'noto-serif', 'lxgw']);
 
 function normalizeFontFamily(font) {
+  if (font === 'noto-sans') return 'system';
   return VALID_FONTS.has(font) ? font : 'system';
 }
 
@@ -313,10 +314,10 @@ console.log('\n[feedMode切换-数据隔离]');
     .sort((a, b) => new Date(b.time) - new Date(a.time));
 
   assert(merged.length === 4, '切换后合并为4条（2旧+2新）');
-  assert(merged[0].title === '精选A', '排序正确:精选A第一');
-  assert(merged[1].title === '全量C', '排序正确:全量C第二');
-  assert(merged[2].title === '精选B', '排序正确:精选B第三');
-  assert(merged[3].title === '全量D', '排序正确:全量D第四');
+  assert(merged[0].title === '精选A', '排序正确:精选A(06:00)第一');
+  assert(merged[1].title === '全量C', '排序正确:全量C(05:00)第二');
+  assert(merged[2].title === '精选B', '排序正确:精选B(04:00)第三');
+  assert(merged[3].title === '全量D', '排序正确:全量D(03:00)第四');
 })();
 
 console.log('\n[feedMode切换-从all到selected不丢数据]');
@@ -489,7 +490,9 @@ console.log('\n[字体默认值]');
 (function() {
   assert(normalizeFontFamily(undefined) === 'system', '未设置字体时默认system');
   assert(normalizeFontFamily('bad-font') === 'system', '异常字体值回退system');
-  assert(normalizeFontFamily('noto-sans') === 'noto-sans', '保留有效字体选项');
+  assert(normalizeFontFamily('noto-sans') === 'system', '旧黑体配置迁移到system');
+  assert(normalizeFontFamily('noto-serif') === 'noto-serif', '保留宋体选项');
+  assert(normalizeFontFamily('lxgw') === 'lxgw', '保留楷体选项');
 })();
 
 console.log('\n[分页拉取-多页合并去重]');

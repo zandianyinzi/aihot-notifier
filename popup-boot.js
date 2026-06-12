@@ -8,7 +8,12 @@
     localStorage.setItem('theme', theme);
   }
 
-  if (!['system', 'noto-sans', 'noto-serif', 'lxgw'].includes(font)) {
+  if (font === 'noto-sans') {
+    font = 'system';
+    localStorage.setItem('fontFamily', font);
+  }
+
+  if (!['system', 'noto-serif', 'lxgw'].includes(font)) {
     font = 'system';
     localStorage.setItem('fontFamily', font);
   }

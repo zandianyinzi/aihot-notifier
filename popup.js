@@ -33,7 +33,7 @@ const BUTTON_TRANSIENT_CLASSES = ['is-loading', ...BUTTON_RESULT_CLASSES];
 const BUTTON_RESULT_MIN_MS = 600;
 const BUTTON_RESULT_MAX_MS = 1400;
 const BUTTON_RESULT_TARGET_TOTAL_MS = 1800;
-const VALID_FONTS = new Set(['system', 'noto-sans', 'noto-serif', 'lxgw']);
+const VALID_FONTS = new Set(['system', 'noto-serif', 'lxgw']);
 
 let cachedReadIds = new Set();
 let lastRenderSignature = '';
@@ -176,6 +176,7 @@ function normalizeTheme(theme) {
 }
 
 function normalizeFontFamily(font) {
+  if (font === 'noto-sans') return 'system';
   return VALID_FONTS.has(font) ? font : 'system';
 }
 
