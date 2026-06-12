@@ -1,2 +1,6 @@
 aihot-notifier.zip
 tasks/
+node_modules/
+package-lock.json
+_wrapper_*.html
+store/chrome-web-store-notes.md

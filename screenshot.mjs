@@ -1,7 +1,8 @@
 /**
  * 生成 Chrome Web Store 全部商店素材：
- *   - 2 张主题截图（1280x800 @2x）
- *   - 1 张宣传图（440x280 @2x，双主题卡片拼接）
+ *   - 3 张主题截图（1280x800）
+ *   - 1 张宣传图（440x280）
+ *   - 1 张顶部宣传图块（1400x560 JPEG）
  *
  * 用法（换电脑后只需执行以下命令）：
  *   npx puppeteer browsers install chrome
@@ -19,6 +20,13 @@ import { writeFileSync, unlinkSync, mkdirSync } from 'fs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STORE_DIR = resolve(__dirname, 'store');
 mkdirSync(STORE_DIR, { recursive: true });
+
+const SCREENSHOT_WIDTH = 1280;
+const SCREENSHOT_HEIGHT = 800;
+const PROMO_WIDTH = 440;
+const PROMO_HEIGHT = 280;
+const MARQUEE_WIDTH = 1400;
+const MARQUEE_HEIGHT = 560;
 
 const mockItems = [
   { title: 'OpenAI 发布 GPT-5 Turbo，推理能力提升 3 倍', summary: '新模型在数学推理和代码生成上有显著提升，支持 100 万 token 上下文窗口', category: '模型', minutesAgo: 30 },
@@ -64,6 +72,18 @@ const themes = [
     frameBorder: '1px solid rgba(255,255,255,0.08)',
     subtitle: '暗森主题，沉浸感十足。',
   },
+  {
+    name: 'chrome-dark',
+    filename: 'screenshot-chrome-dark.png',
+    bg: 'linear-gradient(135deg, #151922 0%, #222832 100%)',
+    textColor: '#f1f3f4',
+    textColor2: '#b4bac0',
+    featureColor: '#b4bac0',
+    accentDot: '#99c3ff',
+    frameShadow: '0 20px 60px rgba(0,0,0,0.42), 0 4px 16px rgba(0,0,0,0.32)',
+    frameBorder: '1px solid rgba(232,234,237,0.14)',
+    subtitle: '铬墨主题，清晰克制的深色界面。',
+  },
 ];
 
 function buildWrapperHtml(theme) {
@@ -74,8 +94,8 @@ function buildWrapperHtml(theme) {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    width: 1280px;
-    height: 800px;
+    width: ${SCREENSHOT_WIDTH}px;
+    height: ${SCREENSHOT_HEIGHT}px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -144,7 +164,7 @@ function buildWrapperHtml(theme) {
     <ul class="features">
       <li>精选 + 全量两种模式</li>
       <li>桌面通知即时推送</li>
-      <li>双主题 / 字体风格可选</li>
+      <li>三主题 / 字体风格可选</li>
       <li>轻量无依赖，隐私友好</li>
     </ul>
   </div>
@@ -157,7 +177,7 @@ function buildWrapperHtml(theme) {
 
   for (const theme of themes) {
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
+    await page.setViewport({ width: SCREENSHOT_WIDTH, height: SCREENSHOT_HEIGHT, deviceScaleFactor: 1 });
 
     const wrapperPath = resolve(__dirname, `_wrapper_${theme.name}.html`);
     writeFileSync(wrapperPath, buildWrapperHtml(theme), 'utf-8');
@@ -222,10 +242,10 @@ function buildWrapperHtml(theme) {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    width: 440px;
-    height: 280px;
+    width: ${PROMO_WIDTH}px;
+    height: ${PROMO_HEIGHT}px;
     background:
-      linear-gradient(112deg, #1a1a2e 0%, #16213e 49.8%, #1a2e1e 50%, #0d1a12 100%);
+      linear-gradient(112deg, #1a1a2e 0%, #16213e 34%, #132218 34.2%, #0d1a12 67%, #222832 67.2%, #151922 100%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -235,7 +255,7 @@ function buildWrapperHtml(theme) {
   }
   .cards {
     position: relative;
-    width: 280px;
+    width: 330px;
     height: 240px;
   }
   .card {
@@ -254,14 +274,19 @@ function buildWrapperHtml(theme) {
     transform-origin: top left;
   }
   .card-1 {
-    left: 10px; top: 10px; z-index: 1;
-    transform: rotate(-5deg);
+    left: 0; top: 18px; z-index: 1;
+    transform: rotate(-7deg);
     border: 1px solid rgba(255,255,255,0.1);
   }
   .card-2 {
-    left: 95px; top: 0px; z-index: 2;
-    transform: rotate(4deg);
+    left: 75px; top: 2px; z-index: 2;
+    transform: rotate(1deg);
     border: 1px solid rgba(255,255,255,0.12);
+  }
+  .card-3 {
+    left: 150px; top: 18px; z-index: 3;
+    transform: rotate(7deg);
+    border: 1px solid rgba(232,234,237,0.14);
   }
 </style>
 </head>
@@ -269,15 +294,16 @@ function buildWrapperHtml(theme) {
   <div class="cards">
     <div class="card card-1"><iframe src="popup.html" data-theme="dark"></iframe></div>
     <div class="card card-2"><iframe src="popup.html" data-theme="green-dark"></iframe></div>
+    <div class="card card-3"><iframe src="popup.html" data-theme="chrome-dark"></iframe></div>
   </div>
 </body>
 </html>`;
 
-  const promoThemes = ['dark', 'green-dark'];
+  const promoThemes = ['dark', 'green-dark', 'chrome-dark'];
   const promoItems = mockItems.slice(0, 5);
 
   const promoPage = await browser.newPage();
-  await promoPage.setViewport({ width: 440, height: 280, deviceScaleFactor: 2 });
+  await promoPage.setViewport({ width: PROMO_WIDTH, height: PROMO_HEIGHT, deviceScaleFactor: 1 });
 
   const promoWrapperPath = resolve(__dirname, '_wrapper_promo.html');
   writeFileSync(promoWrapperPath, promoHtml, 'utf-8');
@@ -331,6 +357,172 @@ function buildWrapperHtml(theme) {
   await promoPage.close();
   unlinkSync(promoWrapperPath);
 
+  // ---- 顶部宣传图块 / Marquee image 1400x560 ----
+  console.log('');
+
+  const marqueeHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: ${MARQUEE_WIDTH}px;
+    height: ${MARQUEE_HEIGHT}px;
+    background:
+      radial-gradient(circle at 75% 42%, rgba(153,195,255,0.22), transparent 30%),
+      linear-gradient(118deg, #151922 0%, #111827 44%, #0d1a12 100%);
+    overflow: hidden;
+    position: relative;
+    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    color: #f1f3f4;
+  }
+  .copy {
+    position: absolute;
+    left: 110px;
+    top: 158px;
+    width: 420px;
+  }
+  h1 {
+    font-size: 56px;
+    line-height: 1.02;
+    font-weight: 700;
+    letter-spacing: 0;
+    margin-bottom: 22px;
+  }
+  h1 .brand-ai {
+    color: #ff8c5a;
+  }
+  h1 .brand-hot {
+    color: #ff4d2e;
+  }
+  h1 .brand-rest {
+    color: #f1f3f4;
+  }
+  p {
+    font-size: 24px;
+    line-height: 1.45;
+    color: #b4bac0;
+  }
+  .cards {
+    position: absolute;
+    right: 86px;
+    top: 54px;
+    width: 700px;
+    height: 470px;
+  }
+  .card {
+    position: absolute;
+    width: 300px;
+    height: 430px;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 22px 70px rgba(0,0,0,0.44);
+  }
+  .card iframe {
+    width: 420px;
+    height: 600px;
+    border: none;
+    transform: scale(0.7143);
+    transform-origin: top left;
+  }
+  .card-1 {
+    left: 10px;
+    top: 36px;
+    z-index: 1;
+    transform: rotate(-6deg);
+    border: 1px solid rgba(255,140,90,0.25);
+  }
+  .card-2 {
+    left: 208px;
+    top: 10px;
+    z-index: 2;
+    transform: rotate(0deg);
+    border: 1px solid rgba(143,189,178,0.22);
+  }
+  .card-3 {
+    left: 406px;
+    top: 36px;
+    z-index: 3;
+    transform: rotate(6deg);
+    border: 1px solid rgba(153,195,255,0.26);
+  }
+</style>
+</head>
+<body>
+  <div class="copy">
+    <h1><span class="brand-ai">AI</span> <span class="brand-hot">HOT</span><br><span class="brand-rest">Notifier</span></h1>
+    <p>实时监控 AI HOT 资讯，新内容即时桌面通知。</p>
+  </div>
+  <div class="cards">
+    <div class="card card-1"><iframe src="popup.html"></iframe></div>
+    <div class="card card-2"><iframe src="popup.html"></iframe></div>
+    <div class="card card-3"><iframe src="popup.html"></iframe></div>
+  </div>
+</body>
+</html>`;
+
+  const marqueeThemes = ['dark', 'green-dark', 'chrome-dark'];
+  const marqueeItems = mockItems.slice(0, 5);
+  const marqueePage = await browser.newPage();
+  await marqueePage.setViewport({ width: MARQUEE_WIDTH, height: MARQUEE_HEIGHT, deviceScaleFactor: 1 });
+
+  const marqueeWrapperPath = resolve(__dirname, '_wrapper_marquee.html');
+  writeFileSync(marqueeWrapperPath, marqueeHtml, 'utf-8');
+
+  await marqueePage.goto(`file:///${marqueeWrapperPath.replace(/\\/g, '/')}`, { waitUntil: 'networkidle0' });
+  await new Promise(r => setTimeout(r, 1500));
+
+  const marqueeFrames = marqueePage.frames().filter(f => f.url().includes('popup.html'));
+  for (let i = 0; i < marqueeFrames.length; i++) {
+    const themeName = marqueeThemes[i] || 'dark';
+    await marqueeFrames[i].evaluate((themeName, items, catClass) => {
+      document.documentElement.setAttribute('data-theme', themeName);
+      document.body.setAttribute('data-theme', themeName);
+
+      const list = document.getElementById('historyList');
+      list.innerHTML = '';
+      document.getElementById('markAllRead').classList.add('visible');
+
+      const now = Date.now();
+      items.forEach((item, idx) => {
+        const div = document.createElement('div');
+        const isUnread = idx < 3;
+        div.className = `item ${isUnread ? 'unread' : 'read'}`;
+
+        const time = new Date(now - item.minutesAgo * 60 * 1000);
+        const timeStr = `${time.getHours().toString().padStart(2,'0')}:${time.getMinutes().toString().padStart(2,'0')}`;
+        const cls = catClass[item.category] || 'cat-default';
+
+        div.innerHTML = `
+          <div class="item-body">
+            <div class="item-title">${item.title}</div>
+            <div class="item-summary">${item.summary}</div>
+            <div class="item-meta">
+              <span class="cat-tag ${cls}">${item.category}</span>
+              <span class="sep"></span>
+              <span>${timeStr}</span>
+            </div>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+    }, themeName, marqueeItems, catClass);
+  }
+
+  await marqueePage.evaluate(() => document.fonts.ready);
+  await new Promise(r => setTimeout(r, 2000));
+
+  await marqueePage.screenshot({
+    path: resolve(STORE_DIR, 'marquee-1400x560.jpg'),
+    type: 'jpeg',
+    quality: 95,
+  });
+  console.log('✓ marquee-1400x560.jpg');
+
+  await marqueePage.close();
+  unlinkSync(marqueeWrapperPath);
+
   await browser.close();
-  console.log(`\nDone! ${themes.length} screenshots + 1 promo tile saved to store/`);
+  console.log(`\nDone! ${themes.length} screenshots + 1 promo tile + 1 marquee image saved to store/`);
 })();

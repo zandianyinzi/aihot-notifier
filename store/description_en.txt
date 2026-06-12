@@ -1,4 +1,3 @@
-Short description (≤132 chars):
 Real-time AI news monitoring with desktop notifications. Focused dark themes and elegant reading experience.
 
 Detailed description:
