@@ -33,6 +33,7 @@ const BUTTON_TRANSIENT_CLASSES = ['is-loading', ...BUTTON_RESULT_CLASSES];
 const BUTTON_RESULT_MIN_MS = 600;
 const BUTTON_RESULT_MAX_MS = 1400;
 const BUTTON_RESULT_TARGET_TOTAL_MS = 1800;
+const VALID_FONTS = new Set(['system', 'noto-sans', 'noto-serif', 'lxgw']);
 
 let cachedReadIds = new Set();
 let lastRenderSignature = '';
@@ -174,6 +175,10 @@ function normalizeTheme(theme) {
   return VALID_THEMES.has(theme) ? theme : 'dark';
 }
 
+function normalizeFontFamily(font) {
+  return VALID_FONTS.has(font) ? font : 'system';
+}
+
 function normalizeFeedMode(mode) {
   return mode === 'all' ? 'all' : 'selected';
 }
@@ -253,6 +258,7 @@ function applyFontSize(size) {
 }
 
 function applyFontFamily(font) {
+  font = normalizeFontFamily(font);
   document.documentElement.setAttribute('data-font', font);
   localStorage.setItem('fontFamily', font);
 }
@@ -266,7 +272,7 @@ function applyConfig(data) {
   const theme = normalizeTheme(data.theme);
   themeEl.value = theme;
   applyTheme(theme);
-  const font = data.fontFamily || 'noto-sans';
+  const font = normalizeFontFamily(data.fontFamily);
   fontFamilyEl.value = font;
   applyFontFamily(font);
   const size = data.fontSize || 'medium';
@@ -386,7 +392,7 @@ function cacheLoadedPopupData(data) {
     interval: data.interval,
     feedMode: data.feedMode,
     theme: data.theme,
-    fontFamily: data.fontFamily,
+    fontFamily: normalizeFontFamily(data.fontFamily),
     fontSize: data.fontSize,
     historyDays: data.historyDays,
     history: data.history || [],
@@ -422,7 +428,7 @@ async function updateBadge() {
 async function saveConfig(options = {}) {
   const shouldNotifyBackground = options.notifyBackground !== false;
   const theme = themeEl.value;
-  const fontFamily = fontFamilyEl.value;
+  const fontFamily = normalizeFontFamily(fontFamilyEl.value);
   const fontSize = fontSizeEl.value;
   const historyDays = Number(historyDaysEl.value);
   const feedMode = feedModeEl.value;
@@ -566,6 +572,9 @@ pollBtn.addEventListener('click', async () => {
   applyConfig(data);
   if (data.theme && data.theme !== normalizeTheme(data.theme)) {
     chrome.storage.local.set({ theme: 'dark' });
+  }
+  if (data.fontFamily && data.fontFamily !== normalizeFontFamily(data.fontFamily)) {
+    chrome.storage.local.set({ fontFamily: 'system' });
   }
   renderHistory(data, { scrollToFirstUnread: true });
   cacheLoadedPopupData(data);

@@ -61,6 +61,16 @@ function daysAgo(days) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+function hoursAgo(hours) {
+  return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+}
+
+const VALID_FONTS = new Set(['system', 'noto-sans', 'noto-serif', 'lxgw']);
+
+function normalizeFontFamily(font) {
+  return VALID_FONTS.has(font) ? font : 'system';
+}
+
 // ===== 测试用例 =====
 
 console.log('\n[去重]');
@@ -283,15 +293,15 @@ console.log('\n[feedMode切换-数据隔离]');
   // 切换 feedMode 后，已有 history 不应被清空（去重逻辑基于 URL）
   // 模拟：之前用 selected 模式积累了 history，切换到 all 后拉到更多条目
   const historyFromSelected = [
-    { title: '精选A', url: 'https://a.com/selected-1', time: '2026-06-05T06:00:00Z' },
-    { title: '精选B', url: 'https://a.com/selected-2', time: '2026-06-05T04:00:00Z' },
+    { title: '精选A', url: 'https://a.com/selected-1', time: hoursAgo(6) },
+    { title: '精选B', url: 'https://a.com/selected-2', time: hoursAgo(8) },
   ];
   // all 模式返回更多条目（包含精选的 + 额外的）
   const apiAllItems = [
-    { url: 'https://a.com/selected-1', title: '精选A', publishedAt: '2026-06-05T06:00:00Z' },
-    { url: 'https://a.com/all-1', title: '全量C', publishedAt: '2026-06-05T05:00:00Z' },
-    { url: 'https://a.com/selected-2', title: '精选B', publishedAt: '2026-06-05T04:00:00Z' },
-    { url: 'https://a.com/all-2', title: '全量D', publishedAt: '2026-06-05T03:00:00Z' },
+    { url: 'https://a.com/selected-1', title: '精选A', publishedAt: hoursAgo(6) },
+    { url: 'https://a.com/all-1', title: '全量C', publishedAt: hoursAgo(7) },
+    { url: 'https://a.com/selected-2', title: '精选B', publishedAt: hoursAgo(8) },
+    { url: 'https://a.com/all-2', title: '全量D', publishedAt: hoursAgo(9) },
   ];
 
   const existingUrls = new Set(historyFromSelected.map(i => i.url));
@@ -303,23 +313,23 @@ console.log('\n[feedMode切换-数据隔离]');
     .sort((a, b) => new Date(b.time) - new Date(a.time));
 
   assert(merged.length === 4, '切换后合并为4条（2旧+2新）');
-  assert(merged[0].title === '精选A', '排序正确:精选A(06:00)第一');
-  assert(merged[1].title === '全量C', '排序正确:全量C(05:00)第二');
-  assert(merged[2].title === '精选B', '排序正确:精选B(04:00)第三');
-  assert(merged[3].title === '全量D', '排序正确:全量D(03:00)第四');
+  assert(merged[0].title === '精选A', '排序正确:精选A第一');
+  assert(merged[1].title === '全量C', '排序正确:全量C第二');
+  assert(merged[2].title === '精选B', '排序正确:精选B第三');
+  assert(merged[3].title === '全量D', '排序正确:全量D第四');
 })();
 
 console.log('\n[feedMode切换-从all到selected不丢数据]');
 (function() {
   // 从 all 切换到 selected，API 返回子集，但已有的全量 history 应保留
   const historyFromAll = [
-    { title: '全量A', url: 'https://a.com/1', time: '2026-06-05T06:00:00Z' },
-    { title: '全量B', url: 'https://a.com/2', time: '2026-06-05T05:00:00Z' },
-    { title: '全量C', url: 'https://a.com/3', time: '2026-06-05T04:00:00Z' },
+    { title: '全量A', url: 'https://a.com/1', time: hoursAgo(6) },
+    { title: '全量B', url: 'https://a.com/2', time: hoursAgo(7) },
+    { title: '全量C', url: 'https://a.com/3', time: hoursAgo(8) },
   ];
   // selected 模式 API 返回只有部分
   const apiSelectedItems = [
-    { url: 'https://a.com/1', title: '全量A', publishedAt: '2026-06-05T06:00:00Z' },
+    { url: 'https://a.com/1', title: '全量A', publishedAt: hoursAgo(6) },
   ];
 
   const existingUrls = new Set(historyFromAll.map(i => i.url));
@@ -473,6 +483,13 @@ console.log('\n[配置变更-background通知范围]');
   assert(!shouldNotifyBackground('fontSize'), '字号变化不重设alarm');
   assert(!shouldNotifyBackground('historyDays'), '显示天数变化不重设alarm');
   assert(!shouldNotifyBackground('feedMode'), '内容源切换走feedModeChanged，不额外configChanged');
+})();
+
+console.log('\n[字体默认值]');
+(function() {
+  assert(normalizeFontFamily(undefined) === 'system', '未设置字体时默认system');
+  assert(normalizeFontFamily('bad-font') === 'system', '异常字体值回退system');
+  assert(normalizeFontFamily('noto-sans') === 'noto-sans', '保留有效字体选项');
 })();
 
 console.log('\n[分页拉取-多页合并去重]');

@@ -18,7 +18,7 @@ Automatically monitors the latest AI industry updates from aihot.virxact.com and
 ✦ Personalization
 
 • 2 carefully crafted themes: Obsidian Night / Dark Forest
-• 4 font styles: Sans / Serif / Kai / Default
+• 4 font styles: Default / Sans / Serif / Kai
 • 5 font size levels: Small / Default / Large / Extra Large / Huge
 • Configurable polling interval: 2 / 5 / 15 / 30 / 60 minutes
 • Configurable display range: 1 / 2 / 3 / 5 days (default: 2 days)
