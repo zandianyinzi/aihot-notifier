@@ -22,7 +22,7 @@ const CATEGORY_MAP = {
   'tips': { cls: 'cat-tips', label: '技巧' }
 };
 
-const VALID_THEMES = new Set(['dark', 'green-dark']);
+const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark']);
 const DEFAULT_HISTORY_DAYS = 2;
 const BADGE_COLOR = '#e2231a';
 const POPUP_CACHE_KEY = 'popupDataSnapshot';

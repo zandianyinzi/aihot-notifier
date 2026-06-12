@@ -3,7 +3,7 @@
   var font = localStorage.getItem('fontFamily') || 'system';
   var size = localStorage.getItem('fontSize') || 'medium';
 
-  if (theme !== 'dark' && theme !== 'green-dark') {
+  if (theme !== 'dark' && theme !== 'green-dark' && theme !== 'chrome-dark') {
     theme = 'dark';
     localStorage.setItem('theme', theme);
   }

@@ -67,6 +67,7 @@ function hoursAgo(hours) {
 
 const VALID_FONTS = new Set(['system', 'noto-serif', 'lxgw']);
 const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
+const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark']);
 
 function normalizeFontFamily(font) {
   if (font === 'noto-sans') return 'system';
@@ -75,6 +76,10 @@ function normalizeFontFamily(font) {
 
 function normalizeOpenPositionMode(mode) {
   return VALID_OPEN_POSITION_MODES.has(mode) ? mode : 'free';
+}
+
+function normalizeTheme(theme) {
+  return VALID_THEMES.has(theme) ? theme : 'dark';
 }
 
 // ===== 测试用例 =====
@@ -506,6 +511,14 @@ console.log('\n[定位默认值]');
   assert(normalizeOpenPositionMode(undefined) === 'free', '未设置定位时默认free');
   assert(normalizeOpenPositionMode('bad-mode') === 'free', '异常定位值回退free');
   assert(normalizeOpenPositionMode('unread') === 'unread', '保留未读定位选项');
+})();
+
+console.log('\n[主题默认值]');
+(function() {
+  assert(normalizeTheme(undefined) === 'dark', '未设置主题时默认dark');
+  assert(normalizeTheme('bad-theme') === 'dark', '异常主题值回退dark');
+  assert(normalizeTheme('green-dark') === 'green-dark', '保留暗森主题');
+  assert(normalizeTheme('chrome-dark') === 'chrome-dark', '保留铬墨主题');
 })();
 
 console.log('\n[分页拉取-多页合并去重]');
