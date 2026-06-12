@@ -519,6 +519,7 @@ console.log('\n[主题默认值]');
   assert(normalizeTheme('bad-theme') === 'dark', '异常主题值回退dark');
   assert(normalizeTheme('green-dark') === 'green-dark', '保留暗森主题');
   assert(normalizeTheme('chrome-dark') === 'chrome-dark', '保留铬墨主题');
+  assert(normalizeTheme('paper-light') === 'dark', '旧浅色主题配置回退dark');
 })();
 
 console.log('\n[分页拉取-多页合并去重]');
