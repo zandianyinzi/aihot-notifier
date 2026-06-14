@@ -353,7 +353,8 @@ async function migrateReadAllBefore(data) {
 function applyTheme(theme) {
   theme = normalizeTheme(theme);
   document.documentElement.setAttribute('data-theme', theme);
-  document.documentElement.style.background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  document.documentElement.style.background =
+    theme === 'green-dark' ? '#101410' : theme === 'chrome-dark' ? '#111317' : '#111111';
   localStorage.setItem('theme', theme);
 }
 

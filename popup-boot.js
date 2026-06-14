@@ -22,6 +22,6 @@
   document.documentElement.setAttribute('data-font', font);
   document.documentElement.setAttribute('data-size', size);
 
-  var bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
-  document.documentElement.style.background = bg || '#111111';
+  document.documentElement.style.background =
+    theme === 'green-dark' ? '#101410' : theme === 'chrome-dark' ? '#111317' : '#111111';
 })();
