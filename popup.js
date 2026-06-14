@@ -29,7 +29,7 @@ const POPUP_CACHE_KEY = 'popupDataSnapshot';
 const POPUP_SESSION_KEY = 'popupWarmSession';
 const POPUP_SCROLL_KEY = 'popupScrollPosition';
 const POPUP_CACHE_VERSION = 3;
-const POPUP_CACHE_TTL_MS = 5 * 60 * 1000;
+const POPUP_CACHE_TTL_MS = 30 * 60 * 1000;
 const POPUP_SCROLL_TTL_MS = 30 * 60 * 1000;
 const POPUP_SCROLL_SAVE_DELAY_MS = 200;
 const BUTTON_RESULT_CLASSES = ['is-result-accent', 'is-result-danger', 'is-result-ok'];
@@ -605,6 +605,13 @@ historyList.addEventListener('click', async (e) => {
 });
 
 markAllReadBtn.addEventListener('click', async () => {
+  historyList.querySelectorAll('.item.unread').forEach(el => {
+    el.classList.remove('unread');
+    el.classList.add('read');
+  });
+  markAllReadBtn.classList.remove('visible');
+  chrome.action.setBadgeText({ text: '' });
+
   const { feedMode = 'selected', readAllBeforeByMode = {} } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode']);
   const mode = normalizeFeedMode(feedMode);
   await chrome.storage.local.set({
@@ -627,8 +634,7 @@ intervalEl.addEventListener('change', () => saveConfig());
 feedModeEl.addEventListener('change', async () => {
   const feedbackStartedAt = Date.now();
   const nextFeedMode = normalizeFeedMode(feedModeEl.value);
-  const { feedMode = 'selected' } = await chrome.storage.local.get('feedMode');
-  const previousFeedMode = normalizeFeedMode(feedMode);
+  const previousFeedMode = normalizeFeedMode(readPopupCache()?.feedMode || 'selected');
 
   clearButtonFeedback(pollBtn);
   pollBtn.classList.add('is-loading');
