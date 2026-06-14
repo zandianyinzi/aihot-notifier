@@ -353,6 +353,7 @@ async function migrateReadAllBefore(data) {
 function applyTheme(theme) {
   theme = normalizeTheme(theme);
   document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.style.background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
   localStorage.setItem('theme', theme);
 }
 
