@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html data-theme="dark" data-font="system" data-size="medium">
+<html data-theme="dark" data-font="system" data-size="medium" style="width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: var(--bg, #111111); color-scheme: var(--color-scheme, dark);">
 <head>
   <meta charset="utf-8">
+  <meta name="color-scheme" content="dark">
   <style>
     @font-face {
       font-family: 'Fraunces Local';
@@ -12,6 +13,7 @@
     }
 
     [data-theme="dark"] {
+      --color-scheme: dark;
       --bg: #111111;
       --bg-sub: #191919;
       --bg-hover: #242424;
@@ -45,6 +47,7 @@
     }
 
     [data-theme="green-dark"] {
+      --color-scheme: dark;
       --bg: #101410;
       --bg-sub: #171d17;
       --bg-hover: #202420;
@@ -78,6 +81,7 @@
     }
 
     [data-theme="chrome-dark"] {
+      --color-scheme: dark;
       --bg: #111317;
       --bg-sub: #181b20;
       --bg-hover: #23272f;
@@ -141,12 +145,16 @@
     [data-font="system"] { --ff-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
 
     html, body {
+      width: 420px;
+      min-width: 420px;
       height: 600px;
+      min-height: 600px;
       overflow: hidden;
+      background: var(--bg, #111111);
+      color-scheme: var(--color-scheme, dark);
     }
 
     body {
-      width: 420px;
       display: flex;
       flex-direction: column;
       font-family: var(--ff-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif);
