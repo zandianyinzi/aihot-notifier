@@ -1,12 +1,10 @@
-Stay ahead of AI HOT news — instant desktop notifications, multiple dark themes, lightweight and unobtrusive.
+Track AI frontier trends as it happens — instant desktop notifications, flexible themes, lightweight and unobtrusive.
 
-AI HOT Notifier — Your AI News Radar
-
-Automatically tracks the latest AI HOT updates and delivers instant desktop notifications, so you never miss what matters.
+Automatically tracks the latest AI updates and delivers desktop notifications, so you never miss what matters.
 
 ✦ Core Features
 
-• Automatic polling for AI news with instant desktop notifications
+• Automatic monitoring for AI news with desktop notifications
 • Click notifications or list items to jump directly to the source
 • News list with title + summary for quick scanning
 • Read/unread state persists across browser restarts
