@@ -1,4 +1,5 @@
 (function () {
+  console.log('[POPUP] boot-start', performance.now().toFixed(2));
   var theme = localStorage.getItem('theme') || 'dark';
   var font = localStorage.getItem('fontFamily') || 'system';
   var size = localStorage.getItem('fontSize') || 'medium';

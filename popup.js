@@ -1,4 +1,18 @@
 const enabledEl = document.getElementById('enabled');
+console.log('[POPUP] js-start', performance.now().toFixed(2));
+
+const _dbuf = [];
+const _origLog = console.log;
+console.log = function(...a) { _origLog.apply(console, a); if (String(a[0]).startsWith('[POPUP]')) _dbuf.push(a.join(' ')); };
+
+new ResizeObserver(entries => {
+  const r = entries[0].contentRect;
+  console.log('[POPUP] resize', r.width.toFixed(0), 'x', r.height.toFixed(0), performance.now().toFixed(2));
+}).observe(document.documentElement);
+
+new PerformanceObserver(list => {
+  list.getEntries().forEach(e => console.log('[POPUP] paint', e.name, e.startTime.toFixed(2)));
+}).observe({ type: 'paint', buffered: true });
 const intervalEl = document.getElementById('interval');
 const feedModeEl = document.getElementById('feedMode');
 const themeEl = document.getElementById('theme');
@@ -630,6 +644,15 @@ settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.toggle('open');
 });
 
+document.getElementById('copyLogs').addEventListener('click', function() {
+  const log = _dbuf.join('\n');
+  navigator.clipboard.writeText(log).then(() => {
+    this.textContent = '已复制';
+    this.classList.add('copied');
+    setTimeout(() => { this.textContent = '复制日志'; this.classList.remove('copied'); }, 1500);
+  });
+});
+
 enabledEl.addEventListener('change', () => saveConfig());
 intervalEl.addEventListener('change', () => saveConfig());
 feedModeEl.addEventListener('change', async () => {
@@ -690,17 +713,22 @@ pollBtn.addEventListener('click', async () => {
 
 // Keep cold start on the skeleton; only use cached content after this browser session has warmed.
 (async function init() {
+  console.log('[POPUP] init-start', performance.now().toFixed(2));
   const storageDataPromise = chrome.storage.local.get([
     'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'openPositionMode', 'historyDays',
     'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode'
   ]);
   const cachedData = await readWarmPopupCache();
+  console.log('[POPUP] cache', cachedData ? 'hit' : 'miss', performance.now().toFixed(2));
   if (cachedData) {
     applyConfig(cachedData);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     renderHistory(cachedData, { updateBadge: false, applyInitialPosition: true });
+    console.log('[POPUP] render-cache', performance.now().toFixed(2));
   }
 
   const storageData = await storageDataPromise;
+  console.log('[POPUP] storage-ready', performance.now().toFixed(2));
   const reconciled = reconcileCachedReadIds(storageData, cachedData);
   const data = reconciled.data;
   await migrateReadAllBefore(data);
@@ -712,6 +740,7 @@ pollBtn.addEventListener('click', async () => {
     chrome.storage.local.set({ fontFamily: 'system' });
   }
   renderHistory(data, { applyInitialPosition: true });
+  console.log('[POPUP] render-storage', performance.now().toFixed(2));
   cacheLoadedPopupData(data);
   markPopupSessionWarm();
   if (reconciled.changed) chrome.storage.local.set({ readIds: data.readIds });
