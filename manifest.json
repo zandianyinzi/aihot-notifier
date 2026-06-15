@@ -1,15 +1,17 @@
 {
   "manifest_version": 3,
   "name": "AI HOT Notifier",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "实时监控 AI HOT 资讯动态，新内容即时桌面通知，支持三款深色主题、内容源切换和本地已读状态。",
-  "permissions": ["alarms", "notifications", "storage"],
+  "permissions": ["alarms", "notifications", "storage", "sidePanel"],
   "host_permissions": ["https://aihot.virxact.com/*"],
   "background": {
     "service_worker": "background.js"
   },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
   "action": {
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

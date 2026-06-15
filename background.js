@@ -1,3 +1,5 @@
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
 const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
 const ALARM_NAME = 'aihot-poll';
 const DEFAULT_INTERVAL = 5;
