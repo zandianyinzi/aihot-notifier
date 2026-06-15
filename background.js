@@ -118,9 +118,10 @@ async function incrementFailCount() {
 async function showNotification(items) {
   const count = items.length;
   const discoveredAt = new Date().toISOString();
+  const notifId = 'aihot-' + Date.now();
 
   if (count === 1) {
-    chrome.notifications.create('aihot-new', {
+    chrome.notifications.create(notifId, {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: 'AI HOT 新内容',
@@ -128,7 +129,7 @@ async function showNotification(items) {
       contextMessage: items[0].source || ''
     });
   } else {
-    chrome.notifications.create('aihot-new', {
+    chrome.notifications.create(notifId, {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: `AI HOT ${count} 条新内容`,
