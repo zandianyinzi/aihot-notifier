@@ -1,10 +1,8 @@
-Real-time AI news monitoring with desktop notifications. Focused dark themes and elegant reading experience.
-
-Detailed description:
+Stay ahead of AI HOT news — instant desktop notifications, multiple dark themes, lightweight and unobtrusive.
 
 AI HOT Notifier — Your AI News Radar
 
-Automatically monitors the latest AI industry updates from aihot.virxact.com and delivers instant desktop notifications, keeping you informed about important developments in the AI field.
+Automatically tracks the latest AI HOT updates and delivers instant desktop notifications, so you never miss what matters.
 
 ✦ Core Features
 
@@ -23,15 +21,6 @@ Automatically monitors the latest AI industry updates from aihot.virxact.com and
 • Configurable polling interval: 2 / 5 / 15 / 30 / 60 minutes
 • Configurable display range: 1 / 2 / 3 / 5 days (default: 2 days)
 
-✦ Technical Highlights
-
-• Manifest V3, modern architecture
-• Lightweight and efficient, minimal resource usage
-• Local storage only — no user data collected
-• Auto-resumes polling after browser restart
-
 ✦ Data Source
 
-News curated from aihot.virxact.com, covering AI model releases, product updates, industry news, academic papers, and usage tips — daily curated picks.
-
-Feedback and suggestions are welcome.
+News curated from aihot.virxact.com, covering AI model releases, product updates, industry news, academic papers, and usage tips. All data is stored locally — no user information collected.

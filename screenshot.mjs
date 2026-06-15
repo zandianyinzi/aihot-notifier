@@ -391,10 +391,10 @@ function buildWrapperHtml(theme) {
     margin-bottom: 22px;
   }
   h1 .brand-ai {
-    color: #ff8c5a;
+    color: #f1f3f4;
   }
   h1 .brand-hot {
-    color: #ff4d2e;
+    color: #f1f3f4;
   }
   h1 .brand-rest {
     color: #f1f3f4;
