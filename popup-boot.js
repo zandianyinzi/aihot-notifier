@@ -24,4 +24,10 @@
 
   document.documentElement.style.background =
     theme === 'green-dark' ? '#101410' : theme === 'chrome-dark' ? '#111317' : '#111111';
+
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      document.documentElement.style.visibility = 'visible';
+    });
+  });
 })();
