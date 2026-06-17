@@ -40,6 +40,13 @@ GET https://aihot.virxact.com/api/public/items?mode={selected|all}&since={ISO-86
 
 响应：`{ items: [...], hasNext: bool, nextCursor: string }`
 
+## 发布流程
+
+每次改动后，按顺序执行：
+1. 升级 `manifest.json` 中的版本号
+2. 打包（`./pack.sh` 或 PowerShell `Compress-Archive`）
+3. commit + push
+
 ## 发布
 
 - GitHub: https://github.com/nayexinqing/aihot-notifier

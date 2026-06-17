@@ -31,6 +31,13 @@
 
 修改逻辑前后至少运行 `node test.js` 和 `node test-notification.js`。涉及 API 模式、分页、日期窗口或线上 feed 假设时，运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。
 
+## 发布流程
+
+每次改动后，按顺序执行：
+1. 升级 `manifest.json` 中的版本号
+2. 打包（`bash pack.sh` 或 PowerShell `Compress-Archive`）
+3. commit + push
+
 ## 提交与 Pull Request 规范
 
 近期提交多为简短祈使句，部分使用 Conventional Commit 前缀，例如 `perf: eliminate theme FOUC`、`fix polling miss due to insufficient API delay buffer`。提交标题应说明具体行为变化。
