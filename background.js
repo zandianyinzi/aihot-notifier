@@ -13,7 +13,7 @@ async function getConfig() {
     enabled: data.enabled !== false,
     interval: Math.max(Number(data.interval) || DEFAULT_INTERVAL, MIN_INTERVAL),
     lastCheck: data.lastCheck || new Date().toISOString(),
-    feedMode: data.feedMode || 'selected'
+    feedMode: data.feedMode || 'all'
   };
 }
 
@@ -132,8 +132,9 @@ async function showNotification(items) {
     chrome.notifications.create(notifId, {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
-      title: `AI HOT ${count} 条新内容`,
-      message: items.slice(0, 3).map(i => i.title).join('\n')
+      title: `AI HOT 有 ${count} 条新内容`,
+      message: items[0].title,
+      contextMessage: items[0].source || ''
     });
   }
 
@@ -153,7 +154,7 @@ async function showNotification(items) {
 }
 
 async function manualPoll() {
-  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode = 'selected' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode = 'all' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
   const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
   console.log(`[AI HOT] manual poll since=${sinceTime}`);
 
@@ -292,7 +293,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await migrateReadAllBefore();
   if (details.reason === 'install') {
     try {
-      const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+      const { feedMode = 'all', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
       const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
       const maxPages = 3;
       let allItems = [];

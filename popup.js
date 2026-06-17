@@ -201,11 +201,11 @@ function normalizeFontFamily(font) {
 }
 
 function normalizeOpenPositionMode(mode) {
-  return VALID_OPEN_POSITION_MODES.has(mode) ? mode : 'free';
+  return VALID_OPEN_POSITION_MODES.has(mode) ? mode : 'unread';
 }
 
 function normalizeFeedMode(mode) {
-  return mode === 'all' ? 'all' : 'selected';
+  return mode === 'selected' ? 'selected' : 'all';
 }
 
 function getScrollContext(data) {
@@ -592,7 +592,7 @@ historyList.addEventListener('click', async (e) => {
   if (!item) return;
   const url = item.dataset.url;
 
-  const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+  const { feedMode = 'all', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
   writeScrollPosition({ feedMode, historyDays });
 
   if (!cachedReadIds.has(url)) {
@@ -627,7 +627,7 @@ markAllReadBtn.addEventListener('click', async () => {
   markAllReadBtn.classList.remove('visible');
   chrome.action.setBadgeText({ text: '' });
 
-  const { feedMode = 'selected', readAllBeforeByMode = {} } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode']);
+  const { feedMode = 'all', readAllBeforeByMode = {} } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode']);
   const mode = normalizeFeedMode(feedMode);
   await chrome.storage.local.set({
     readAllBeforeByMode: {
@@ -658,7 +658,7 @@ intervalEl.addEventListener('change', () => saveConfig());
 feedModeEl.addEventListener('change', async () => {
   const feedbackStartedAt = Date.now();
   const nextFeedMode = normalizeFeedMode(feedModeEl.value);
-  const previousFeedMode = normalizeFeedMode(readPopupCache()?.feedMode || 'selected');
+  const previousFeedMode = normalizeFeedMode(readPopupCache()?.feedMode || 'all');
 
   clearButtonFeedback(pollBtn);
   pollBtn.classList.add('is-loading');
