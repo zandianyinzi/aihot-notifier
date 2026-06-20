@@ -908,6 +908,7 @@ pollBtn.addEventListener('click', async () => {
   console.log('[POPUP] cache', cachedData ? 'hit' : 'miss', performance.now().toFixed(2));
   if (cachedData) {
     applyConfig(cachedData);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     renderHistory(cachedData, { updateBadge: false, applyInitialPosition: true });
     console.log('[POPUP] render-cache', performance.now().toFixed(2));
   }
