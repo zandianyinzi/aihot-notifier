@@ -5,6 +5,11 @@ const MIN_INTERVAL = 2;
 const DEFAULT_HISTORY_DAYS = 2;
 const MAX_HISTORY_DAYS = 5;
 const BADGE_COLOR = '#e2231a';
+const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
+const WATCH_REMINDER_DELAYS = [0, 2 * 60 * 1000, 5 * 60 * 1000, 2 * 60 * 60 * 1000];
+const WATCH_DAILY_REMINDER_MS = 24 * 60 * 60 * 1000;
+const notificationUrlMap = {};
+
 
 
 async function getConfig() {
@@ -20,6 +25,164 @@ async function getConfig() {
 function getApiUrl(mode) {
   return `${API_BASE}&mode=${mode}`;
 }
+
+function splitWatchKeywords(value) {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap(v => splitWatchKeywords(v))
+      .filter(Boolean);
+  }
+  return String(value || '')
+    .split(/[,，]/)
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeWatchRules(rules) {
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .map((rule, index) => {
+      const source = String(rule.source || '').trim();
+      const author = String(rule.author || '').trim();
+      const keywords = splitWatchKeywords(rule.keywords);
+      return {
+        id: String(rule.id || `wr_${index}`),
+        source,
+        author,
+        keywords,
+        enabled: rule.enabled !== false,
+        createdAt: rule.createdAt || ''
+      };
+    })
+    .filter(rule => rule.enabled && (rule.source || rule.author || rule.keywords.length > 0));
+}
+
+function parseSourceParts(source) {
+  const text = String(source || '').trim();
+  const parts = text.split(/[:：]/);
+  if (parts.length < 2) return { sourceType: text, authorText: text };
+  return {
+    sourceType: parts[0].trim(),
+    authorText: parts.slice(1).join('：').trim()
+  };
+}
+
+function includesText(haystack, needle) {
+  const normalizedNeedle = normalizeText(needle);
+  if (!normalizedNeedle) return true;
+  return normalizeText(haystack).includes(normalizedNeedle);
+}
+
+function matchWatchRules(item, rules) {
+  const normalizedRules = normalizeWatchRules(rules);
+  if (normalizedRules.length === 0) return [];
+
+  const source = item.source || '';
+  const parts = parseSourceParts(source);
+  const keywordText = `${item.title || ''}\n${item.summary || ''}`;
+
+  return normalizedRules.filter(rule => {
+    if (rule.source && !includesText(parts.sourceType, rule.source)) return false;
+    if (rule.author && !includesText(parts.authorText || source, rule.author)) return false;
+    if (rule.keywords.length > 0 && !rule.keywords.some(keyword => includesText(keywordText, keyword))) return false;
+    return true;
+  });
+}
+
+function getNextWatchNotifyAt(firstMatchedAt, notifyCount, referenceNow) {
+  const first = new Date(firstMatchedAt).getTime();
+  if (!first) return '';
+  if (notifyCount < WATCH_REMINDER_DELAYS.length) {
+    return new Date(first + WATCH_REMINDER_DELAYS[notifyCount]).toISOString();
+  }
+  const base = referenceNow ? new Date(referenceNow).getTime() : Date.now();
+  return new Date(base + WATCH_DAILY_REMINDER_MS).toISOString();
+}
+
+function isWatchViewed(state) {
+  return Boolean(state && state.viewedAt);
+}
+
+function buildWatchStateForItem(existingState, item, ruleIds, now) {
+  const current = existingState || {};
+  const firstMatchedAt = current.firstMatchedAt || now;
+  const notifyCount = Number(current.notifyCount || 0);
+  return {
+    ruleIds: Array.from(new Set([...(current.ruleIds || []), ...ruleIds])),
+    firstMatchedAt,
+    lastNotifiedAt: current.lastNotifiedAt || '',
+    notifyCount,
+    nextNotifyAt: current.nextNotifyAt || getNextWatchNotifyAt(firstMatchedAt, notifyCount, now),
+    viewedAt: current.viewedAt || ''
+  };
+}
+
+function shouldNotifyWatchState(state, nowMs) {
+  if (!state || isWatchViewed(state)) return false;
+  const next = new Date(state.nextNotifyAt || state.firstMatchedAt || 0).getTime();
+  return next > 0 && next <= nowMs;
+}
+
+function advanceWatchNotifyState(state, now) {
+  const notifyCount = Number(state.notifyCount || 0) + 1;
+  return {
+    ...state,
+    lastNotifiedAt: now,
+    notifyCount,
+    nextNotifyAt: getNextWatchNotifyAt(state.firstMatchedAt || now, notifyCount, now)
+  };
+}
+
+function getWatchNotificationTitle(item, state) {
+  const ruleLabel = parseSourceParts(item.source || '').authorText || item.source || '特别关注';
+  return `特别关注：${ruleLabel}`;
+}
+
+function createNotification(id, options, url) {
+  if (url) notificationUrlMap[id] = url;
+  chrome.notifications.create(id, options);
+}
+
+async function sendWatchNotifications(items, watchNotifyState, now) {
+  const nowMs = new Date(now).getTime();
+  const dueItems = items
+    .filter(item => shouldNotifyWatchState(watchNotifyState[item.url], nowMs))
+    .sort((a, b) => getItemTime(b) - getItemTime(a))
+    .slice(0, MAX_WATCH_NOTIFICATIONS_PER_CYCLE);
+
+  dueItems.forEach((item, index) => {
+    const state = watchNotifyState[item.url];
+    createNotification(`aihot-watch-${Date.now()}-${index}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: getWatchNotificationTitle(item, state),
+      message: item.title,
+      contextMessage: item.source || ''
+    }, item.url);
+    watchNotifyState[item.url] = advanceWatchNotifyState(state, now);
+  });
+
+  return dueItems;
+}
+
+async function markWatchViewed(urls) {
+  const list = Array.isArray(urls) ? urls : [urls];
+  const filtered = list.filter(Boolean);
+  if (filtered.length === 0) return;
+  const { watchNotifyState = {} } = await chrome.storage.local.get('watchNotifyState');
+  const now = new Date().toISOString();
+  filtered.forEach(url => {
+    if (watchNotifyState[url]) {
+      watchNotifyState[url] = { ...watchNotifyState[url], viewedAt: watchNotifyState[url].viewedAt || now };
+    }
+  });
+  await chrome.storage.local.set({ watchNotifyState });
+}
+
 
 function normalizeFeedMode(mode) {
   return mode === 'all' ? 'all' : 'selected';
@@ -43,8 +206,8 @@ function isWithinHistoryWindow(item, cutoff) {
   return getUnreadReferenceTime(item) > cutoff;
 }
 
-function toHistoryEntry(item, discoveredAt) {
-  return {
+function toHistoryEntry(item, discoveredAt, watchMatches = []) {
+  const entry = {
     title: item.title,
     url: item.url,
     source: item.source || '',
@@ -53,6 +216,12 @@ function toHistoryEntry(item, discoveredAt) {
     time: item.publishedAt,
     discoveredAt
   };
+  if (watchMatches.length > 0) {
+    entry.watchMatched = true;
+    entry.watchRuleIds = watchMatches.map(rule => rule.id);
+    entry.watchMatchedAt = discoveredAt;
+  }
+  return entry;
 }
 
 async function migrateReadAllBefore() {
@@ -116,41 +285,83 @@ async function incrementFailCount() {
 }
 
 async function showNotification(items) {
-  const count = items.length;
   const discoveredAt = new Date().toISOString();
-  const notifId = 'aihot-' + Date.now();
+  const {
+    history = [],
+    historyDays = DEFAULT_HISTORY_DAYS,
+    watchRules = [],
+    watchNotifyState = {}
+  } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState']);
 
-  if (count === 1) {
-    chrome.notifications.create(notifId, {
-      type: 'basic',
-      iconUrl: 'icons/icon128.png',
-      title: 'AI HOT 新内容',
-      message: items[0].title,
-      contextMessage: items[0].source || ''
+  const existingUrls = new Set(history.map(i => i.url));
+  const newEntries = [];
+  const watchItems = [];
+  const normalItems = [];
+  const nextWatchNotifyState = { ...watchNotifyState };
+
+  items
+    .filter(i => !existingUrls.has(i.url))
+    .forEach(item => {
+      const watchMatches = matchWatchRules(item, watchRules);
+      const entry = toHistoryEntry(item, discoveredAt, watchMatches);
+      newEntries.push(entry);
+      if (watchMatches.length > 0) {
+        const ruleIds = watchMatches.map(rule => rule.id);
+        nextWatchNotifyState[item.url] = buildWatchStateForItem(nextWatchNotifyState[item.url], item, ruleIds, discoveredAt);
+        watchItems.push(entry);
+      } else {
+        normalItems.push(item);
+      }
     });
-  } else {
-    chrome.notifications.create(notifId, {
-      type: 'basic',
-      iconUrl: 'icons/icon128.png',
-      title: `AI HOT 有 ${count} 条新内容`,
-      message: items[0].title,
-      contextMessage: items[0].source || ''
-    });
+
+  await sendWatchNotifications(watchItems, nextWatchNotifyState, discoveredAt);
+
+  if (normalItems.length > 0) {
+    const count = normalItems.length;
+    const notifId = 'aihot-' + Date.now();
+
+    if (count === 1) {
+      createNotification(notifId, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'AI HOT 新内容',
+        message: normalItems[0].title,
+        contextMessage: normalItems[0].source || ''
+      }, normalItems[0].url);
+    } else {
+      createNotification(notifId, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: `AI HOT 有 ${count} 条新内容`,
+        message: normalItems[0].title,
+        contextMessage: normalItems[0].source || ''
+      }, normalItems[0].url);
+    }
   }
 
-  await chrome.storage.local.set({ lastItems: items.slice(0, 5) });
+  await chrome.storage.local.set({
+    lastItems: [...watchItems, ...normalItems.map(i => toHistoryEntry(i, discoveredAt))].slice(0, 5),
+    watchNotifyState: nextWatchNotifyState
+  });
 
-  const { history = [], historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['history', 'historyDays']);
-  const existingUrls = new Set(history.map(i => i.url));
-  const newEntries = items
-    .filter(i => !existingUrls.has(i.url))
-    .map(i => toHistoryEntry(i, discoveredAt));
   const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
   const updated = [...newEntries, ...history]
     .filter(i => isWithinHistoryWindow(i, cutoff))
     .sort((a, b) => getItemTime(b) - getItemTime(a));
   await chrome.storage.local.set({ history: updated });
   await updateBadge();
+}
+
+async function checkWatchReminders() {
+  const { history = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'watchNotifyState']);
+  const watchItems = history.filter(item => item.watchMatched && watchNotifyState[item.url]);
+  if (watchItems.length === 0) return;
+  const now = new Date().toISOString();
+  const nextWatchNotifyState = { ...watchNotifyState };
+  const notified = await sendWatchNotifications(watchItems, nextWatchNotifyState, now);
+  if (notified.length > 0) {
+    await chrome.storage.local.set({ watchNotifyState: nextWatchNotifyState, lastItems: notified.slice(0, 5) });
+  }
 }
 
 async function manualPoll() {
@@ -268,15 +479,20 @@ async function resetAndPoll(feedMode) {
 chrome.notifications.onClicked.addListener(async (notificationId) => {
   if (notificationId.startsWith('aihot-')) {
     const { lastItems = [] } = await chrome.storage.local.get('lastItems');
-    if (lastItems.length > 0 && lastItems[0].url) {
-      chrome.tabs.create({ url: lastItems[0].url });
+    const url = notificationUrlMap[notificationId] || lastItems[0]?.url;
+    if (url) {
+      if (notificationId.startsWith('aihot-watch-')) {
+        await markWatchViewed(url);
+      }
+      delete notificationUrlMap[notificationId];
+      chrome.tabs.create({ url });
     }
   }
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
-    pollForUpdates();
+    pollForUpdates().then(() => checkWatchReminders());
   }
 });
 
@@ -354,6 +570,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === 'feedModeChanged') {
     resetAndPoll(msg.feedMode)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === 'markWatchViewed') {
+    markWatchViewed(msg.urls || msg.url)
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;

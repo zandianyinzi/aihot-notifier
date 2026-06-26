@@ -25,6 +25,11 @@ const pollBtn = document.getElementById('pollNow');
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsPanel = document.getElementById('settingsPanel');
 const historyList = document.getElementById('historyList');
+const watchRulesList = document.getElementById('watchRulesList');
+const watchSourceEl = document.getElementById('watchSource');
+const watchAuthorEl = document.getElementById('watchAuthor');
+const watchKeywordsEl = document.getElementById('watchKeywords');
+const addWatchRuleBtn = document.getElementById('addWatchRule');
 
 const CATEGORY_MAP = {
   'ai-models': { cls: 'cat-model', label: '模型' },
@@ -178,6 +183,141 @@ function getDateLabel(isoStr) {
   if (d.toDateString() === today.toDateString()) return '今天';
   if (d.toDateString() === yesterday.toDateString()) return '昨天';
   return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+
+function splitWatchKeywords(value) {
+  if (Array.isArray(value)) return value.flatMap(v => splitWatchKeywords(v)).filter(Boolean);
+  return String(value || '').split(/[,，]/).map(v => v.trim()).filter(Boolean);
+}
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeWatchRules(rules) {
+  if (!Array.isArray(rules)) return [];
+  return rules.map((rule, index) => ({
+    id: String(rule.id || `wr_${index}`),
+    source: String(rule.source || '').trim(),
+    author: String(rule.author || '').trim(),
+    keywords: splitWatchKeywords(rule.keywords),
+    enabled: rule.enabled !== false,
+    createdAt: rule.createdAt || ''
+  }));
+}
+
+function getWatchRuleLabel(rule) {
+  const parts = [];
+  if (rule.source) parts.push(rule.source);
+  if (rule.author) parts.push(rule.author);
+  if (rule.keywords.length > 0) parts.push(rule.keywords.join(', '));
+  return parts.join(' · ') || '未配置规则';
+}
+
+function getWatchRuleMain(rule) {
+  const parts = [];
+  if (rule.source) parts.push(rule.source);
+  if (rule.author) parts.push(rule.author);
+  return parts.join(' · ') || '任意来源';
+}
+
+function mergeWatchRuleInput(rules, input) {
+  const normalized = normalizeWatchRules(rules);
+  const source = String(input.source || '').trim();
+  const author = String(input.author || '').trim();
+  const keywords = splitWatchKeywords(input.keywords);
+  if (!source && !author && keywords.length === 0) return normalized;
+  const sameRule = normalized.find(rule => normalizeText(rule.source) === normalizeText(source) && normalizeText(rule.author) === normalizeText(author));
+  if (!sameRule) {
+    return [
+      ...normalized,
+      {
+        id: `wr_${Date.now()}`,
+        source,
+        author,
+        keywords,
+        enabled: true,
+        createdAt: new Date().toISOString()
+      }
+    ];
+  }
+  const mergedKeywords = [...sameRule.keywords];
+  for (const keyword of keywords) {
+    if (!mergedKeywords.some(existing => normalizeText(existing) === normalizeText(keyword))) mergedKeywords.push(keyword);
+  }
+  return normalized.map(rule => rule.id === sameRule.id ? { ...rule, keywords: mergedKeywords } : rule);
+}
+
+function removeWatchRuleKeyword(rules, ruleId, keywordIndex) {
+  return normalizeWatchRules(rules)
+    .map(rule => rule.id === ruleId ? { ...rule, keywords: rule.keywords.filter((_, index) => index !== keywordIndex) } : rule)
+    .filter(rule => rule.source || rule.author || rule.keywords.length > 0);
+}
+
+function renderWatchRules(rules) {
+  if (!watchRulesList) return;
+  const normalized = normalizeWatchRules(rules);
+  if (normalized.length === 0) {
+    watchRulesList.innerHTML = '<div class="watch-rule-text">暂无规则，添加来源/作者/关键词开始关注</div>';
+    return;
+  }
+  watchRulesList.innerHTML = normalized.map(rule => `
+    <div class="watch-rule-card ${rule.enabled ? '' : 'disabled'}" data-rule-id="${escapeHtml(rule.id)}">
+      <div class="watch-rule-content" title="${escapeHtml(getWatchRuleLabel(rule))}">
+        <div class="watch-rule-main">${escapeHtml(getWatchRuleMain(rule))}</div>
+        ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag">${escapeHtml(keyword)}<button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词">×</button></span>`).join('')}</div>` : ''}
+      </div>
+      <div class="watch-rule-actions">
+        <button class="btn-mini watch-rule-btn" data-action="toggle">${rule.enabled ? '停用' : '启用'}</button>
+        <button class="btn-mini watch-rule-btn" data-action="delete" title="删除">×</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function saveWatchRules(rules) {
+  const normalized = normalizeWatchRules(rules);
+  await chrome.storage.local.set({ watchRules: normalized });
+  renderWatchRules(normalized);
+}
+
+function renderItemHtml(item, isUnread, options = {}) {
+  const cat = getCategory(item.category);
+  const title = escapeHtml(item.title);
+  const source = escapeHtml(item.source || '');
+  const tagHtml = cat.label ? `<span class="cat-tag ${cat.cls}">${cat.label}</span>` : '';
+  const watchTagHtml = item.watchMatched ? '<span class="watch-badge">特关</span>' : '';
+  const summary = escapeHtml(item.summary || '');
+  const summaryHtml = summary ? `<div class="item-summary">${summary}</div>` : '';
+  return `<div class="item ${isUnread ? 'unread' : 'read'} ${item.watchMatched ? 'watch-item' : ''}" data-url="${escapeHtml(item.url)}">
+    <div class="item-body">
+      <div class="item-title">${options.prefix || ''}${title}</div>
+      ${summaryHtml}
+      <div class="item-meta">
+        ${watchTagHtml}
+        ${tagHtml}
+        <span>${source}</span>
+        <span class="sep"></span>
+        <span>${formatTime(item.time)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function markWatchUrlsViewed(urls) {
+  const list = Array.isArray(urls) ? urls.filter(Boolean) : [urls].filter(Boolean);
+  if (list.length === 0) return;
+  try {
+    await chrome.runtime.sendMessage({ type: 'markWatchViewed', urls: list });
+  } catch (_e) {
+    const { watchNotifyState = {} } = await chrome.storage.local.get('watchNotifyState');
+    const now = new Date().toISOString();
+    list.forEach(url => {
+      if (watchNotifyState[url]) watchNotifyState[url] = { ...watchNotifyState[url], viewedAt: watchNotifyState[url].viewedAt || now };
+    });
+    await chrome.storage.local.set({ watchNotifyState });
+  }
 }
 
 function getCategory(category) {
@@ -402,6 +542,7 @@ function applyConfig(data) {
   let days = data.historyDays || DEFAULT_HISTORY_DAYS;
   if (days > 5) days = 5;
   historyDaysEl.value = String(days);
+  renderWatchRules(data.watchRules || []);
 }
 
 function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) {
@@ -414,6 +555,7 @@ function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) 
       item.source || '',
       item.category || '',
       item.summary || '',
+      item.watchMatched ? '1' : '',
       getDateLabel(item.time),
       item.discoveredAt || '',
       isReadFast(item, readIdSet, readAllBeforeTime) ? 1 : 0
@@ -462,36 +604,31 @@ function renderHistory(data, options = {}) {
     markAllReadBtn.classList.remove('visible');
   }
 
+  const pinnedWatch = history
+    .filter(item => item.watchMatched && !isReadFast(item, readIdSet, readAllBeforeTime))
+    .sort((a, b) => getItemTime(b) - getItemTime(a));
+  const pinnedUrls = new Set(pinnedWatch.map(item => item.url));
+  const displayHistory = [...pinnedWatch, ...history.filter(item => !pinnedUrls.has(item.url))];
+
+  let html = '';
+  if (pinnedWatch.length > 0) {
+    pinnedWatch.forEach(item => {
+      html += renderItemHtml(item, true);
+    });
+  }
+
   const groups = {};
-  history.forEach(item => {
+  displayHistory.filter(item => !pinnedUrls.has(item.url)).forEach(item => {
     const label = getDateLabel(item.time);
     if (!groups[label]) groups[label] = [];
     groups[label].push(item);
   });
 
-  let html = '';
   Object.entries(groups).forEach(([dateLabel, items]) => {
     html += `<div class="date-label">${dateLabel}</div>`;
     items.forEach(item => {
       const isUnread = !isReadFast(item, cachedReadIds, readAllBeforeTime);
-      const cat = getCategory(item.category);
-      const title = escapeHtml(item.title);
-      const source = escapeHtml(item.source || '');
-      const tagHtml = cat.label ? `<span class="cat-tag ${cat.cls}">${cat.label}</span>` : '';
-      const summary = escapeHtml(item.summary || '');
-      const summaryHtml = summary ? `<div class="item-summary">${summary}</div>` : '';
-      html += `<div class="item ${isUnread ? 'unread' : 'read'}" data-url="${escapeHtml(item.url)}">
-        <div class="item-body">
-          <div class="item-title">${title}</div>
-          ${summaryHtml}
-          <div class="item-meta">
-            ${tagHtml}
-            <span>${source}</span>
-            <span class="sep"></span>
-            <span>${formatTime(item.time)}</span>
-          </div>
-        </div>
-      </div>`;
+      html += renderItemHtml(item, isUnread);
     });
   });
 
@@ -520,7 +657,8 @@ function cacheLoadedPopupData(data) {
     history: data.history || [],
     readIds: data.readIds || [],
     readAllBefore: data.readAllBefore || '',
-    readAllBeforeByMode: data.readAllBeforeByMode || {}
+    readAllBeforeByMode: data.readAllBeforeByMode || {},
+    watchRules: data.watchRules || []
   });
 }
 
@@ -578,7 +716,7 @@ async function saveConfig(options = {}) {
 }
 
 async function loadHistory() {
-  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode', 'openPositionMode']);
+  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode', 'openPositionMode', 'watchRules']);
   const cachedData = await readWarmPopupCache();
   const reconciled = reconcileCachedReadIds(data, cachedData);
   renderHistory(reconciled.data);
@@ -586,8 +724,7 @@ async function loadHistory() {
   if (reconciled.changed) chrome.storage.local.set({ readIds: reconciled.data.readIds });
 }
 
-// Event delegation for item clicks
-historyList.addEventListener('click', async (e) => {
+async function handleItemClick(e) {
   const item = e.target.closest('.item');
   if (!item) return;
   const url = item.dataset.url;
@@ -604,10 +741,12 @@ historyList.addEventListener('click', async (e) => {
     lastRenderSignature = '';
   }
 
-  item.classList.remove('unread');
-  item.classList.add('read');
+  document.querySelectorAll(`.item[data-url="${CSS.escape(url)}"]`).forEach(el => {
+    el.classList.remove('unread');
+    el.classList.add('read');
+  });
 
-  const unreadEls = historyList.querySelectorAll('.item.unread');
+  const unreadEls = document.querySelectorAll('.item.unread');
   const unreadCount = unreadEls.length;
   if (unreadCount > 0) {
     markAllReadBtn.classList.add('visible');
@@ -616,8 +755,12 @@ historyList.addEventListener('click', async (e) => {
   }
   chrome.action.setBadgeText({ text: unreadCount > 0 ? String(unreadCount) : '' });
 
+  await markWatchUrlsViewed(url);
   chrome.tabs.create({ url });
-});
+}
+
+// Event delegation for item clicks
+historyList.addEventListener('click', handleItemClick);
 
 markAllReadBtn.addEventListener('click', async () => {
   historyList.querySelectorAll('.item.unread').forEach(el => {
@@ -629,6 +772,8 @@ markAllReadBtn.addEventListener('click', async () => {
 
   const { feedMode = 'all', readAllBeforeByMode = {} } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode']);
   const mode = normalizeFeedMode(feedMode);
+  const visibleWatchUrls = Array.from(document.querySelectorAll('.item.watch-item')).map(el => el.dataset.url).filter(Boolean);
+  await markWatchUrlsViewed(visibleWatchUrls);
   await chrome.storage.local.set({
     readAllBeforeByMode: {
       ...readAllBeforeByMode,
@@ -647,11 +792,52 @@ settingsBtn.addEventListener('click', () => {
 document.getElementById('copyLogs').addEventListener('click', function() {
   const log = _dbuf.join('\n');
   navigator.clipboard.writeText(log).then(() => {
-    this.textContent = '已复制';
-    this.classList.add('copied');
-    setTimeout(() => { this.textContent = '复制日志'; this.classList.remove('copied'); }, 1500);
+    this.textContent = '成功';
+    setTimeout(() => { this.textContent = '拷贝'; }, 1500);
   });
 });
+
+
+if (addWatchRuleBtn) {
+  addWatchRuleBtn.addEventListener('click', async () => {
+    const source = watchSourceEl.value.trim();
+    const author = watchAuthorEl.value.trim();
+    const keywords = splitWatchKeywords(watchKeywordsEl.value);
+    if (!source && !author && keywords.length === 0) return;
+    const { watchRules = [] } = await chrome.storage.local.get('watchRules');
+    const nextRules = mergeWatchRuleInput(watchRules, { source, author, keywords });
+    watchKeywordsEl.value = '';
+    await saveWatchRules(nextRules);
+  });
+}
+
+if (watchRulesList) {
+  watchRulesList.addEventListener('click', async (e) => {
+    const keywordRemoveBtn = e.target.closest('.watch-keyword-remove');
+    if (keywordRemoveBtn) {
+      const card = keywordRemoveBtn.closest('.watch-rule-card');
+      const ruleId = card?.dataset.ruleId;
+      const keywordIndex = Number(keywordRemoveBtn.dataset.keywordIndex);
+      if (!ruleId || !Number.isInteger(keywordIndex)) return;
+      const { watchRules = [] } = await chrome.storage.local.get('watchRules');
+      await saveWatchRules(removeWatchRuleKeyword(watchRules, ruleId, keywordIndex));
+      return;
+    }
+
+    const button = e.target.closest('.watch-rule-btn');
+    if (!button) return;
+    const card = button.closest('.watch-rule-card');
+    const ruleId = card?.dataset.ruleId;
+    if (!ruleId) return;
+    const { watchRules = [] } = await chrome.storage.local.get('watchRules');
+    const rules = normalizeWatchRules(watchRules);
+    const action = button.dataset.action;
+    const nextRules = action === 'delete'
+      ? rules.filter(rule => rule.id !== ruleId)
+      : rules.map(rule => rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule);
+    await saveWatchRules(nextRules);
+  });
+}
 
 enabledEl.addEventListener('change', () => saveConfig());
 intervalEl.addEventListener('change', () => saveConfig());
@@ -716,7 +902,7 @@ pollBtn.addEventListener('click', async () => {
   console.log('[POPUP] init-start', performance.now().toFixed(2));
   const storageDataPromise = chrome.storage.local.get([
     'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'openPositionMode', 'historyDays',
-    'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode'
+    'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules'
   ]);
   const cachedData = await readWarmPopupCache();
   console.log('[POPUP] cache', cachedData ? 'hit' : 'miss', performance.now().toFixed(2));

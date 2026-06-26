@@ -57,6 +57,99 @@ function getApiUrl(mode) {
   return `${API_BASE}&mode=${mode}`;
 }
 
+
+const WATCH_REMINDER_DELAYS = [0, 2 * 60 * 1000, 5 * 60 * 1000, 2 * 60 * 60 * 1000];
+const WATCH_DAILY_REMINDER_MS = 24 * 60 * 60 * 1000;
+
+function splitWatchKeywords(value) {
+  if (Array.isArray(value)) return value.flatMap(v => splitWatchKeywords(v)).filter(Boolean);
+  return String(value || '').split(/[,，]/).map(v => v.trim()).filter(Boolean);
+}
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeWatchRules(rules) {
+  if (!Array.isArray(rules)) return [];
+  return rules.map((rule, index) => {
+    const source = String(rule.source || '').trim();
+    const author = String(rule.author || '').trim();
+    const keywords = splitWatchKeywords(rule.keywords);
+    return { id: String(rule.id || `wr_${index}`), source, author, keywords, enabled: rule.enabled !== false, createdAt: rule.createdAt || '' };
+  }).filter(rule => rule.enabled && (rule.source || rule.author || rule.keywords.length > 0));
+}
+
+function normalizeWatchRuleRecords(rules) {
+  if (!Array.isArray(rules)) return [];
+  return rules.map((rule, index) => {
+    const source = String(rule.source || '').trim();
+    const author = String(rule.author || '').trim();
+    const keywords = splitWatchKeywords(rule.keywords);
+    return { id: String(rule.id || `wr_${index}`), source, author, keywords, enabled: rule.enabled !== false, createdAt: rule.createdAt || '' };
+  });
+}
+
+function mergeWatchRuleInput(rules, input, nowIso = '2026-06-26T00:00:00.000Z') {
+  const normalized = normalizeWatchRuleRecords(rules);
+  const source = String(input.source || '').trim();
+  const author = String(input.author || '').trim();
+  const keywords = splitWatchKeywords(input.keywords);
+  if (!source && !author && keywords.length === 0) return normalized;
+  const sameRule = normalized.find(rule => normalizeText(rule.source) === normalizeText(source) && normalizeText(rule.author) === normalizeText(author));
+  if (!sameRule) return [...normalized, { id: 'wr_new', source, author, keywords, enabled: true, createdAt: nowIso }];
+  const mergedKeywords = [...sameRule.keywords];
+  for (const keyword of keywords) {
+    if (!mergedKeywords.some(existing => normalizeText(existing) === normalizeText(keyword))) mergedKeywords.push(keyword);
+  }
+  return normalized.map(rule => rule.id === sameRule.id ? { ...rule, keywords: mergedKeywords } : rule);
+}
+
+function removeWatchRuleKeyword(rules, ruleId, keywordIndex) {
+  return normalizeWatchRuleRecords(rules)
+    .map(rule => rule.id === ruleId ? { ...rule, keywords: rule.keywords.filter((_, index) => index !== keywordIndex) } : rule)
+    .filter(rule => rule.source || rule.author || rule.keywords.length > 0);
+}
+
+function parseSourceParts(source) {
+  const text = String(source || '').trim();
+  const parts = text.split(/[:：]/);
+  if (parts.length < 2) return { sourceType: text, authorText: text };
+  return { sourceType: parts[0].trim(), authorText: parts.slice(1).join('：').trim() };
+}
+
+function includesText(haystack, needle) {
+  const normalizedNeedle = normalizeText(needle);
+  if (!normalizedNeedle) return true;
+  return normalizeText(haystack).includes(normalizedNeedle);
+}
+
+function matchWatchRules(item, rules) {
+  const normalizedRules = normalizeWatchRules(rules);
+  const source = item.source || '';
+  const parts = parseSourceParts(source);
+  const keywordText = `${item.title || ''}\n${item.summary || ''}`;
+  return normalizedRules.filter(rule => {
+    if (rule.source && !includesText(parts.sourceType, rule.source)) return false;
+    if (rule.author && !includesText(parts.authorText || source, rule.author)) return false;
+    if (rule.keywords.length > 0 && !rule.keywords.some(keyword => includesText(keywordText, keyword))) return false;
+    return true;
+  });
+}
+
+function getNextWatchNotifyAt(firstMatchedAt, notifyCount, referenceNow) {
+  const first = new Date(firstMatchedAt).getTime();
+  if (!first) return '';
+  if (notifyCount < WATCH_REMINDER_DELAYS.length) return new Date(first + WATCH_REMINDER_DELAYS[notifyCount]).toISOString();
+  return new Date(new Date(referenceNow).getTime() + WATCH_DAILY_REMINDER_MS).toISOString();
+}
+
+function shouldNotifyWatchState(state, nowMs) {
+  if (!state || state.viewedAt) return false;
+  const next = new Date(state.nextNotifyAt || state.firstMatchedAt || 0).getTime();
+  return next > 0 && next <= nowMs;
+}
+
 function daysAgo(days) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
@@ -594,6 +687,83 @@ console.log('\n[分页拉取-maxPages限制]');
   }
   assert(pagesFetched === 3, `最多拉取 ${maxPages} 页`);
   assert(pagesFetched <= 3, '不超过 maxPages 上限');
+})();
+
+
+console.log('\n[特别关注-规则匹配]');
+(function() {
+  const item = {
+    source: '公众号：数字生命卡兹克',
+    title: 'Claude Code 6个实用Hook玩法',
+    summary: '内置近30个Hook事件，运行时不消耗token。'
+  };
+  const rules = [
+    { id: 'r1', source: '公众号', author: '数字生命卡兹克', keywords: ['Claude Code'] },
+    { id: 'r2', source: 'X', author: '数字生命卡兹克', keywords: ['Claude Code'] },
+    { id: 'r3', source: '', author: '', keywords: [] }
+  ];
+  const matches = matchWatchRules(item, rules);
+  assert(matches.length === 1, '仅匹配来源+作者+关键词都满足的规则');
+  assert(matches[0].id === 'r1', '匹配卡兹克公众号规则');
+})();
+
+console.log('\n[特别关注-关键词任一命中]');
+(function() {
+  const item = { source: 'X：可灵 Kling AI (@Kling_ai)', title: '可灵Kling AI问：你看到UFO了吗？', summary: '视频生成示例' };
+  const matches = matchWatchRules(item, [{ id: 'r1', source: 'X', author: 'kling_ai', keywords: 'Claude Code，UFO' }]);
+  assert(matches.length === 1, '中文逗号分隔关键词任一命中');
+})();
+
+console.log('\n[特别关注-补充关键词合并]');
+(function() {
+  const rules = [{ id: 'r1', source: '公众号', author: '数字生命卡兹克', keywords: ['Claude Code'], enabled: true }];
+  const merged = mergeWatchRuleInput(rules, { source: '公众号', author: '数字生命卡兹克', keywords: 'Hook, claude code' });
+  assert(merged.length === 1, '相同来源和作者时不新增重复规则');
+  assert(merged[0].keywords.length === 2, '补充关键词并按大小写不敏感去重');
+  assert(merged[0].keywords.includes('Hook'), '保留新增关键词');
+})();
+
+console.log('\n[特别关注-补充关键词不改变启停]');
+(function() {
+  const rules = [{ id: 'r1', source: '公众号', author: '数字生命卡兹克', keywords: ['Claude Code'], enabled: false }];
+  const merged = mergeWatchRuleInput(rules, { source: '公众号', author: '数字生命卡兹克', keywords: 'Hook' });
+  assert(merged.length === 1, '停用规则补充关键词时不新增重复规则');
+  assert(merged[0].enabled === false, '补充关键词不自动启用已停用规则');
+})();
+
+console.log('\n[特别关注-删除单个关键词]');
+(function() {
+  const rules = [{ id: 'r1', source: '公众号', author: '数字生命卡兹克', keywords: ['Claude Code', 'Hook'], enabled: true }];
+  const nextRules = removeWatchRuleKeyword(rules, 'r1', 0);
+  assert(nextRules.length === 1, '删除关键词后规则仍保留');
+  assert(nextRules[0].keywords.length === 1, '只删除指定关键词');
+  assert(nextRules[0].keywords[0] === 'Hook', '保留其它关键词');
+})();
+
+console.log('\n[特别关注-删除最后关键词后清理空规则]');
+(function() {
+  const rules = [{ id: 'r1', source: '', author: '', keywords: ['Hook'], enabled: true }];
+  const nextRules = removeWatchRuleKeyword(rules, 'r1', 0);
+  assert(nextRules.length === 0, '没有来源作者时删除最后关键词会删除空规则');
+})();
+
+console.log('\n[特别关注-提醒节奏]');
+(function() {
+  const first = '2026-06-26T02:00:00.000Z';
+  assert(getNextWatchNotifyAt(first, 0, first) === first, '首次提醒立即');
+  assert(getNextWatchNotifyAt(first, 1, first) === '2026-06-26T02:02:00.000Z', '第二次提醒间隔2分钟');
+  assert(getNextWatchNotifyAt(first, 2, first) === '2026-06-26T02:05:00.000Z', '第三次提醒间隔5分钟');
+  assert(getNextWatchNotifyAt(first, 3, first) === '2026-06-26T04:00:00.000Z', '第四次提醒间隔2小时');
+  assert(getNextWatchNotifyAt(first, 4, '2026-06-26T04:00:00.000Z') === '2026-06-27T04:00:00.000Z', '后续每天最多一次');
+})();
+
+console.log('\n[特别关注-已查看抑制]');
+(function() {
+  const due = { firstMatchedAt: '2026-06-26T02:00:00.000Z', nextNotifyAt: '2026-06-26T02:00:00.000Z', viewedAt: '' };
+  const viewed = { ...due, viewedAt: '2026-06-26T02:01:00.000Z' };
+  const nowMs = new Date('2026-06-26T02:10:00.000Z').getTime();
+  assert(shouldNotifyWatchState(due, nowMs), '未查看且到期会提醒');
+  assert(!shouldNotifyWatchState(viewed, nowMs), '已查看不再提醒');
 })();
 
 // ===== 结果 =====

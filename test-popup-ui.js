@@ -26,6 +26,7 @@ function hasDeclaration(css, property, valuePattern) {
 }
 
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
+const popupJs = fs.readFileSync('popup.js', 'utf8');
 const htmlTag = popupHtml.match(/<html\b[^>]*>/i)?.[0] || '';
 const htmlStyle = htmlTag.match(/\sstyle="([^"]*)"/i)?.[1] || '';
 const bodyTag = popupHtml.match(/<body\b[^>]*>/i)?.[0] || '';
@@ -63,6 +64,101 @@ for (const [_, themeName, themeCss] of themeRules) {
   assert(hasDeclaration(themeCss, '--color-scheme', /dark|light/), `${themeName} 主题声明 --color-scheme`);
 }
 
+
+
+
+console.log('\n[简约设置分组]');
+assert(/<section class="setting-group">[\s\S]*?常规[\s\S]*?id="enabled"[\s\S]*?id="interval"[\s\S]*?id="feedMode"[\s\S]*?id="historyDays"[\s\S]*?id="openPositionMode"/.test(popupHtml), '常规分组包含推送、频率、内容源、显示天数、定位');
+assert(/<section class="setting-group">[\s\S]*?外观[\s\S]*?id="theme"[\s\S]*?id="fontFamily"[\s\S]*?id="fontSize"[\s\S]*?<\/section>/.test(popupHtml), '外观分组只包含视觉设置');
+assert(/<section class="setting-group watch-settings">[\s\S]*?扩展[\s\S]*?特别关注[\s\S]*?id="watchRulesList"/.test(popupHtml), '特别关注配置位于扩展分组下');
+assert(/<div class="setting-group-title">扩展<\/div>/.test(popupHtml), '扩展使用与常规、外观一致的分组标题样式');
+assert(/<div class="setting-subtitle">特别关注<\/div>/.test(popupHtml), '特别关注作为扩展分组下的子功能标题');
+assert(/<section class="setting-group setting-group-debug">[\s\S]*?调试[\s\S]*?id="copyLogs"[\s\S]*?拷贝/.test(popupHtml), '调试入口位于独立分组并使用拷贝文案');
+const settingGroupRule = popupHtml.match(/\.setting-group\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(settingGroupRule, 'gap', '8px'), '设置分组使用轻量间距');
+assert(/\.setting-group \+ \.setting-group\s*{[\s\S]*?border-top/.test(popupHtml), '设置分组之间使用细分割线');
+assert(/\.btn-mini\s*{/.test(popupHtml), '设置面板文字按钮使用统一 btn-mini 基类');
+assert(!/\.btn-mini\.is-result-ok\s*{/.test(popupHtml), '拷贝按钮不使用额外成功态样式，保持整体按钮风格一致');
+const btnMiniHoverRule = popupHtml.match(/\.btn-mini:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(btnMiniHoverRule, 'background', /var\(--accent-soft\)/), '文字按钮悬停使用统一主题色轻染背景');
+assert(hasDeclaration(btnMiniHoverRule, 'color', /var\(--accent\)/), '文字按钮悬停使用主题色文字');
+assert(/border-color\s*:\s*color-mix\(in srgb, var\(--accent\) 35%, var\(--border\)\)/.test(btnMiniHoverRule), '文字按钮悬停使用轻量主题色边框');
+const selectMiniRule = popupHtml.match(/\.select-mini\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(selectMiniRule, 'padding', /5px\s+8px/), '下拉控件尺寸与文字按钮对齐');
+assert(hasDeclaration(selectMiniRule, 'border-radius', '5px'), '下拉控件圆角与文字按钮对齐');
+const selectMiniHoverRule = popupHtml.match(/\.select-mini:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(selectMiniHoverRule, 'background', /var\(--bg\)/), '下拉控件悬停不改变背景色');
+assert(hasDeclaration(selectMiniHoverRule, 'color', /var\(--accent\)/), '下拉控件悬停使用主题色文字');
+assert(/border-color\s*:\s*color-mix\(in srgb, var\(--accent\) 35%, var\(--border\)\)/.test(selectMiniHoverRule), '下拉控件悬停使用轻量主题色边框');
+assert(/class="btn-mini watch-add-btn" id="addWatchRule"/.test(popupHtml), '添加按钮使用统一文字按钮基类');
+assert(/class="btn-mini watch-rule-btn"/.test(popupJs), '规则操作按钮使用统一文字按钮基类');
+
+console.log('\n[右上角按钮布局]');
+const actionsRule = popupHtml.match(/\.actions\s*{([\s\S]*?)}/i)?.[1] || '';
+const btnIconRule = popupHtml.match(/\.btn-icon\s*{([\s\S]*?)}/i)?.[1] || '';
+const btnIconHoverRule = popupHtml.match(/\.btn-icon:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(actionsRule, 'justify-content', 'flex-end'), '右上角按钮靠右排列');
+assert(hasDeclaration(actionsRule, 'flex', /0\s+0\s+auto/), '右上角按钮组不被压缩');
+assert(hasDeclaration(actionsRule, 'gap', '6px'), '右上角按钮保持间距');
+assert(hasDeclaration(btnIconRule, 'flex', /0\s+0\s+var\(--control-size\)/), '单个按钮固定占位，避免叠加');
+assert(hasDeclaration(btnIconHoverRule, 'background', /var\(--accent-soft\)/), '右上角按钮悬停使用统一主题色轻染背景');
+assert(hasDeclaration(btnIconHoverRule, 'color', /var\(--accent\)/), '右上角按钮悬停使用主题色图标');
+
+console.log('\n[特别关注UI]');
+assert(!/id="watchSection"/.test(popupHtml), '不再使用重复的特别关注顶部区域');
+assert(!/id="watchList"/.test(popupHtml), '不再使用独立特别关注列表容器');
+assert(/id="watchRulesList"/.test(popupHtml), '存在特别关注规则列表');
+assert(/id="watchSource"/.test(popupHtml), '存在来源输入框');
+assert(/id="watchAuthor"/.test(popupHtml), '存在作者输入框');
+assert(/id="watchKeywords"/.test(popupHtml), '存在关键词输入框');
+assert(/<input class="watch-input watch-input-full" id="watchKeywords"[\s\S]*?<button class="btn-mini watch-add-btn" id="addWatchRule">添加<\/button>/.test(popupHtml), '关键词输入框与添加按钮位于同一行');
+assert(!/watchSourceEl\.value\s*=\s*''/.test(popupJs), '添加后保留来源输入，方便继续补充关键词');
+assert(!/watchAuthorEl\.value\s*=\s*''/.test(popupJs), '添加后保留作者输入，方便继续补充关键词');
+assert(/watchKeywordsEl\.value\s*=\s*''/.test(popupJs), '添加后仅清空关键词输入');
+assert(!/匹配后置顶/.test(popupHtml), '特关输入区不显示额外说明文案');
+assert(/watch-rule-main/.test(popupJs), '规则列表分行展示来源作者与关键词');
+assert(/watch-keyword-tags/.test(popupJs), '规则列表完整展示关键词标签');
+assert(/watch-keyword-tag/.test(popupHtml), '关键词标签有独立轻量样式');
+assert(/watch-keyword-remove/.test(popupJs), '关键词标签支持单独删除');
+assert(/data-keyword-index/.test(popupJs), '删除关键词时使用索引定位具体关键词');
+assert(!/\.watch-section\.visible\s*{/.test(popupHtml), '不再维护特别关注分区显示状态');
+assert(/\.watch-badge\s*{/.test(popupHtml), '主列表存在特别关注标签样式');
+assert(/pinnedWatch/.test(popupJs), '未读特别关注在主列表置顶');
+assert(/pinnedUrls/.test(popupJs), '置顶特别关注不重复渲染原始条目');
+assert(/watch-badge\">特关<\/span>/.test(popupJs), '特别关注条目使用紧凑的特关标签');
+const watchBadgeRule = popupHtml.match(/\.watch-badge\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchBadgeRule, 'color', /var\(--accent\)/), '特关标签沿用原有强调色');
+assert(hasDeclaration(watchBadgeRule, 'background', /var\(--accent-soft\)/), '特关标签使用与分类一致的底色');
+assert(hasDeclaration(watchBadgeRule, 'border-radius', '3px'), '特关标签使用与分类一致的圆角长方形');
+assert(hasDeclaration(watchBadgeRule, 'font-weight', '500'), '特关标签使用与分类一致的字重');
+assert(hasDeclaration(watchBadgeRule, 'padding', '1px 6px'), '特关标签使用与分类一致的内边距');
+assert(!/box-shadow\s*:/.test(watchBadgeRule), '特关标签不使用额外立体效果，保持与分类协调');
+assert(!/pinnedUrls\.has\(item\.url\) \? '特别关注'/.test(popupJs), '置顶重点条目不额外显示悬浮分组标签');
+assert(/'readAllBeforeByMode', 'watchRules'/.test(popupJs), '初始化时从 chrome.storage.local 读取特别关注规则');
+assert(/renderWatchRules\(data\.watchRules \|\| \[\]\)/.test(popupJs), '加载配置时渲染已保存规则');
+assert(/function normalizeText\(value\)/.test(popupJs), 'popup 规则合并具备文本归一化函数');
+assert(/\.watch-rules-list\s*{[\s\S]*?max-height:[\s\S]*?overflow-y:\s*auto/.test(popupHtml), '特别关注规则列表可滚动');
+const watchInputHoverRule = popupHtml.match(/\.watch-input:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchInputHoverRule, 'background', /var\(--bg\)/), '特别关注输入框 hover 不改变背景色');
+assert(/border-color\s*:\s*color-mix\(in srgb, var\(--accent\) 35%, var\(--border\)\)/.test(watchInputHoverRule), '特别关注输入框 hover 使用统一轻量主题色边框');
+const watchRuleCardRule = popupHtml.match(/\.watch-rule-card\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchRuleCardRule, 'display', /inline-flex/), '添加后的规则使用轻量胶囊布局');
+assert(hasDeclaration(watchRuleCardRule, 'background', /var\(--bg\)/), '规则列表风格贴合现有主题背景');
+assert(!/box-shadow\s*:/.test(watchRuleCardRule), '规则胶囊不使用阴影，降低卡片感');
+const watchRuleContentRule = popupHtml.match(/\.watch-rule-content\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchRuleContentRule, 'flex', /1\s+1\s+auto/), '规则内容区域优先展示完整关键词');
+assert(/<button class="btn-mini watch-rule-btn" data-action="delete" title="删除">×<\/button>/.test(popupJs), '删除规则使用轻量 × 操作');
+const watchRuleDeleteHoverRule = popupHtml.match(/\.watch-rule-actions \.watch-rule-btn\[data-action="delete"\]:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchRuleDeleteHoverRule, 'color', /var\(--state-fail\)/), '整条删除 hover 使用危险色');
+assert(hasDeclaration(watchRuleDeleteHoverRule, 'background', /var\(--state-fail-softer\)/), '整条删除 hover 使用轻危险背景');
+const keywordRemoveHoverRule = popupHtml.match(/\.watch-keyword-remove:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(keywordRemoveHoverRule, 'color', /var\(--state-fail\)/), '关键词删除 hover 使用危险色');
+assert(!/data-action="delete">删除<\/button>/.test(popupJs), '规则列表不显示厚重的删除文字按钮');
+assert(/class="btn-mini" id="copyLogs"/.test(popupHtml), '调试拷贝按钮使用独立 mini button 风格');
+assert(/this\.textContent = '成功'/.test(popupJs), '拷贝成功反馈显示成功');
+assert(/this\.textContent = '拷贝'/.test(popupJs), '拷贝反馈结束后恢复拷贝文案');
+assert(!/classList\.add\('is-result-ok'\)/.test(popupJs), '拷贝成功不添加特殊视觉状态');
+assert(/\.settings-inner\s*{[\s\S]*?max-height:[\s\S]*?overflow-y:\s*auto/.test(popupHtml), '设置面板内容可滚动');
 console.log(`\n${'='.repeat(40)}`);
 console.log(`结果: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
