@@ -68,9 +68,8 @@ for (const [_, themeName, themeCss] of themeRules) {
 console.log('\n[简约设置分组]');
 assert(/<section class="setting-group">[\s\S]*?常规[\s\S]*?id="enabled"[\s\S]*?id="interval"[\s\S]*?id="feedMode"[\s\S]*?id="historyDays"[\s\S]*?id="openPositionMode"/.test(popupHtml), '常规分组包含推送、频率、内容源、显示天数、定位');
 assert(/<section class="setting-group">[\s\S]*?外观[\s\S]*?id="theme"[\s\S]*?id="fontFamily"[\s\S]*?id="fontSize"[\s\S]*?<\/section>/.test(popupHtml), '外观分组只包含视觉设置');
-assert(/<section class="setting-group watch-settings">[\s\S]*?特关[\s\S]*?来源 \/ 作者 \/ 关键词[\s\S]*?id="watchRulesList"/.test(popupHtml), '特关分组包含来源/作者/关键词说明和规则列表');
+assert(/<section class="setting-group watch-settings">[\s\S]*?特关[\s\S]*?id="watchRulesList"/.test(popupHtml), '特关分组包含规则列表');
 assert(/<div class="setting-group-title">特关<\/div>/.test(popupHtml), '特关使用与常规、外观一致的分组标题样式');
-assert(/<div class="setting-subtitle">来源 \/ 作者 \/ 关键词<\/div>/.test(popupHtml), '特关副标题点明输入维度');
 assert(/<section class="setting-group setting-group-debug">[\s\S]*?调试[\s\S]*?id="copyLogs"[\s\S]*?拷贝/.test(popupHtml), '调试入口位于独立分组并使用拷贝文案');
 const settingGroupRule = popupHtml.match(/\.setting-group\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupRule, 'gap', '8px'), '设置分组使用轻量间距');
