@@ -73,7 +73,7 @@ Expected: PASS.
 - [ ] **Step 1: Add failing notification tests**
 
 Add tests that assert:
-- special-watch items get `特别关注` notifications.
+- special-watch items get `特关` notifications.
 - a poll cycle sends at most 3 watch notifications.
 - ordinary notification excludes watch items.
 - viewed watch state prevents repeat notification.
@@ -120,7 +120,7 @@ Load/save `watchRules`; add, edit, toggle, and delete rules.
 
 - [ ] **Step 4: Render pinned watch items**
 
-Pin unread matched items at the top of the main list, avoid duplicate rendering, restore read items to their time-sorted position, and keep the compact `重点` label in the main history list.
+Pin unread matched items at the top of the main list, avoid duplicate rendering, restore read items to their time-sorted position, and keep the compact `特关` label in the main history list.
 
 - [ ] **Step 5: Mark viewed from popup actions**
 

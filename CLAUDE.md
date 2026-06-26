@@ -22,8 +22,14 @@ node test-e2e.js
 ## 架构
 
 - **background.js** — Service Worker。定时轮询 API、去重、存储 history、发通知、管理 badge 计数。核心函数：`pollForUpdates()`（定时触发）、`manualPoll()`（用户手动刷新）、`resetAndPoll()`（切换 feedMode 时全量重拉）、`updateBadge()`（badge 未读数）。
-- **popup.html + popup.js** — 弹窗 UI。读取 storage 渲染资讯列表，管理已读状态和设置面板。通知开关/轮询间隔变更通过 `chrome.runtime.sendMessage` 通知 background；外观类设置仅本地保存和重渲染。
+- **popup.html + popup.js** — 弹窗 UI。读取 storage 渲染资讯列表，管理已读状态和设置面板。通知开关/轮询间隔变更通过 `chrome.runtime.sendMessage` 通知 background；外观类设置仅本地保存和重渲染。设置面板按 `常规 / 外观 / 特关 / 调试` 分组。
 - **manifest.json** — 权限：alarms、notifications、storage。host_permissions 限制为 aihot.virxact.com。
+
+## UI 约定
+
+- 设置面板使用原生折叠分组，默认只有 `常规` 展开，其他组收起。
+- 分组标题、按钮和标签沿用主题色与低对比度层级，不把说明性文字做成高亮主视觉。
+- 除输入框外，弹窗内其它交互区域不应出现文本插入光标。
 
 ## 关键设计决策
 

@@ -13,6 +13,7 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
 - 支持三套深色主题（墨夜/暗森/铬墨）
 - 支持字体风格切换（系统/宋体/楷体）
 - 支持字号调节（小/默认/大/特大/超大）
+- 支持特关规则（来源/作者/关键词，多关键词支持中英文逗号分隔，英文不区分大小写）
 - 可配置轮询间隔和显示天数
 
 ## 安装
@@ -37,20 +38,17 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
 - 点击刷新按钮立即拉取最新内容
 - 有未读内容时，点击右上角「全部已读」按钮可批量清除当前内容源的未读状态
 - 点击设置按钮展开配置面板：
-  - **通知推送**：开关桌面通知
-  - **检查频率**：2 / 5 / 15 / 30 / 60 分钟
-  - **外观**：墨夜 / 暗森 / 铬墨
-  - **字体**：系统 / 宋体 / 楷体（优先使用本机已安装字体）
-  - **字号**：小 / 默认 / 大 / 特大 / 超大
-  - **定位**：自由浏览 / 未读优先
-  - **内容源**：精选 / 全部
-  - **显示天数**：1 / 2 / 3 / 5 天（默认 2 天）
+  - **常规**：通知推送、检查频率、定位、内容源、显示天数
+  - **外观**：主题、字体、字号
+  - **特关**：来源 / 作者 / 关键词（支持中英文逗号分隔，英文不区分大小写）
+  - **调试**：拷贝日志
 
 ## 开发与发布
 
 - `node test.js`：运行纯逻辑测试，覆盖去重、排序、时间窗口和 API URL。
 - `node test-notification.js`：使用 mock 的 Chrome API 验证通知和 badge 逻辑。
 - `node test-background.js`：直接加载真实 `background.js`，验证消息通道和失败语义。
+- `node test-popup-ui.js`：验证弹窗设置、特关和光标等 UI 约束。
 - `node test-e2e.js`：请求 `https://aihot.virxact.com`，验证线上 API 数据假设。
 - `python3 scripts/generate-logo.py`：重新生成扩展图标 PNG；需要 `Pillow`。
 - `node screenshot.mjs`：重新生成 Chrome Web Store 截图和宣传图；首次使用前执行 `npm install --no-save puppeteer`。

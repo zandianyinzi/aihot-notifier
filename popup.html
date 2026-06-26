@@ -395,6 +395,33 @@
     .settings-inner::-webkit-scrollbar-track { background: transparent; }
     .settings-inner::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
+    .settings {
+      cursor: default;
+    }
+
+    .settings * {
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+    }
+
+    .settings input,
+    .settings textarea {
+      cursor: text;
+      user-select: text;
+      -webkit-user-select: text;
+      -moz-user-select: text;
+      -ms-user-select: text;
+    }
+
+    .settings button,
+    .settings summary,
+    .settings select,
+    .settings .switch {
+      cursor: pointer;
+    }
+
     .setting-group {
       display: flex;
       flex-direction: column;
@@ -424,46 +451,53 @@
       appearance: none;
       border: 0;
       background: transparent;
-      padding: 1px 0 1px 10px;
+      padding: 6px 0;
+      min-height: 28px;
       width: 100%;
       display: flex;
       align-items: center;
       justify-content: space-between;
       font-size: 11px;
-      font-weight: 600;
-      color: var(--text-3);
+      font-weight: 500;
+      color: var(--text-2);
       line-height: 1;
       cursor: pointer;
-      border-left: 2px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+      -webkit-tap-highlight-color: transparent;
       transition:
         color var(--motion-tap) ease,
-        border-color var(--motion-tap) ease,
         background var(--motion-tap) ease;
     }
 
     .setting-group-title::after {
       content: '▾';
       font-size: 10px;
-      color: color-mix(in srgb, var(--accent) 26%, var(--text-3));
+      color: var(--accent);
       transform: rotate(0deg);
       transition: transform var(--motion-tap) ease, color var(--motion-tap) ease;
     }
 
     .setting-group-title:hover {
-      color: var(--text-2);
-      border-left-color: color-mix(in srgb, var(--accent) 44%, var(--border));
-      background: color-mix(in srgb, var(--accent) 4%, transparent);
+      color: var(--accent);
+      background: transparent;
+    }
+
+    .setting-group[open] > .setting-group-title:hover {
+      color: var(--accent);
+      background: transparent;
     }
 
     .setting-group[open] > .setting-group-title::after {
       transform: rotate(-180deg);
-      color: color-mix(in srgb, var(--accent) 58%, var(--text-2));
+      color: var(--accent);
     }
 
     .setting-group[open] > .setting-group-title {
-      color: var(--text-2);
-      border-left-color: color-mix(in srgb, var(--accent) 58%, var(--border));
-      background: color-mix(in srgb, var(--accent) 3%, transparent);
+      color: var(--accent);
+      background: transparent;
+    }
+
+    .setting-group-body .setting-row > label:not(.switch) {
+      color: var(--text-3);
     }
 
     .setting-group-body {
@@ -771,6 +805,10 @@
       padding: var(--item-pad, 12px) 18px;
       border-bottom: 1px solid var(--border-light);
       cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
       transition: background 0.12s ease;
     }
 
@@ -928,7 +966,7 @@
 
   <div class="settings" id="settingsPanel">
     <div class="settings-inner">
-      <details class="setting-group" open data-setting-group="general">
+      <details class="setting-group" data-setting-group="general">
         <summary class="setting-group-title">常规</summary>
         <div class="setting-group-body">
           <div class="setting-row">

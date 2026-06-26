@@ -808,6 +808,16 @@ settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.toggle('open');
 });
 
+const settingGroups = Array.from(settingsPanel.querySelectorAll('.setting-group'));
+settingGroups.forEach(group => {
+  group.addEventListener('toggle', () => {
+    if (!group.open) return;
+    settingGroups.forEach(otherGroup => {
+      if (otherGroup !== group) otherGroup.open = false;
+    });
+  });
+});
+
 document.getElementById('copyLogs').addEventListener('click', function() {
   const log = window.__popupPerf && window.__popupPerf.snapshot ? window.__popupPerf.snapshot().join('\n') : _dbuf.join('\n');
   navigator.clipboard.writeText(log).then(() => {
