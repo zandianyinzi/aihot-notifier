@@ -714,6 +714,13 @@ console.log('\n[特别关注-关键词任一命中]');
   assert(matches.length === 1, '中文逗号分隔关键词任一命中');
 })();
 
+console.log('\n[特别关注-英文大小写不敏感]');
+(function() {
+  const item = { source: 'X：OpenAI (@OpenAI)', title: 'Claude Code Hooks', summary: 'A post about CLI hooks' };
+  const matches = matchWatchRules(item, [{ id: 'r1', source: 'x', author: 'openai', keywords: 'claude code' }]);
+  assert(matches.length === 1, '英文来源、作者、关键词匹配都不区分大小写');
+})();
+
 console.log('\n[特别关注-补充关键词合并]');
 (function() {
   const rules = [{ id: 'r1', source: '公众号', author: '数字生命卡兹克', keywords: ['Claude Code'], enabled: true }];
