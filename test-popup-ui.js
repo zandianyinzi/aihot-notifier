@@ -26,6 +26,7 @@ function hasDeclaration(css, property, valuePattern) {
 }
 
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
+const popupLogJs = fs.readFileSync('popup-log.js', 'utf8');
 const popupJs = fs.readFileSync('popup.js', 'utf8');
 const htmlTag = popupHtml.match(/<html\b[^>]*>/i)?.[0] || '';
 const htmlStyle = htmlTag.match(/\sstyle="([^"]*)"/i)?.[1] || '';
@@ -63,9 +64,6 @@ for (const [_, themeName, themeCss] of themeRules) {
   assert(hasDeclaration(themeCss, '--bg', /#[0-9a-f]{6}|rgba?\([^)]+\)/), `${themeName} 主题声明 --bg`);
   assert(hasDeclaration(themeCss, '--color-scheme', /dark|light/), `${themeName} 主题声明 --color-scheme`);
 }
-
-
-
 
 console.log('\n[简约设置分组]');
 assert(/<section class="setting-group">[\s\S]*?常规[\s\S]*?id="enabled"[\s\S]*?id="interval"[\s\S]*?id="feedMode"[\s\S]*?id="historyDays"[\s\S]*?id="openPositionMode"/.test(popupHtml), '常规分组包含推送、频率、内容源、显示天数、定位');
@@ -159,6 +157,14 @@ assert(/this\.textContent = '成功'/.test(popupJs), '拷贝成功反馈显示�
 assert(/this\.textContent = '拷贝'/.test(popupJs), '拷贝反馈结束后恢复拷贝文案');
 assert(!/classList\.add\('is-result-ok'\)/.test(popupJs), '拷贝成功不添加特殊视觉状态');
 assert(/\.settings-inner\s*{[\s\S]*?max-height:[\s\S]*?overflow-y:\s*auto/.test(popupHtml), '设置面板内容可滚动');
+console.log('\n[popup首帧初始化顺序]');
+assert(/function\s+waitForNextPaint\(\)/.test(popupJs), '存在首帧让步 helper');
+assert(/await\s+waitForNextPaint\(\);\s*renderHistory\(data,\s*\{\s*applyInitialPosition:\s*true\s*\}\s*\);/s.test(popupJs), 'storage 渲染前先等待下一帧');
+assert(/await\s+waitForNextPaint\(\);\s*renderHistory\(cachedData,\s*\{\s*updateBadge:\s*false,\s*applyInitialPosition:\s*true\s*\}\s*\);/s.test(popupJs), '缓存渲染前先等待下一帧');
+assert(/<script\s+src="popup-log\.js"><\/script>/i.test(popupHtml), 'popup 首屏接入统一性能日志脚本');
+assert(/window\.__popupPerfLog/.test(popupLogJs), '统一性能日志脚本导出全局 helper');
+assert(/String\(a\[0\]\)\.startsWith\('\[POPUP\]\[perf\]'\)/.test(popupJs), '只复制标准化性能日志');
+
 console.log(`\n${'='.repeat(40)}`);
 console.log(`结果: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

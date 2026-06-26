@@ -1,17 +1,24 @@
 const enabledEl = document.getElementById('enabled');
-console.log('[POPUP] js-start', performance.now().toFixed(2));
+const perfLog = window.__popupPerfLog || function () {};
+perfLog('js-start');
 
 const _dbuf = [];
 const _origLog = console.log;
-console.log = function(...a) { _origLog.apply(console, a); if (String(a[0]).startsWith('[POPUP]')) _dbuf.push(a.join(' ')); };
+console.log = function(...a) {
+  _origLog.apply(console, a);
+  if (String(a[0]).startsWith('[POPUP][perf]')) _dbuf.push(a.join(' '));
+};
 
 new ResizeObserver(entries => {
   const r = entries[0].contentRect;
-  console.log('[POPUP] resize', r.width.toFixed(0), 'x', r.height.toFixed(0), performance.now().toFixed(2));
+  perfLog('resize', { width: Math.round(r.width), height: Math.round(r.height) });
 }).observe(document.documentElement);
 
 new PerformanceObserver(list => {
-  list.getEntries().forEach(e => console.log('[POPUP] paint', e.name, e.startTime.toFixed(2)));
+  list.getEntries().forEach(e => perfLog('paint', {
+    name: e.name,
+    startTime: Number(e.startTime.toFixed(2))
+  }));
 }).observe({ type: 'paint', buffered: true });
 const intervalEl = document.getElementById('interval');
 const feedModeEl = document.getElementById('feedMode');
@@ -66,6 +73,14 @@ let scrollSaveTimer = 0;
 function clearButtonFeedback(button) {
   button.classList.remove(...BUTTON_TRANSIENT_CLASSES);
   button.style.removeProperty('--control-result-duration');
+}
+
+function waitForNextPaint() {
+  return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+function logPerf(phase, fields = {}) {
+  perfLog(phase, fields);
 }
 
 function getButtonResultDuration(elapsedMs) {
@@ -579,10 +594,12 @@ function renderHistory(data, options = {}) {
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const history = rawHistory.filter(i => isWithinHistoryWindow(i, cutoff));
   const signature = getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays);
+  logPerf('render-start', { items: history.length, cached: signature === lastRenderSignature });
 
   if (skipUnchanged && signature === lastRenderSignature) {
     if (shouldUpdateBadge) updateBadgeFromData(history, readIdSet, readAllBeforeTime);
     if (shouldApplyInitialPosition) applyInitialPosition(data);
+    logPerf('render-skip', { items: history.length });
     return;
   }
 
@@ -594,6 +611,7 @@ function renderHistory(data, options = {}) {
     markAllReadBtn.classList.remove('visible');
     if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
     lastRenderSignature = signature;
+    logPerf('render-end', { items: 0, empty: true });
     return;
   }
 
@@ -636,6 +654,7 @@ function renderHistory(data, options = {}) {
   if (shouldApplyInitialPosition) applyInitialPosition(data);
   if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
   lastRenderSignature = signature;
+  logPerf('render-end', { items: history.length, unread });
 }
 
 function scrollToFirstUnread() {
@@ -790,7 +809,7 @@ settingsBtn.addEventListener('click', () => {
 });
 
 document.getElementById('copyLogs').addEventListener('click', function() {
-  const log = _dbuf.join('\n');
+  const log = window.__popupPerf && window.__popupPerf.snapshot ? window.__popupPerf.snapshot().join('\n') : _dbuf.join('\n');
   navigator.clipboard.writeText(log).then(() => {
     this.textContent = '成功';
     setTimeout(() => { this.textContent = '拷贝'; }, 1500);
@@ -899,22 +918,22 @@ pollBtn.addEventListener('click', async () => {
 
 // Keep cold start on the skeleton; only use cached content after this browser session has warmed.
 (async function init() {
-  console.log('[POPUP] init-start', performance.now().toFixed(2));
+  logPerf('init-start');
   const storageDataPromise = chrome.storage.local.get([
     'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'openPositionMode', 'historyDays',
     'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules'
   ]);
   const cachedData = await readWarmPopupCache();
-  console.log('[POPUP] cache', cachedData ? 'hit' : 'miss', performance.now().toFixed(2));
+  logPerf(cachedData ? 'cache-hit' : 'cache-miss');
   if (cachedData) {
     applyConfig(cachedData);
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await waitForNextPaint();
     renderHistory(cachedData, { updateBadge: false, applyInitialPosition: true });
-    console.log('[POPUP] render-cache', performance.now().toFixed(2));
+    logPerf('render-cache');
   }
 
   const storageData = await storageDataPromise;
-  console.log('[POPUP] storage-ready', performance.now().toFixed(2));
+  logPerf('storage-ready');
   const reconciled = reconcileCachedReadIds(storageData, cachedData);
   const data = reconciled.data;
   await migrateReadAllBefore(data);
@@ -925,8 +944,9 @@ pollBtn.addEventListener('click', async () => {
   if (data.fontFamily && data.fontFamily !== normalizeFontFamily(data.fontFamily)) {
     chrome.storage.local.set({ fontFamily: 'system' });
   }
+  await waitForNextPaint();
   renderHistory(data, { applyInitialPosition: true });
-  console.log('[POPUP] render-storage', performance.now().toFixed(2));
+  logPerf('render-storage');
   cacheLoadedPopupData(data);
   markPopupSessionWarm();
   if (reconciled.changed) chrome.storage.local.set({ readIds: data.readIds });

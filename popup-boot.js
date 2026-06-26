@@ -1,5 +1,6 @@
 (function () {
-  console.log('[POPUP] boot-start', performance.now().toFixed(2));
+  const perfLog = window.__popupPerfLog || function () {};
+  perfLog('boot-start');
   var theme = localStorage.getItem('theme') || 'dark';
   var font = localStorage.getItem('fontFamily') || 'system';
   var size = localStorage.getItem('fontSize') || 'medium';
@@ -25,4 +26,5 @@
 
   document.documentElement.style.background =
     theme === 'green-dark' ? '#101410' : theme === 'chrome-dark' ? '#111317' : '#111111';
+  perfLog('boot-ready', { theme, font, size });
 })();
