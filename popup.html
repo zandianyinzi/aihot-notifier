@@ -398,26 +398,25 @@
     .setting-group {
       display: flex;
       flex-direction: column;
-      gap: 7px;
+      gap: 8px;
       padding-top: 2px;
     }
 
     .setting-group + .setting-group {
       border-top: 1px solid var(--border-light);
-      padding-top: 9px;
+      padding-top: 11px;
     }
 
     .setting-group-title {
-      font-size: 9px;
-      letter-spacing: 0.13em;
+      font-size: 10px;
+      letter-spacing: 0.11em;
       color: var(--text-3);
       line-height: 1;
-      text-transform: uppercase;
     }
 
     .setting-subtitle {
-      font-size: 11px;
-      color: var(--text-3);
+      font-size: 12px;
+      color: var(--text-2);
       line-height: 1;
     }
 
@@ -946,8 +945,8 @@
       </section>
 
       <section class="setting-group watch-settings">
-        <div class="setting-group-title">特别关注</div>
-        <div class="setting-subtitle">来源 / 作者 / 关键词</div>
+        <div class="setting-group-title">扩展</div>
+        <div class="setting-subtitle">特别关注</div>
         <div class="watch-rule-form">
           <input class="watch-input" id="watchSource" placeholder="来源，如 公众号 / X">
           <input class="watch-input" id="watchAuthor" placeholder="作者，如 数字生命卡兹克">
@@ -958,8 +957,7 @@
       </section>
 
       <section class="setting-group setting-group-debug">
-        <div class="setting-group-title">高级</div>
-        <div class="setting-subtitle">调试</div>
+        <div class="setting-group-title">调试</div>
         <div class="setting-row">
           <label>日志</label>
           <button class="btn-mini" id="copyLogs">拷贝</button>
