@@ -202,8 +202,8 @@ function advanceWatchNotifyState(state, now) {
 }
 
 function getWatchNotificationTitle(item, state) {
-  const ruleLabel = parseSourceParts(item.source || '').authorText || item.source || '特别关注';
-  return `特别关注：${ruleLabel}`;
+  const ruleLabel = parseSourceParts(item.source || '').authorText || item.source || '特关';
+  return `特关：${ruleLabel}`;
 }
 
 function createNotification(id, options) {
@@ -618,7 +618,7 @@ async function runTests() {
   globalThis.fetch = okFetch;
 
 
-  console.log('\n[场景11: 特别关注单独通知并排除普通通知]');
+  console.log('\n[场景11: 特关单独通知并排除普通通知]');
 
   storageData.enabled = true;
   storageData.history = [];
@@ -646,12 +646,12 @@ async function runTests() {
 
   await pollForUpdates();
 
-  assert(notificationsCreated.length === 1, `特别关注只发1条通知: ${notificationsCreated.length}`);
-  assert(notificationsCreated[0].title.includes('特别关注'), `特别关注通知标题: ${notificationsCreated[0]?.title}`);
-  assert(storageData.history[0].watchMatched === true, 'history标记特别关注命中');
-  assert(storageData.watchNotifyState['https://mp.weixin.qq.com/s/LVj2foSXi_hBRKxjuYaUyw'].notifyCount === 1, '特别关注通知状态记录次数');
+  assert(notificationsCreated.length === 1, `特关只发1条通知: ${notificationsCreated.length}`);
+  assert(notificationsCreated[0].title.includes('特关'), `特关通知标题: ${notificationsCreated[0]?.title}`);
+  assert(storageData.history[0].watchMatched === true, 'history标记特关命中');
+  assert(storageData.watchNotifyState['https://mp.weixin.qq.com/s/LVj2foSXi_hBRKxjuYaUyw'].notifyCount === 1, '特关通知状态记录次数');
 
-  console.log('\n[场景12: 特别关注每轮最多3条]');
+  console.log('\n[场景12: 特关每轮最多3条]');
 
   storageData.history = [];
   storageData.watchRules = [{ id: 'wr_x', source: 'X', author: '', keywords: [], enabled: true }];
@@ -675,10 +675,10 @@ async function runTests() {
 
   await pollForUpdates();
 
-  assert(notificationsCreated.length === 3, `特别关注每轮最多3条: ${notificationsCreated.length}`);
-  assert(storageData.history.filter(i => i.watchMatched).length === 4, '超过3条仍全部进入特别关注历史');
+  assert(notificationsCreated.length === 3, `特关每轮最多3条: ${notificationsCreated.length}`);
+  assert(storageData.history.filter(i => i.watchMatched).length === 4, '超过3条仍全部进入特关历史');
 
-  console.log('\n[场景13: 已查看特别关注不重复提醒]');
+  console.log('\n[场景13: 已查看特关不重复提醒]');
 
   notificationsCreated = [];
   const watchedUrl = storageData.history[0].url;
@@ -688,7 +688,7 @@ async function runTests() {
     viewedAt: new Date().toISOString()
   };
   await sendWatchNotifications([storageData.history[0]], storageData.watchNotifyState, new Date().toISOString());
-  assert(notificationsCreated.length === 0, '已查看的特别关注不重复通知');
+  assert(notificationsCreated.length === 0, '已查看的特关不重复通知');
 
   notificationsCreated = [];
   const repeatUrl = storageData.history[1].url;
@@ -699,7 +699,7 @@ async function runTests() {
     viewedAt: ''
   };
   await sendWatchNotifications([storageData.history[1]], storageData.watchNotifyState, new Date().toISOString());
-  assert(notificationsCreated[0].title.startsWith('特别关注：'), `重复提醒标题不含提醒二字: ${notificationsCreated[0]?.title}`);
+  assert(notificationsCreated[0].title.startsWith('特关：'), `重复提醒标题不含提醒二字: ${notificationsCreated[0]?.title}`);
   assert(!notificationsCreated[0].title.includes('提醒：'), `重复提醒标题删除提醒二字: ${notificationsCreated[0]?.title}`);
 
   console.log('\n[场景14: 停用规则后不再重复提醒]');

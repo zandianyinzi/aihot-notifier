@@ -147,8 +147,8 @@ function advanceWatchNotifyState(state, now) {
 }
 
 function getWatchNotificationTitle(item, state) {
-  const ruleLabel = parseSourceParts(item.source || '').authorText || item.source || '特别关注';
-  return `特别关注：${ruleLabel}`;
+  const ruleLabel = parseSourceParts(item.source || '').authorText || item.source || '特关';
+  return `特关：${ruleLabel}`;
 }
 
 function createNotification(id, options, url) {
