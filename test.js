@@ -137,6 +137,15 @@ function matchWatchRules(item, rules) {
   });
 }
 
+function getActiveWatchMatchIds(historyItem, watchRules) {
+  const normalizedRules = normalizeWatchRules(watchRules);
+  if (!historyItem || !historyItem.watchMatched || !Array.isArray(historyItem.watchRuleIds) || historyItem.watchRuleIds.length === 0) {
+    return [];
+  }
+  const activeRuleIds = new Set(normalizedRules.map(rule => rule.id));
+  return historyItem.watchRuleIds.filter(ruleId => activeRuleIds.has(ruleId));
+}
+
 function getNextWatchNotifyAt(firstMatchedAt, notifyCount, referenceNow) {
   const first = new Date(firstMatchedAt).getTime();
   if (!first) return '';
@@ -771,6 +780,15 @@ console.log('\n[特别关注-已查看抑制]');
   const nowMs = new Date('2026-06-26T02:10:00.000Z').getTime();
   assert(shouldNotifyWatchState(due, nowMs), '未查看且到期会提醒');
   assert(!shouldNotifyWatchState(viewed, nowMs), '已查看不再提醒');
+})();
+
+console.log('\n[特别关注-停用规则不回放旧提醒]');
+(function() {
+  const historyItem = { watchMatched: true, watchRuleIds: ['wr_x'], url: 'https://x.com/a/1' };
+  const activeRules = [{ id: 'wr_y', source: '公众号', author: '', keywords: [], enabled: true }];
+  const disabledSameRule = [{ id: 'wr_x', source: 'X', author: '', keywords: [], enabled: false }];
+  assert(matchWatchRules({ source: 'X：测试账号 (@test)', title: 'Test', summary: '' }, disabledSameRule).length === 0, '停用规则本身不再匹配新条目');
+  assert(getActiveWatchMatchIds(historyItem, activeRules).length === 0, '历史命中在当前无启用规则时不再参与提醒');
 })();
 
 // ===== 结果 =====

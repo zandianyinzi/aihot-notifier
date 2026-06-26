@@ -701,6 +701,19 @@ async function runTests() {
   await sendWatchNotifications([storageData.history[1]], storageData.watchNotifyState, new Date().toISOString());
   assert(notificationsCreated[0].title.startsWith('特别关注：'), `重复提醒标题不含提醒二字: ${notificationsCreated[0]?.title}`);
   assert(!notificationsCreated[0].title.includes('提醒：'), `重复提醒标题删除提醒二字: ${notificationsCreated[0]?.title}`);
+
+  console.log('\n[场景14: 停用规则后不再重复提醒]');
+
+  notificationsCreated = [];
+  storageData.watchRules = [{ id: 'wr_x', source: 'X', author: '', keywords: [], enabled: false }];
+  storageData.watchNotifyState[storageData.history[1].url] = {
+    ...storageData.watchNotifyState[storageData.history[1].url],
+    nextNotifyAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    notifyCount: 1,
+    viewedAt: ''
+  };
+  await pollForUpdates();
+  assert(notificationsCreated.length === 0, '停用规则后不再重复提醒');
   console.log(`\n========================================`);
   console.log(`结果: ${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);

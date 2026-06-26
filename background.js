@@ -93,6 +93,15 @@ function matchWatchRules(item, rules) {
   });
 }
 
+function getActiveWatchMatchIds(historyItem, watchRules) {
+  const normalizedRules = normalizeWatchRules(watchRules);
+  if (!historyItem || !historyItem.watchMatched || !Array.isArray(historyItem.watchRuleIds) || historyItem.watchRuleIds.length === 0) {
+    return [];
+  }
+  const activeRuleIds = new Set(normalizedRules.map(rule => rule.id));
+  return historyItem.watchRuleIds.filter(ruleId => activeRuleIds.has(ruleId));
+}
+
 function getNextWatchNotifyAt(firstMatchedAt, notifyCount, referenceNow) {
   const first = new Date(firstMatchedAt).getTime();
   if (!first) return '';
@@ -353,8 +362,8 @@ async function showNotification(items) {
 }
 
 async function checkWatchReminders() {
-  const { history = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'watchNotifyState']);
-  const watchItems = history.filter(item => item.watchMatched && watchNotifyState[item.url]);
+  const { history = [], watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'watchRules', 'watchNotifyState']);
+  const watchItems = history.filter(item => getActiveWatchMatchIds(item, watchRules).length > 0 && watchNotifyState[item.url]);
   if (watchItems.length === 0) return;
   const now = new Date().toISOString();
   const nextWatchNotifyState = { ...watchNotifyState };
