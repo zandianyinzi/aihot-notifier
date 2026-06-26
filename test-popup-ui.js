@@ -71,7 +71,7 @@ assert(/<details class="setting-group" data-setting-group="appearance">[\s\S]*?<
 assert(/<details class="setting-group watch-settings" data-setting-group="watch">[\s\S]*?<summary class="setting-group-title">特关<\/summary>[\s\S]*?id="watchRulesList"/.test(popupHtml), '特关分组默认收起并包含规则列表');
 assert(/<details class="setting-group setting-group-debug" data-setting-group="debug">[\s\S]*?<summary class="setting-group-title">调试<\/summary>[\s\S]*?id="copyLogs"[\s\S]*?拷贝/.test(popupHtml), '调试入口位于独立分组并使用拷贝文案');
 const settingGroupRule = popupHtml.match(/\.setting-group\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(settingGroupRule, 'gap', '8px'), '设置分组使用轻量间距');
+assert(hasDeclaration(settingGroupRule, 'gap', '7px'), '设置分组使用轻量间距');
 assert(/\.setting-group \+ \.setting-group\s*{[\s\S]*?border-top/.test(popupHtml), '设置分组之间使用细分割线');
 const settingGroupTitleRule = popupHtml.match(/\.setting-group-title\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupTitleRule, 'color', /var\(--text-3\)/), '所有分组标题使用灰色层级');
