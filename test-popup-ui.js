@@ -66,14 +66,16 @@ for (const [_, themeName, themeCss] of themeRules) {
 }
 
 console.log('\n[简约设置分组]');
-assert(/<section class="setting-group">[\s\S]*?常规[\s\S]*?id="enabled"[\s\S]*?id="interval"[\s\S]*?id="feedMode"[\s\S]*?id="historyDays"[\s\S]*?id="openPositionMode"/.test(popupHtml), '常规分组包含推送、频率、内容源、显示天数、定位');
-assert(/<section class="setting-group">[\s\S]*?外观[\s\S]*?id="theme"[\s\S]*?id="fontFamily"[\s\S]*?id="fontSize"[\s\S]*?<\/section>/.test(popupHtml), '外观分组只包含视觉设置');
-assert(/<section class="setting-group watch-settings">[\s\S]*?特关[\s\S]*?id="watchRulesList"/.test(popupHtml), '特关分组包含规则列表');
-assert(/<div class="setting-group-title">特关<\/div>/.test(popupHtml), '特关使用与常规、外观一致的分组标题样式');
-assert(/<section class="setting-group setting-group-debug">[\s\S]*?调试[\s\S]*?id="copyLogs"[\s\S]*?拷贝/.test(popupHtml), '调试入口位于独立分组并使用拷贝文案');
+assert(/<details class="setting-group" open data-setting-group="general">[\s\S]*?<summary class="setting-group-title">常规<\/summary>[\s\S]*?id="enabled"[\s\S]*?id="interval"[\s\S]*?id="feedMode"[\s\S]*?id="historyDays"[\s\S]*?id="openPositionMode"[\s\S]*?<\/details>/.test(popupHtml), '常规分组默认展开并包含推送、频率、内容源、显示天数、定位');
+assert(/<details class="setting-group" data-setting-group="appearance">[\s\S]*?<summary class="setting-group-title">外观<\/summary>[\s\S]*?id="theme"[\s\S]*?id="fontFamily"[\s\S]*?id="fontSize"[\s\S]*?<\/details>/.test(popupHtml), '外观分组默认收起且只包含视觉设置');
+assert(/<details class="setting-group watch-settings" data-setting-group="watch">[\s\S]*?<summary class="setting-group-title">特关<\/summary>[\s\S]*?id="watchRulesList"/.test(popupHtml), '特关分组默认收起并包含规则列表');
+assert(/<details class="setting-group setting-group-debug" data-setting-group="debug">[\s\S]*?<summary class="setting-group-title">调试<\/summary>[\s\S]*?id="copyLogs"[\s\S]*?拷贝/.test(popupHtml), '调试入口位于独立分组并使用拷贝文案');
 const settingGroupRule = popupHtml.match(/\.setting-group\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupRule, 'gap', '8px'), '设置分组使用轻量间距');
 assert(/\.setting-group \+ \.setting-group\s*{[\s\S]*?border-top/.test(popupHtml), '设置分组之间使用细分割线');
+const settingGroupTitleRule = popupHtml.match(/\.setting-group-title\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(settingGroupTitleRule, 'color', /var\(--text-3\)/), '所有分组标题使用灰色层级');
+assert(hasDeclaration(settingGroupTitleRule, 'font-weight', '600'), '分组标题保持统一的中等字重');
 assert(/\.btn-mini\s*{/.test(popupHtml), '设置面板文字按钮使用统一 btn-mini 基类');
 assert(!/\.btn-mini\.is-result-ok\s*{/.test(popupHtml), '拷贝按钮不使用额外成功态样式，保持整体按钮风格一致');
 const btnMiniHoverRule = popupHtml.match(/\.btn-mini:hover\s*{([\s\S]*?)}/i)?.[1] || '';

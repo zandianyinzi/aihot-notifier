@@ -399,6 +399,7 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
+      margin: 0;
       padding-top: 2px;
     }
 
@@ -407,17 +408,61 @@
       padding-top: 11px;
     }
 
-    .setting-group-title {
-      font-size: 10px;
-      letter-spacing: 0.11em;
-      color: var(--text-2);
-      line-height: 1;
+    .setting-group > summary {
+      list-style: none;
     }
 
-    .setting-subtitle {
-      font-size: 12px;
-      color: var(--text-2);
+    .setting-group > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .setting-group > summary::marker {
+      content: '';
+    }
+
+    .setting-group-title {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-3);
       line-height: 1;
+      cursor: pointer;
+    }
+
+    .setting-group-title::after {
+      content: '▾';
+      font-size: 10px;
+      color: var(--text-3);
+      transform: rotate(0deg);
+      transition: transform var(--motion-tap) ease, color var(--motion-tap) ease;
+    }
+
+    .setting-group[open] > .setting-group-title::after {
+      transform: rotate(-180deg);
+      color: var(--text-2);
+    }
+
+    .setting-group-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .setting-group:not([open]) > .setting-group-body {
+      display: none;
+    }
+
+    .setting-group-title:focus-visible {
+      outline: 1px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 4px;
     }
 
     .setting-row {
@@ -495,10 +540,6 @@
       background: var(--bg);
       color: var(--accent);
       border-color: var(--accent);
-    }
-
-    .watch-settings {
-      gap: 8px;
     }
 
     .watch-rule-form {
@@ -870,98 +911,106 @@
 
   <div class="settings" id="settingsPanel">
     <div class="settings-inner">
-      <section class="setting-group">
-        <div class="setting-group-title">常规</div>
-        <div class="setting-row">
-          <label>推送通知</label>
-          <label class="switch">
-            <input type="checkbox" id="enabled">
-            <span class="switch-track"></span>
-          </label>
+      <details class="setting-group" open data-setting-group="general">
+        <summary class="setting-group-title">常规</summary>
+        <div class="setting-group-body">
+          <div class="setting-row">
+            <label>推送通知</label>
+            <label class="switch">
+              <input type="checkbox" id="enabled">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <label>检查频率</label>
+            <select class="select-mini" id="interval">
+              <option value="2">2 分钟</option>
+              <option value="5">5 分钟</option>
+              <option value="15">15 分钟</option>
+              <option value="30">30 分钟</option>
+              <option value="60">60 分钟</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>内容源</label>
+            <select class="select-mini" id="feedMode">
+              <option value="selected">精选</option>
+              <option value="all">全部</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>显示天数</label>
+            <select class="select-mini" id="historyDays">
+              <option value="1">1 天</option>
+              <option value="2" selected>2 天</option>
+              <option value="3">3 天</option>
+              <option value="5">5 天</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>定位</label>
+            <select class="select-mini" id="openPositionMode">
+              <option value="free">自由浏览</option>
+              <option value="unread">未读优先</option>
+            </select>
+          </div>
         </div>
-        <div class="setting-row">
-          <label>检查频率</label>
-          <select class="select-mini" id="interval">
-            <option value="2">2 分钟</option>
-            <option value="5">5 分钟</option>
-            <option value="15">15 分钟</option>
-            <option value="30">30 分钟</option>
-            <option value="60">60 分钟</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>内容源</label>
-          <select class="select-mini" id="feedMode">
-            <option value="selected">精选</option>
-            <option value="all">全部</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>显示天数</label>
-          <select class="select-mini" id="historyDays">
-            <option value="1">1 天</option>
-            <option value="2" selected>2 天</option>
-            <option value="3">3 天</option>
-            <option value="5">5 天</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>定位</label>
-          <select class="select-mini" id="openPositionMode">
-            <option value="free">自由浏览</option>
-            <option value="unread">未读优先</option>
-          </select>
-        </div>
-      </section>
+      </details>
 
-      <section class="setting-group">
-        <div class="setting-group-title">外观</div>
-        <div class="setting-row">
-          <label>主题</label>
-          <select class="select-mini" id="theme">
-            <option value="dark">墨夜</option>
-            <option value="green-dark">暗森</option>
-            <option value="chrome-dark">铬墨</option>
-          </select>
+      <details class="setting-group" data-setting-group="appearance">
+        <summary class="setting-group-title">外观</summary>
+        <div class="setting-group-body">
+          <div class="setting-row">
+            <label>主题</label>
+            <select class="select-mini" id="theme">
+              <option value="dark">墨夜</option>
+              <option value="green-dark">暗森</option>
+              <option value="chrome-dark">铬墨</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>字体</label>
+            <select class="select-mini" id="fontFamily">
+              <option value="system">系统</option>
+              <option value="noto-serif">宋体</option>
+              <option value="lxgw">楷体</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>字号</label>
+            <select class="select-mini" id="fontSize">
+              <option value="small">小</option>
+              <option value="medium">默认</option>
+              <option value="large">大</option>
+              <option value="xlarge">特大</option>
+              <option value="xxlarge">超大</option>
+            </select>
+          </div>
         </div>
-        <div class="setting-row">
-          <label>字体</label>
-          <select class="select-mini" id="fontFamily">
-            <option value="system">系统</option>
-            <option value="noto-serif">宋体</option>
-            <option value="lxgw">楷体</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label>字号</label>
-          <select class="select-mini" id="fontSize">
-            <option value="small">小</option>
-            <option value="medium">默认</option>
-            <option value="large">大</option>
-            <option value="xlarge">特大</option>
-            <option value="xxlarge">超大</option>
-          </select>
-        </div>
-      </section>
+      </details>
 
-      <section class="setting-group watch-settings">
-        <div class="setting-group-title">特关</div>
-        <div class="watch-rule-form">
-          <input class="watch-input" id="watchSource" placeholder="来源，如 公众号 / X">
-          <input class="watch-input" id="watchAuthor" placeholder="作者，如 数字生命卡兹克">
-          <input class="watch-input watch-input-full" id="watchKeywords" placeholder="关键词，逗号分隔，可选">
-          <button class="btn-mini watch-add-btn" id="addWatchRule">添加</button>
+      <details class="setting-group watch-settings" data-setting-group="watch">
+        <summary class="setting-group-title">特关</summary>
+        <div class="setting-group-body">
+          <div class="watch-rule-form">
+            <input class="watch-input" id="watchSource" placeholder="来源，如 公众号 / X">
+            <input class="watch-input" id="watchAuthor" placeholder="作者，如 数字生命卡兹克">
+            <input class="watch-input watch-input-full" id="watchKeywords" placeholder="关键词，逗号分隔，可选">
+            <button class="btn-mini watch-add-btn" id="addWatchRule">添加</button>
+          </div>
+          <div class="watch-rules-list" id="watchRulesList"></div>
         </div>
-        <div class="watch-rules-list" id="watchRulesList"></div>
-      </section>
+      </details>
 
-      <section class="setting-group setting-group-debug">
-        <div class="setting-group-title">调试</div>
-        <div class="setting-row">
-          <label>日志</label>
-          <button class="btn-mini" id="copyLogs">拷贝</button>
+      <details class="setting-group setting-group-debug" data-setting-group="debug">
+        <summary class="setting-group-title">调试</summary>
+        <div class="setting-group-body">
+          <div class="setting-row">
+            <label>日志</label>
+            <button class="btn-mini" id="copyLogs">拷贝</button>
+          </div>
         </div>
-      </section>
+      </details>
     </div>
   </div>
 
