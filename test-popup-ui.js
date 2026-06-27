@@ -79,7 +79,7 @@ const settingGroupSiblingRule = popupHtml.match(/\.setting-group \+ \.setting-gr
 assert(/border-top\s*:\s*1px solid/.test(settingGroupSiblingRule), '设置分组之间使用细分割线');
 assert(hasDeclaration(settingGroupSiblingRule, 'padding-top', '0'), '设置分组分割线后不再额外撑高折叠态');
 const settingGroupTitleRule = popupHtml.match(/\.setting-group-title\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(settingGroupTitleRule, 'height', '32px'), '设置分组标题固定 32px 高度');
+assert(hasDeclaration(settingGroupTitleRule, 'height', '36px'), '设置分组标题固定 36px 高度');
 assert(hasDeclaration(settingGroupTitleRule, 'padding', '0'), '设置分组标题不使用垂直 padding 干扰居中');
 assert(hasDeclaration(settingGroupTitleRule, 'color', /var\(--text-2\)/), '所有分组标题使用次级灰阶');
 assert(hasDeclaration(settingGroupTitleRule, 'font-weight', '500'), '分组标题保持较轻的中等字重');
@@ -92,7 +92,7 @@ assert(hasDeclaration(settingGroupOpenHoverRule, 'background', /transparent/), '
 const settingGroupOpenRule = popupHtml.match(/\.setting-group\[open\] > \.setting-group-title\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupOpenRule, 'color', /var\(--accent\)/), '展开态标题保持常驻主题色');
 const settingGroupBodyRule = popupHtml.match(/\.setting-group-body\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(settingGroupBodyRule, 'margin', /4px\s+0\s+12px/), '展开内容区与 32px 标题行分离设置间距');
+assert(hasDeclaration(settingGroupBodyRule, 'margin', /4px\s+0\s+12px/), '展开内容区与固定标题行分离设置间距');
 const settingRowRule = popupHtml.match(/\.setting-row\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingRowRule, 'min-height', '28px'), '设置行使用稳定最小高度对齐开关与下拉控件');
 assert(/\.btn-mini\s*{/.test(popupHtml), '设置面板文字按钮使用统一 btn-mini 基类');
