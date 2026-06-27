@@ -230,13 +230,6 @@ function getWatchRuleLabel(rule) {
   return parts.join(' · ') || '未配置规则';
 }
 
-function getWatchRuleMain(rule) {
-  const parts = [];
-  if (rule.source) parts.push(rule.source);
-  if (rule.author) parts.push(rule.author);
-  return parts.join(' · ') || '任意来源';
-}
-
 function mergeWatchRuleInput(rules, input) {
   const normalized = normalizeWatchRules(rules);
   const source = String(input.source || '').trim();
@@ -280,7 +273,11 @@ function renderWatchRules(rules) {
   watchRulesList.innerHTML = normalized.map(rule => `
     <div class="watch-rule-card ${rule.enabled ? '' : 'disabled'}" data-rule-id="${escapeHtml(rule.id)}">
       <div class="watch-rule-content" title="${escapeHtml(getWatchRuleLabel(rule))}">
-        <div class="watch-rule-main">${escapeHtml(getWatchRuleMain(rule))}</div>
+        <div class="watch-rule-head">
+          <span class="watch-rule-source">${escapeHtml(rule.source || '任意来源')}</span>
+          <span class="watch-rule-author">${escapeHtml(rule.author || '任意作者')}</span>
+        </div>
+        <div class="watch-rule-main">${escapeHtml(rule.keywords.length > 0 ? `关键词 ${rule.keywords.length} 项` : '未限定关键词')}</div>
         ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag">${escapeHtml(keyword)}<button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词">×</button></span>`).join('')}</div>` : ''}
       </div>
       <div class="watch-rule-actions">

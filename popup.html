@@ -646,8 +646,8 @@
     }
 
     .watch-rules-list {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      display: flex;
+      flex-direction: column;
       gap: 6px;
       max-height: 118px;
       overflow-y: auto;
@@ -660,14 +660,26 @@
 
     .watch-rule-card {
       display: flex;
-      gap: 6px;
-      align-items: center;
+      align-items: flex-start;
+      gap: 10px;
       width: 100%;
       min-width: 0;
-      padding: 5px 7px;
+      padding: 8px 8px 8px 11px;
       border: 1px solid var(--border-light);
       border-radius: 6px;
       background: var(--bg);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .watch-rule-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--accent);
     }
 
     .watch-rule-card.disabled {
@@ -679,13 +691,41 @@
       flex: 1 1 auto;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 5px;
+    }
+
+    .watch-rule-head {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .watch-rule-source {
+      flex: 0 0 auto;
+      font-size: 10px;
+      color: var(--text-3);
+      white-space: nowrap;
+    }
+
+    .watch-rule-author {
+      min-width: 0;
+      flex: 1 1 auto;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .watch-rule-main {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--text-2);
       line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .watch-keyword-tags {
@@ -697,13 +737,13 @@
     .watch-keyword-tag {
       display: inline-flex;
       align-items: center;
-      gap: 3px;
       font-size: 10px;
       line-height: 1.2;
       color: var(--text-3);
       border: 1px solid var(--border-light);
       border-radius: 3px;
-      padding: 1px 5px;
+      padding: 1px 4px 1px 5px;
+      gap: 4px;
     }
 
     .watch-keyword-remove {
@@ -722,8 +762,22 @@
 
     .watch-rule-actions {
       display: inline-flex;
-      gap: 4px;
+      gap: 6px;
+      align-items: center;
       flex: 0 0 auto;
+      margin-left: auto;
+      padding-top: 1px;
+    }
+
+    .watch-rule-actions .watch-rule-btn {
+      min-width: 0;
+      padding-inline: 7px;
+      height: 22px;
+      line-height: 1;
+    }
+
+    .watch-rule-actions .watch-rule-btn[data-action="toggle"] {
+      min-width: 44px;
     }
 
     .watch-rule-actions .watch-rule-btn[data-action="delete"] {
@@ -738,6 +792,17 @@
       color: var(--state-fail);
       background: var(--state-fail-softer);
       border-color: var(--state-fail-soft);
+    }
+
+    .watch-rule-text {
+      padding: 10px 8px;
+      color: var(--text-3);
+      font-size: 11px;
+      line-height: 1.35;
+      text-align: center;
+      border: 1px dashed var(--border-light);
+      border-radius: 6px;
+      background: var(--bg);
     }
 
     .item.watch-item {
