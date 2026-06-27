@@ -71,9 +71,13 @@ assert(/<details class="setting-group" data-setting-group="appearance">[\s\S]*?<
 assert(/<details class="setting-group watch-settings" data-setting-group="watch">[\s\S]*?<summary class="setting-group-title">特关<\/summary>[\s\S]*?id="watchRulesList"/.test(popupHtml), '特关分组默认收起并包含规则列表');
 assert(/<details class="setting-group setting-group-debug" data-setting-group="debug">[\s\S]*?<summary class="setting-group-title">调试<\/summary>[\s\S]*?id="copyLogs"[\s\S]*?拷贝/.test(popupHtml), '调试入口位于独立分组并使用拷贝文案');
 assert(/settingGroups\.forEach\(group => \{[\s\S]*?group\.addEventListener\('toggle'/.test(popupJs), '设置分组支持互斥展开');
+const settingsInnerRule = popupHtml.match(/\.settings-inner\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(settingsInnerRule, 'gap', '0'), '设置面板折叠列表不使用额外纵向 gap');
 const settingGroupRule = popupHtml.match(/\.setting-group\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupRule, 'gap', '0'), '设置分组折叠态不引入额外 gap');
-assert(/\.setting-group \+ \.setting-group\s*{[\s\S]*?border-top/.test(popupHtml), '设置分组之间使用细分割线');
+const settingGroupSiblingRule = popupHtml.match(/\.setting-group \+ \.setting-group\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(/border-top\s*:\s*1px solid/.test(settingGroupSiblingRule), '设置分组之间使用细分割线');
+assert(hasDeclaration(settingGroupSiblingRule, 'padding-top', '0'), '设置分组分割线后不再额外撑高折叠态');
 const settingGroupTitleRule = popupHtml.match(/\.setting-group-title\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupTitleRule, 'height', '32px'), '设置分组标题固定 32px 高度');
 assert(hasDeclaration(settingGroupTitleRule, 'padding', '0'), '设置分组标题不使用垂直 padding 干扰居中');
