@@ -379,15 +379,15 @@
     }
 
     .settings.open {
-      max-height: 560px;
+      max-height: 600px;
     }
 
     .settings-inner {
-      padding: 12px 18px 14px;
+      padding: 12px 18px 18px;
       display: flex;
       flex-direction: column;
       gap: 4px;
-      max-height: 532px;
+      max-height: 572px;
       overflow-y: auto;
     }
 
@@ -649,7 +649,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
-      max-height: 118px;
+      max-height: 228px;
       overflow-y: auto;
       padding-right: 2px;
     }
@@ -659,12 +659,15 @@
     .watch-rules-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
     .watch-rule-card {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-rows: auto auto;
+      column-gap: 10px;
+      row-gap: 5px;
+      align-items: start;
       width: 100%;
       min-width: 0;
-      padding: 8px 8px 8px 11px;
+      padding: 9px 8px 9px 11px;
       border: 1px solid var(--border-light);
       border-radius: 6px;
       background: var(--bg);
@@ -687,8 +690,9 @@
     }
 
     .watch-rule-content {
+      grid-column: 1;
+      grid-row: 1 / span 2;
       min-width: 0;
-      flex: 1 1 auto;
       display: flex;
       flex-direction: column;
       gap: 5px;
@@ -714,15 +718,6 @@
       font-size: 11px;
       font-weight: 500;
       color: var(--text);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .watch-rule-main {
-      font-size: 10px;
-      color: var(--text-2);
-      line-height: 1.35;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -761,12 +756,13 @@
     }
 
     .watch-rule-actions {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      justify-self: end;
+      align-self: start;
       display: inline-flex;
       gap: 6px;
       align-items: center;
-      flex: 0 0 auto;
-      margin-left: auto;
-      padding-top: 1px;
     }
 
     .watch-rule-actions .watch-rule-btn {

@@ -277,7 +277,6 @@ function renderWatchRules(rules) {
           <span class="watch-rule-source">${escapeHtml(rule.source || '任意来源')}</span>
           <span class="watch-rule-author">${escapeHtml(rule.author || '任意作者')}</span>
         </div>
-        <div class="watch-rule-main">${escapeHtml(rule.keywords.length > 0 ? `关键词 ${rule.keywords.length} 项` : '未限定关键词')}</div>
         ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag">${escapeHtml(keyword)}<button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词">×</button></span>`).join('')}</div>` : ''}
       </div>
       <div class="watch-rule-actions">
