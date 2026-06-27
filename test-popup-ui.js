@@ -19,10 +19,11 @@ function assert(condition, msg) {
 }
 
 function hasDeclaration(css, property, valuePattern) {
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const value = valuePattern instanceof RegExp
     ? valuePattern.source
     : valuePattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`${property}\\s*:\\s*${value}\\s*(?:;|$)`, 'i').test(css);
+  return new RegExp(`(?:^|;)\\s*${escapedProperty}\\s*:\\s*${value}\\s*(?:;|$)`, 'i').test(css);
 }
 
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
@@ -132,6 +133,7 @@ assert(!/id="watchList"/.test(popupHtml), '不再使用独立特关列表容器'
 assert(/id="watchRulesList"/.test(popupHtml), '存在特关规则列表');
 assert(/id="watchSource"/.test(popupHtml), '存在来源输入框');
 assert(/id="watchAuthor"/.test(popupHtml), '存在作者输入框');
+assert(/id="watchAuthor"\s+placeholder="作者，如 钱袋子"/.test(popupHtml), '作者输入框示例使用钱袋子');
 assert(/id="watchKeywords"/.test(popupHtml), '存在关键词输入框');
 assert(/<input class="watch-input watch-input-full" id="watchKeywords"[\s\S]*?<button class="btn-mini watch-add-btn" id="addWatchRule">添加<\/button>/.test(popupHtml), '关键词输入框与添加按钮位于同一行');
 assert(!/watchSourceEl\.value\s*=\s*''/.test(popupJs), '添加后保留来源输入，方便继续补充关键词');
@@ -163,8 +165,8 @@ assert(/'readAllBeforeByMode', 'watchRules'/.test(popupJs), '初始化时从 chr
 assert(/renderWatchRules\(data\.watchRules \|\| \[\]\)/.test(popupJs), '加载配置时渲染已保存规则');
 assert(/function normalizeText\(value\)/.test(popupJs), 'popup 规则合并具备文本归一化函数');
 const watchRulesListScrollRule = popupHtml.match(/\.watch-rules-list\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(watchRulesListScrollRule, 'height', '168px'), '特关规则列表使用固定可视槽位，避免随规则数量自动撑开');
-assert(hasDeclaration(watchRulesListScrollRule, 'max-height', '168px'), '特关规则列表高度上限与固定槽位一致');
+assert(!hasDeclaration(watchRulesListScrollRule, 'height', '168px'), '特关规则列表不固定高度，删除规则后随内容收缩');
+assert(hasDeclaration(watchRulesListScrollRule, 'max-height', '168px'), '特关规则列表只保留高度上限，规则较多时才滚动');
 assert(hasDeclaration(watchRulesListScrollRule, 'overflow-y', 'auto'), '特关规则列表可滚动');
 const watchInputHoverRule = popupHtml.match(/\.watch-input:hover\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(watchInputHoverRule, 'background', /var\(--bg\)/), '特关输入框 hover 不改变背景色');
