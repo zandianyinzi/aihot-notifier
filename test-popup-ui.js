@@ -86,10 +86,10 @@ assert(hasDeclaration(settingGroupTitleRule, 'color', /var\(--text-2\)/), '所�
 assert(hasDeclaration(settingGroupTitleRule, 'font-weight', '500'), '分组标题保持较轻的中等字重');
 const settingGroupTitleHoverRule = popupHtml.match(/\.setting-group-title:hover\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupTitleHoverRule, 'color', /var\(--accent\)/), '分组标题 hover 使用主题色文字');
-assert(hasDeclaration(settingGroupTitleHoverRule, 'background', /color-mix\(in srgb, var\(--accent\) 6%, transparent\)/), '分组标题 hover 使用极轻主题色底色');
+assert(hasDeclaration(settingGroupTitleHoverRule, 'background', /transparent/), '分组标题 hover 不改变背景');
 const settingGroupOpenHoverRule = popupHtml.match(/\.setting-group\[open\] > \.setting-group-title:hover\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupOpenHoverRule, 'color', /var\(--accent\)/), '展开态标题 hover 仍使用主题色文字');
-assert(hasDeclaration(settingGroupOpenHoverRule, 'background', /color-mix\(in srgb, var\(--accent\) 6%, transparent\)/), '展开态标题 hover 也使用极轻主题色底色');
+assert(hasDeclaration(settingGroupOpenHoverRule, 'background', /transparent/), '展开态标题 hover 也不改变背景');
 const settingGroupOpenRule = popupHtml.match(/\.setting-group\[open\] > \.setting-group-title\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(settingGroupOpenRule, 'color', /var\(--accent\)/), '展开态标题保持常驻主题色');
 const settingGroupBodyRule = popupHtml.match(/\.setting-group-body\s*{([\s\S]*?)}/i)?.[1] || '';
