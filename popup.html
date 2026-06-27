@@ -386,7 +386,7 @@
       padding: 12px 18px 14px;
       display: flex;
       flex-direction: column;
-      gap: 0;
+      gap: 4px;
       max-height: 532px;
       overflow-y: auto;
     }
@@ -427,11 +427,11 @@
       flex-direction: column;
       gap: 0;
       margin: 0;
-      padding-top: 2px;
+      padding-top: 0;
     }
 
     .setting-group + .setting-group {
-      border-top: 1px solid color-mix(in srgb, var(--accent) 8%, var(--border-light));
+      border-top: 0;
       padding-top: 0;
     }
 
@@ -452,7 +452,7 @@
       border: 0;
       background: transparent;
       padding: 0;
-      height: 36px;
+      height: 38px;
       width: 100%;
       display: flex;
       align-items: center;
@@ -478,12 +478,12 @@
 
     .setting-group-title:hover {
       color: var(--accent);
-      background: transparent;
+      background: color-mix(in srgb, var(--accent) 6%, transparent);
     }
 
     .setting-group[open] > .setting-group-title:hover {
       color: var(--accent);
-      background: transparent;
+      background: color-mix(in srgb, var(--accent) 6%, transparent);
     }
 
     .setting-group[open] > .setting-group-title::after {
