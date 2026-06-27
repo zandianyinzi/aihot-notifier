@@ -662,8 +662,7 @@
     .watch-rule-card {
       display: grid;
       flex: 0 0 auto;
-      grid-template-columns: minmax(0, 1fr) auto;
-      column-gap: 10px;
+      grid-template-columns: minmax(0, 1fr);
       align-items: start;
       width: 100%;
       min-width: 0;
@@ -690,7 +689,7 @@
     }
 
     .watch-rule-content {
-      grid-column: 1;
+      grid-column: 1 / -1;
       min-width: 0;
       display: flex;
       flex-direction: column;
@@ -698,6 +697,7 @@
     }
 
     .watch-rule-head {
+      grid-column: 1 / -1;
       display: flex;
       align-items: baseline;
       gap: 8px;
@@ -755,9 +755,8 @@
     }
 
     .watch-rule-actions {
-      grid-column: 2;
-      justify-self: end;
-      align-self: start;
+      margin-left: auto;
+      flex: 0 0 auto;
       display: inline-flex;
       gap: 6px;
       align-items: center;

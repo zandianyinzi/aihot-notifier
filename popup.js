@@ -276,21 +276,24 @@ function renderWatchRules(rules) {
         <div class="watch-rule-head">
           <span class="watch-rule-source">${escapeHtml(rule.source || '任意来源')}</span>
           <span class="watch-rule-author">${escapeHtml(rule.author || '任意作者')}</span>
+          <div class="watch-rule-actions">
+            <button class="btn-mini watch-rule-btn" data-action="toggle">${rule.enabled ? '停用' : '启用'}</button>
+            <button class="btn-mini watch-rule-btn" data-action="delete" title="删除">×</button>
+          </div>
         </div>
         ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag">${escapeHtml(keyword)}<button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词">×</button></span>`).join('')}</div>` : ''}
-      </div>
-      <div class="watch-rule-actions">
-        <button class="btn-mini watch-rule-btn" data-action="toggle">${rule.enabled ? '停用' : '启用'}</button>
-        <button class="btn-mini watch-rule-btn" data-action="delete" title="删除">×</button>
       </div>
     </div>
   `).join('');
 }
 
-async function saveWatchRules(rules) {
+async function saveWatchRules(rules, options = {}) {
   const normalized = normalizeWatchRules(rules);
   await chrome.storage.local.set({ watchRules: normalized });
   renderWatchRules(normalized);
+  if (options.scrollToEnd && watchRulesList) {
+    watchRulesList.scrollTop = watchRulesList.scrollHeight;
+  }
 }
 
 function renderItemHtml(item, isUnread, options = {}) {
@@ -832,7 +835,7 @@ if (addWatchRuleBtn) {
     const { watchRules = [] } = await chrome.storage.local.get('watchRules');
     const nextRules = mergeWatchRuleInput(watchRules, { source, author, keywords });
     watchKeywordsEl.value = '';
-    await saveWatchRules(nextRules);
+    await saveWatchRules(nextRules, { scrollToEnd: true });
   });
 }
 

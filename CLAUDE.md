@@ -29,6 +29,7 @@ node test-e2e.js
 
 - 设置面板使用原生折叠分组，默认只有 `常规` 展开，其他组收起。
 - 分组标题、按钮和标签沿用主题色与低对比度层级，不把说明性文字做成高亮主视觉。
+- 特关规则项首行保持 `来源 / 作者 / 停用 / 删除` 同行：来源完整显示，作者在操作按钮前省略；关键词只在存在时另起一行并横向展开，不为空关键词预留位置。
 - 除输入框外，弹窗内其它交互区域不应出现文本插入光标。
 
 ## 关键设计决策
@@ -55,6 +56,6 @@ GET https://aihot.virxact.com/api/public/items?mode={selected|all}&since={ISO-86
 
 ## 发布
 
-- GitHub: https://github.com/nayexinqing/aihot-notifier
-- 隐私政策: https://nayexinqing.github.io/aihot-notifier/privacy-policy.html
+- GitHub: https://github.com/zandianyinzi/aihot-notifier
+- 隐私政策: https://zandianyinzi.github.io/aihot-notifier/privacy-policy.html
 - Chrome Web Store 素材在 `store/` 目录
