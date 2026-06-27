@@ -491,7 +491,7 @@
       color: var(--accent);
     }
 
-    .setting-group[open] > .setting-group-title {
+.setting-group[open] > .setting-group-title {
       color: var(--accent);
       background: transparent;
     }
@@ -597,7 +597,7 @@
 
     .watch-rule-form {
       display: grid;
-      grid-template-columns: 1fr 1fr auto;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 6px;
     }
 
@@ -628,13 +628,26 @@
       border-color: var(--accent);
     }
 
-    .watch-input-full {
+    .watch-action-row {
       grid-column: 1 / 3;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .watch-action-row .watch-input-full {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .watch-action-row .watch-add-btn {
+      flex: 0 0 auto;
     }
 
     .watch-rules-list {
-      display: flex;
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 6px;
       max-height: 118px;
       overflow-y: auto;
@@ -646,10 +659,11 @@
     .watch-rules-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
     .watch-rule-card {
-      display: inline-flex;
+      display: flex;
       gap: 6px;
       align-items: center;
-      max-width: 100%;
+      width: 100%;
+      min-width: 0;
       padding: 5px 7px;
       border: 1px solid var(--border-light);
       border-radius: 6px;
@@ -1052,8 +1066,10 @@
           <div class="watch-rule-form">
             <input class="watch-input" id="watchSource" placeholder="来源，如 公众号 / X">
             <input class="watch-input" id="watchAuthor" placeholder="作者，如 数字生命卡兹克">
-            <input class="watch-input watch-input-full" id="watchKeywords" placeholder="关键词，逗号分隔，可选">
-            <button class="btn-mini watch-add-btn" id="addWatchRule">添加</button>
+            <div class="watch-action-row">
+              <input class="watch-input watch-input-full" id="watchKeywords" placeholder="关键词，逗号分隔，可选">
+              <button class="btn-mini watch-add-btn" id="addWatchRule">添加</button>
+            </div>
           </div>
           <div class="watch-rules-list" id="watchRulesList"></div>
         </div>
