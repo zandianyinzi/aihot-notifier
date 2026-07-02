@@ -48,7 +48,7 @@ const CATEGORY_MAP = {
   'tips': { cls: 'cat-tips', label: '技巧' }
 };
 
-const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark']);
+const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark', 'clear-light', 'slate-night']);
 const DEFAULT_HISTORY_DAYS = 2;
 const BADGE_COLOR = '#e2231a';
 const POPUP_CACHE_KEY = 'popupDataSnapshot';
@@ -521,8 +521,15 @@ async function migrateReadAllBefore(data) {
 function applyTheme(theme) {
   theme = normalizeTheme(theme);
   document.documentElement.setAttribute('data-theme', theme);
-  document.documentElement.style.background =
-    theme === 'green-dark' ? '#101410' : theme === 'chrome-dark' ? '#111317' : '#111111';
+  const themeBackgrounds = {
+    'dark': '#111111',
+    'green-dark': '#101410',
+    'chrome-dark': '#111317',
+    'clear-light': '#ffffff',
+    'slate-night': '#0d1117'
+  };
+  document.documentElement.style.background = themeBackgrounds[theme] || '#111111';
+  document.documentElement.style.colorScheme = theme === 'clear-light' ? 'light' : 'dark';
   localStorage.setItem('theme', theme);
 }
 
@@ -979,3 +986,4 @@ pollBtn.addEventListener('click', async () => {
   markPopupSessionWarm();
   if (reconciled.changed) chrome.storage.local.set({ readIds: data.readIds });
 })();
+

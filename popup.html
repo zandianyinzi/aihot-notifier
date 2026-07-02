@@ -115,6 +115,78 @@
       --shadow: 0 2px 8px rgba(0,0,0,0.42);
     }
 
+
+    [data-theme="clear-light"] {
+      --color-scheme: light;
+      --bg: #f5f8fb;
+      --bg-sub: #eaf0f6;
+      --bg-hover: #e2eaf2;
+      --bg-item-hover: #eef4f9;
+      --bg-unread: #edf5fb;
+      --border: #d5dee8;
+      --border-light: #e1e8ef;
+      --text: #202833;
+      --text-2: #5f6b7a;
+      --text-3: #8793a3;
+      --text-unread: #202833;
+      --text-unread-2: #5f6b7a;
+      --text-unread-3: #8793a3;
+      --text-read: #7d8896;
+      --text-read-hover: #5f6b7a;
+      --accent: #6f8fab;
+      --accent-soft: rgba(111,143,171,0.14);
+      --hot: #d85b2a;
+      --hot-soft: rgba(216,91,42,0.10);
+      --state-ok: #4f8f7a;
+      --state-ok-soft: rgba(79,143,122,0.18);
+      --state-ok-softer: rgba(79,143,122,0.10);
+      --state-fail: #bd5a55;
+      --state-fail-soft: rgba(189,90,85,0.17);
+      --state-fail-softer: rgba(189,90,85,0.09);
+      --cat-model: #7f79bd;
+      --cat-products: #5f86b8;
+      --cat-industry: #a97d35;
+      --cat-paper: #4f8f7a;
+      --cat-tips: #bd6a64;
+      --cat-default: #7b8795;
+      --shadow: 0 1px 3px rgba(42,55,70,0.10);
+    }
+
+    [data-theme="slate-night"] {
+      --color-scheme: dark;
+      --bg: #0d1117;
+      --bg-sub: #151b23;
+      --bg-hover: #262c36;
+      --bg-item-hover: #151b23;
+      --bg-unread: #101923;
+      --border: #3d444d;
+      --border-light: #3d444db3;
+      --text: #f0f6fc;
+      --text-2: #9198a1;
+      --text-3: #6e7681;
+      --text-unread: #f0f6fc;
+      --text-unread-2: #9198a1;
+      --text-unread-3: #6e7681;
+      --text-read: #9198a1;
+      --text-read-hover: #f0f6fc;
+      --accent: #4493f8;
+      --accent-soft: rgba(68,147,248,0.15);
+      --hot: #ff7a45;
+      --hot-soft: rgba(255,122,69,0.14);
+      --state-ok: #3fb950;
+      --state-ok-soft: rgba(63,185,80,0.22);
+      --state-ok-softer: rgba(63,185,80,0.13);
+      --state-fail: #f85149;
+      --state-fail-soft: rgba(248,81,73,0.18);
+      --state-fail-softer: rgba(248,81,73,0.10);
+      --cat-model: #a371f7;
+      --cat-products: #4493f8;
+      --cat-industry: #d29922;
+      --cat-paper: #3fb950;
+      --cat-tips: #f85149;
+      --cat-default: #9198a1;
+      --shadow: 0 8px 24px rgba(1,4,9,0.45);
+    }
     [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --item-pad: 12px; }
     [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --item-pad: 14px; }
     [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --item-pad: 16px; }
@@ -1094,6 +1166,8 @@
               <option value="dark">墨夜</option>
               <option value="green-dark">暗森</option>
               <option value="chrome-dark">铬墨</option>
+              <option value="clear-light">晨雾</option>
+              <option value="slate-night">石青</option>
             </select>
           </div>
           <div class="setting-row">
@@ -1121,10 +1195,10 @@
         <summary class="setting-group-title">特关</summary>
         <div class="setting-group-body">
           <div class="watch-rule-form">
-            <input class="watch-input" id="watchSource" placeholder="来源，如 公众号 / X">
-            <input class="watch-input" id="watchAuthor" placeholder="作者，如 钱袋子">
+            <input class="watch-input" id="watchSource" placeholder="来源">
+            <input class="watch-input" id="watchAuthor" placeholder="作者">
             <div class="watch-action-row">
-              <input class="watch-input watch-input-full" id="watchKeywords" placeholder="关键词，逗号分隔，可选">
+              <input class="watch-input watch-input-full" id="watchKeywords" placeholder="关键词，逗号分隔">
               <button class="btn-mini watch-add-btn" id="addWatchRule">添加</button>
             </div>
           </div>
@@ -1167,3 +1241,4 @@
   <script src="popup.js"></script>
 </body>
 </html>
+
