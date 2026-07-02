@@ -29,6 +29,7 @@ function hasDeclaration(css, property, valuePattern) {
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
 const popupLogJs = fs.readFileSync('popup-log.js', 'utf8');
 const popupJs = fs.readFileSync('popup.js', 'utf8');
+const packSh = fs.readFileSync('pack.sh', 'utf8');
 const htmlTag = popupHtml.match(/<html\b[^>]*>/i)?.[0] || '';
 const htmlStyle = htmlTag.match(/\sstyle="([^"]*)"/i)?.[1] || '';
 const bodyTag = popupHtml.match(/<body\b[^>]*>/i)?.[0] || '';
@@ -227,6 +228,29 @@ assert(/await\s+waitForNextPaint\(\);\s*renderHistory\(cachedData,\s*\{\s*update
 assert(/<script\s+src="popup-log\.js"><\/script>/i.test(popupHtml), 'popup 首屏接入统一性能日志脚本');
 assert(/window\.__popupPerfLog/.test(popupLogJs), '统一性能日志脚本导出全局 helper');
 assert(/String\(a\[0\]\)\.startsWith\('\[POPUP\]\[perf\]'\)/.test(popupJs), '只复制标准化性能日志');
+
+console.log('\n[打包清单]');
+const localScripts = [...popupHtml.matchAll(/<script\s+src="([^"]+\.js)"><\/script>/ig)].map(match => match[1]);
+localScripts.forEach(script => {
+  assert(new RegExp(`(^|\\s)${script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|\\\\|$)`, 'm').test(packSh), `打包包含 popup 引用脚本 ${script}`);
+});
+
+console.log('\n[默认内容源]');
+assert(/function\s+normalizeFeedMode\(mode\)\s*{[\s\S]*?return\s+mode\s+===\s+'all'\s*\?\s*'all'\s*:\s*'selected';[\s\S]*?}/.test(popupJs), 'popup 未设置内容源默认精选');
+assert(/feedModeEl\.value\s*=\s*normalizeFeedMode\(data\.feedMode\)/.test(popupJs), '配置加载使用统一内容源归一化');
+
+console.log('\n[可访问性]');
+assert(/<button\s+class="btn-icon btn-mark-read"\s+id="markAllRead"\s+title="全部已读"\s+aria-label="全部已读">/.test(popupHtml), '全部已读图标按钮有 aria-label');
+assert(/<button\s+class="btn-icon"\s+id="pollNow"\s+title="刷新"\s+aria-label="刷新">/.test(popupHtml), '刷新图标按钮有 aria-label');
+assert(/<button\s+class="btn-icon"\s+id="settingsBtn"\s+title="设置"\s+aria-label="设置">/.test(popupHtml), '设置图标按钮有 aria-label');
+assert(/role="link"/.test(popupJs), '列表条目声明 link 角色');
+assert(/tabindex="0"/.test(popupJs), '列表条目可通过键盘聚焦');
+assert(/historyList\.addEventListener\('keydown'/.test(popupJs), '列表支持键盘打开条目');
+assert(/e\.key\s*===\s*'Enter'/.test(popupJs) && /e\.key\s*===\s*' '/.test(popupJs), '列表条目支持 Enter 和 Space');
+
+console.log('\n[设置默认展开]');
+assert(/ensureDefaultSettingsGroupOpen/.test(popupJs), '打开设置面板时确保默认设置分组');
+assert(/data-setting-group="general"/.test(popupJs), '默认展开常规设置分组');
 
 console.log(`\n${'='.repeat(40)}`);
 console.log(`结果: ${passed} passed, ${failed} failed`);

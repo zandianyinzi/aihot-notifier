@@ -304,7 +304,7 @@ function renderItemHtml(item, isUnread, options = {}) {
   const watchTagHtml = item.watchMatched ? '<span class="watch-badge">特关</span>' : '';
   const summary = escapeHtml(item.summary || '');
   const summaryHtml = summary ? `<div class="item-summary">${summary}</div>` : '';
-  return `<div class="item ${isUnread ? 'unread' : 'read'} ${item.watchMatched ? 'watch-item' : ''}" data-url="${escapeHtml(item.url)}">
+  return `<div class="item ${isUnread ? 'unread' : 'read'} ${item.watchMatched ? 'watch-item' : ''}" data-url="${escapeHtml(item.url)}" role="link" tabindex="0">
     <div class="item-body">
       <div class="item-title">${options.prefix || ''}${title}</div>
       ${summaryHtml}
@@ -359,7 +359,7 @@ function normalizeOpenPositionMode(mode) {
 }
 
 function normalizeFeedMode(mode) {
-  return mode === 'selected' ? 'selected' : 'all';
+  return mode === 'all' ? 'all' : 'selected';
 }
 
 function getScrollContext(data) {
@@ -745,9 +745,13 @@ async function loadHistory() {
 async function handleItemClick(e) {
   const item = e.target.closest('.item');
   if (!item) return;
+  await openHistoryItem(item);
+}
+
+async function openHistoryItem(item) {
   const url = item.dataset.url;
 
-  const { feedMode = 'all', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+  const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
   writeScrollPosition({ feedMode, historyDays });
 
   if (!cachedReadIds.has(url)) {
@@ -779,6 +783,14 @@ async function handleItemClick(e) {
 
 // Event delegation for item clicks
 historyList.addEventListener('click', handleItemClick);
+historyList.addEventListener('keydown', async (e) => {
+  const isOpenKey = e.key === 'Enter' || e.key === ' ';
+  if (!isOpenKey) return;
+  const item = e.target.closest('.item');
+  if (!item) return;
+  e.preventDefault();
+  await openHistoryItem(item);
+});
 
 markAllReadBtn.addEventListener('click', async () => {
   historyList.querySelectorAll('.item.unread').forEach(el => {
@@ -788,7 +800,7 @@ markAllReadBtn.addEventListener('click', async () => {
   markAllReadBtn.classList.remove('visible');
   chrome.action.setBadgeText({ text: '' });
 
-  const { feedMode = 'all', readAllBeforeByMode = {} } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode']);
+  const { feedMode = 'selected', readAllBeforeByMode = {} } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode']);
   const mode = normalizeFeedMode(feedMode);
   const visibleWatchUrls = Array.from(document.querySelectorAll('.item.watch-item')).map(el => el.dataset.url).filter(Boolean);
   await markWatchUrlsViewed(visibleWatchUrls);
@@ -803,11 +815,18 @@ markAllReadBtn.addEventListener('click', async () => {
   await loadHistory();
 });
 
+const settingGroups = Array.from(settingsPanel.querySelectorAll('.setting-group'));
+function ensureDefaultSettingsGroupOpen() {
+  if (settingGroups.some(group => group.open)) return;
+  const generalGroup = settingsPanel.querySelector('[data-setting-group="general"]');
+  if (generalGroup) generalGroup.open = true;
+}
+
 settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.toggle('open');
+  if (settingsPanel.classList.contains('open')) ensureDefaultSettingsGroupOpen();
 });
 
-const settingGroups = Array.from(settingsPanel.querySelectorAll('.setting-group'));
 settingGroups.forEach(group => {
   group.addEventListener('toggle', () => {
     if (!group.open) return;
@@ -872,7 +891,7 @@ intervalEl.addEventListener('change', () => saveConfig());
 feedModeEl.addEventListener('change', async () => {
   const feedbackStartedAt = Date.now();
   const nextFeedMode = normalizeFeedMode(feedModeEl.value);
-  const previousFeedMode = normalizeFeedMode(readPopupCache()?.feedMode || 'all');
+  const previousFeedMode = normalizeFeedMode(readPopupCache()?.feedMode || 'selected');
 
   clearButtonFeedback(pollBtn);
   pollBtn.classList.add('is-loading');

@@ -6,6 +6,7 @@ zip -r aihot-notifier.zip \
   manifest.json \
   background.js \
   popup.html \
+  popup-log.js \
   popup-boot.js \
   popup.js \
   fonts/ \

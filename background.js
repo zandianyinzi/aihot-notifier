@@ -8,17 +8,13 @@ const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
 const WATCH_REMINDER_DELAYS = [0, 2 * 60 * 1000, 5 * 60 * 1000, 2 * 60 * 60 * 1000];
 const WATCH_DAILY_REMINDER_MS = 24 * 60 * 60 * 1000;
-const notificationUrlMap = {};
-
-
-
 async function getConfig() {
   const data = await chrome.storage.local.get(['enabled', 'interval', 'lastCheck', 'feedMode']);
   return {
     enabled: data.enabled !== false,
     interval: Math.max(Number(data.interval) || DEFAULT_INTERVAL, MIN_INTERVAL),
     lastCheck: data.lastCheck || new Date().toISOString(),
-    feedMode: data.feedMode || 'all'
+    feedMode: normalizeFeedMode(data.feedMode)
   };
 }
 
@@ -151,8 +147,27 @@ function getWatchNotificationTitle(item, state) {
   return `特关：${ruleLabel}`;
 }
 
-function createNotification(id, options, url) {
-  if (url) notificationUrlMap[id] = url;
+async function rememberNotificationUrl(id, url) {
+  if (!url) return;
+  const { notificationUrlMap = {} } = await chrome.storage.local.get('notificationUrlMap');
+  await chrome.storage.local.set({
+    notificationUrlMap: {
+      ...notificationUrlMap,
+      [id]: url
+    }
+  });
+}
+
+async function forgetNotificationUrl(id) {
+  const { notificationUrlMap = {} } = await chrome.storage.local.get('notificationUrlMap');
+  if (!notificationUrlMap[id]) return;
+  const nextMap = { ...notificationUrlMap };
+  delete nextMap[id];
+  await chrome.storage.local.set({ notificationUrlMap: nextMap });
+}
+
+async function createNotification(id, options, url) {
+  await rememberNotificationUrl(id, url);
   chrome.notifications.create(id, options);
 }
 
@@ -163,9 +178,10 @@ async function sendWatchNotifications(items, watchNotifyState, now) {
     .sort((a, b) => getItemTime(b) - getItemTime(a))
     .slice(0, MAX_WATCH_NOTIFICATIONS_PER_CYCLE);
 
-  dueItems.forEach((item, index) => {
+  for (let index = 0; index < dueItems.length; index++) {
+    const item = dueItems[index];
     const state = watchNotifyState[item.url];
-    createNotification(`aihot-watch-${Date.now()}-${index}`, {
+    await createNotification(`aihot-watch-${Date.now()}-${index}`, {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: getWatchNotificationTitle(item, state),
@@ -173,7 +189,7 @@ async function sendWatchNotifications(items, watchNotifyState, now) {
       contextMessage: item.source || ''
     }, item.url);
     watchNotifyState[item.url] = advanceWatchNotifyState(state, now);
-  });
+  }
 
   return dueItems;
 }
@@ -330,7 +346,7 @@ async function showNotification(items) {
     const notifId = 'aihot-' + Date.now();
 
     if (count === 1) {
-      createNotification(notifId, {
+      await createNotification(notifId, {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
         title: 'AI HOT 新内容',
@@ -338,7 +354,7 @@ async function showNotification(items) {
         contextMessage: normalItems[0].source || ''
       }, normalItems[0].url);
     } else {
-      createNotification(notifId, {
+      await createNotification(notifId, {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
         title: `AI HOT 有 ${count} 条新内容`,
@@ -374,7 +390,8 @@ async function checkWatchReminders() {
 }
 
 async function manualPoll() {
-  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode = 'all' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+  const mode = normalizeFeedMode(feedMode);
   const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
   console.log(`[AI HOT] manual poll since=${sinceTime}`);
 
@@ -385,7 +402,7 @@ async function manualPoll() {
     const maxPages = 3;
 
     for (let page = 0; page < maxPages; page++) {
-      let url = `${getApiUrl(feedMode)}&since=${encodeURIComponent(sinceTime)}`;
+      let url = `${getApiUrl(mode)}&since=${encodeURIComponent(sinceTime)}`;
       if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
       const res = await fetch(url);
@@ -487,13 +504,13 @@ async function resetAndPoll(feedMode) {
 
 chrome.notifications.onClicked.addListener(async (notificationId) => {
   if (notificationId.startsWith('aihot-')) {
-    const { lastItems = [] } = await chrome.storage.local.get('lastItems');
+    const { lastItems = [], notificationUrlMap = {} } = await chrome.storage.local.get(['lastItems', 'notificationUrlMap']);
     const url = notificationUrlMap[notificationId] || lastItems[0]?.url;
     if (url) {
       if (notificationId.startsWith('aihot-watch-')) {
         await markWatchViewed(url);
       }
-      delete notificationUrlMap[notificationId];
+      await forgetNotificationUrl(notificationId);
       chrome.tabs.create({ url });
     }
   }
@@ -501,7 +518,7 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
-    pollForUpdates().then(() => checkWatchReminders());
+    return pollForUpdates().then(() => checkWatchReminders());
   }
 });
 
@@ -518,14 +535,15 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await migrateReadAllBefore();
   if (details.reason === 'install') {
     try {
-      const { feedMode = 'all', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+      const { feedMode, historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+      const mode = normalizeFeedMode(feedMode);
       const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
       const maxPages = 3;
       let allItems = [];
       let cursor = null;
 
       for (let page = 0; page < maxPages; page++) {
-        let url = getApiUrl(feedMode);
+        let url = getApiUrl(mode);
         if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
         const res = await fetch(url);

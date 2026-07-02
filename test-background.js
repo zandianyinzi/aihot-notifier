@@ -6,8 +6,11 @@
 let passed = 0;
 let failed = 0;
 let onMessageHandler = null;
+let onClickedHandler = null;
+let onAlarmHandler = null;
 let storageData = {};
 let badgeText = null;
+let openedTabs = [];
 let fetchImpl = null;
 
 function assert(condition, msg) {
@@ -35,6 +38,7 @@ function resetState(overrides = {}) {
     ...overrides
   };
   badgeText = null;
+  openedTabs = [];
 }
 
 globalThis.chrome = {
@@ -60,16 +64,19 @@ globalThis.chrome = {
   },
   notifications: {
     create: () => Promise.resolve(),
-    onClicked: { addListener: () => {} }
+    onClicked: { addListener: (fn) => { onClickedHandler = fn; } }
   },
   action: {
     setBadgeText: (opts) => { badgeText = opts.text; },
     setBadgeBackgroundColor: () => {}
   },
+  tabs: {
+    create: (opts) => { openedTabs.push(opts.url); }
+  },
   alarms: {
     create: () => {},
     clear: () => Promise.resolve(),
-    onAlarm: { addListener: () => {} }
+    onAlarm: { addListener: (fn) => { onAlarmHandler = fn; } }
   },
   runtime: {
     onInstalled: { addListener: () => {} },
@@ -89,6 +96,19 @@ function sendMessage(msg) {
 }
 
 async function runTests() {
+  console.log('\n[默认内容源]');
+  resetState({ feedMode: undefined });
+  let requestedUrl = '';
+  fetchImpl = (url) => {
+    requestedUrl = url;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], hasNext: false }) });
+  };
+
+  const defaultPollResponse = await sendMessage({ type: 'pollNow' });
+
+  assert(defaultPollResponse.ok === true, '未设置内容源时手动刷新成功');
+  assert(requestedUrl.includes('mode=selected'), '未设置内容源时默认请求精选');
+
   console.log('\n[feedModeChanged失败]');
   resetState();
   const oldHistory = storageData.history;
@@ -136,6 +156,43 @@ async function runTests() {
   assert(pollResponse.ok === false, '手动刷新失败返回 ok=false');
   assert(storageData.failCount === 1, '手动刷新失败递增 failCount');
   assert(badgeText === null || badgeText === '!', '手动刷新失败不误报未读数');
+
+  console.log('\n[通知点击-持久化映射]');
+  resetState({
+    history: [],
+    notificationUrlMap: {},
+    watchRules: [
+      { id: 'wr_1', source: 'X', author: '目标作者', keywords: [], enabled: true }
+    ],
+    watchNotifyState: {}
+  });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({
+      items: [
+        {
+          title: '特关内容',
+          url: 'https://example.com/watch-target',
+          source: 'X：目标作者',
+          category: 'industry',
+          summary: 'summary',
+          publishedAt: new Date().toISOString()
+        }
+      ],
+      hasNext: false
+    })
+  });
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+  const notificationIds = Object.keys(storageData.notificationUrlMap || {});
+  const notificationId = notificationIds[0];
+  await onClickedHandler(notificationId);
+
+  assert(storageData.history.length === 1, '特关后台轮询写入历史');
+  assert(notificationId && notificationId.startsWith('aihot-watch-'), '特关通知 URL 写入持久化映射');
+  assert(openedTabs[0] === 'https://example.com/watch-target', '点击通知打开持久化映射中的 URL');
+  assert(!storageData.notificationUrlMap[notificationId], '点击后清理已使用的通知映射');
+  assert(storageData.watchNotifyState['https://example.com/watch-target'].viewedAt, '点击特关通知后标记已查看');
 
   console.log(`\n${'='.repeat(40)}`);
   console.log(`结果: ${passed} passed, ${failed} failed`);
