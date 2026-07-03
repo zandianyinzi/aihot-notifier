@@ -522,13 +522,13 @@ function applyTheme(theme) {
   theme = normalizeTheme(theme);
   document.documentElement.setAttribute('data-theme', theme);
   const themeBackgrounds = {
-    'dark': '#111111',
-    'green-dark': '#101410',
+    'dark': '#101010',
+    'green-dark': '#0f1411',
     'chrome-dark': '#111317',
-    'clear-light': '#ffffff',
+    'clear-light': '#f6f8fb',
     'slate-night': '#0d1117'
   };
-  document.documentElement.style.background = themeBackgrounds[theme] || '#111111';
+  document.documentElement.style.background = themeBackgrounds[theme] || '#101010';
   document.documentElement.style.colorScheme = theme === 'clear-light' ? 'light' : 'dark';
   localStorage.setItem('theme', theme);
 }
