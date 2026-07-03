@@ -89,12 +89,12 @@ assert(hasDeclaration(themeCssByName['clear-light'] || '', '--color-scheme', 'li
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg', '#ffffff'), '晴野背景使用标准亮色白');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-sub', '#ffffff'), '晴野面板使用纸面白');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-hover', '#f3f5f4'), '晴野 hover 使用中性纸面灰，避免与未读背景混淆');
-assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-item-hover', '#f1f4f2'), '晴野列表 hover 比未读背景更明确');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-item-hover', '#eef1f0'), '晴野列表 hover 进一步压深，和未读近白背景拉开层级');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--border-light', '#edf0ee'), '晴野弱边界去除过重绿色感');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text', '#202820'), '晴野主文字使用自然墨绿黑');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-2', '#5b635d'), '晴野次级文字更中性，降低绿色疲劳');
-assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-3', '#747d77'), '晴野小号辅助文字保持足够对比并去绿');
-assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-read', '#718071'), '晴野已读文字保持可回看对比');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-3', '#68736d'), '晴野小号辅助文字压实，避免长期阅读发虚');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-read', '#69756d'), '晴野已读文字压实，保持可回看对比');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-read-hover', '#465646'), '晴野已读 hover 恢复清晰可辨');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--border', '#dfe5e1'), '晴野边框转向中性纸面边界');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--accent', '#477f55'), '晴野交互强调使用草绿');
@@ -103,6 +103,7 @@ assert(!hasDeclaration(themeCssByName['clear-light'] || '', '--rail-strong', /#[
 assert(!hasDeclaration(themeCssByName['clear-light'] || '', '--rule-rail', /#[0-9a-f]{6}/), '晴野不定义特关规则轨道特例，回退主题主色');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--scrollbar', '#d8dee4'), '晴野滚动条使用中性浅灰');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--cat-paper', '#3f8a58'), '晴野分类绿色干净有质感');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--cat-default', '#68736d'), '晴野默认分类颜色清掉旧绿灰残留');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--hot', '#d85b2a'), '晴野保留 AI HOT 品牌热度色但不用于未读轨道');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-unread', '#fbfcfd'), '晴野未读背景使用近白冷纸面，不再用绿色铺底');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--color-scheme', 'dark'), '石青使用 dark color-scheme');
