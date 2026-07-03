@@ -28,7 +28,7 @@
     'dark': '#101010',
     'green-dark': '#0f1411',
     'chrome-dark': '#111317',
-    'clear-light': '#f6f8fb',
+    'clear-light': '#fbfdff',
     'slate-night': '#0d1117'
   };
   document.documentElement.style.background = themeBackgrounds[theme] || '#101010';
