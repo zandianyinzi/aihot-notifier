@@ -91,8 +91,11 @@ assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-sub', '#ffffff'
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-hover', '#edf3f8'), '晨雾 hover 使用浅蓝灰');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text', '#202833'), '晨雾主文字使用冷调墨蓝黑');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-2', '#5f6b7a'), '晨雾次级文字使用蓝灰低饱和');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-3', '#6f7d8e'), '晨雾小号辅助文字保持足够对比');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-read', '#687789'), '晨雾已读文字保持可回看对比');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-read-hover', '#46586c'), '晨雾已读 hover 恢复清晰可辨');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--border', '#d7e0ea'), '晨雾边框使用轻雪蓝灰');
-assert(hasDeclaration(themeCssByName['clear-light'] || '', '--accent', '#5f86a8'), '晨雾交互强调使用沉稳霜蓝');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--accent', '#527a9e'), '晨雾交互强调提升小字号对比');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--hot', '#d85b2a'), '晨雾保留降温后的 AI HOT 热度色');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-unread', '#edf5fb'), '晨雾未读背景使用淡雪蓝底色');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--color-scheme', 'dark'), '石青使用 dark color-scheme');
