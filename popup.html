@@ -135,9 +135,10 @@
       --text-read-hover: #465646;
       --accent: #477f55;
       --accent-soft: rgba(71,127,85,0.11);
-      --rail: #8fae95;
+      --rail: #6f9877;
       --rail-strong: #477f55;
       --rule-rail: #b8cdbd;
+      --scrollbar: #d8dee4;
       --hot: #d85b2a;
       --hot-soft: rgba(216,91,42,0.10);
       --state-ok: #2f7d46;
@@ -468,7 +469,7 @@
 
     .settings-inner::-webkit-scrollbar { width: 4px; }
     .settings-inner::-webkit-scrollbar-track { background: transparent; }
-    .settings-inner::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .settings-inner::-webkit-scrollbar-thumb { background: var(--scrollbar, var(--border)); border-radius: 4px; }
 
     .settings {
       cursor: default;
@@ -731,7 +732,7 @@
 
     .watch-rules-list::-webkit-scrollbar { width: 4px; }
     .watch-rules-list::-webkit-scrollbar-track { background: transparent; }
-    .watch-rules-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .watch-rules-list::-webkit-scrollbar-thumb { background: var(--scrollbar, var(--border)); border-radius: 4px; }
 
     .watch-rule-card {
       display: grid;
@@ -897,7 +898,7 @@
 
     .list::-webkit-scrollbar { width: 4px; }
     .list::-webkit-scrollbar-track { background: transparent; }
-    .list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; opacity: 0.5; }
+    .list::-webkit-scrollbar-thumb { background: var(--scrollbar, var(--border)); border-radius: 4px; opacity: 0.5; }
 
     .initial-skeleton {
       pointer-events: none;

@@ -98,9 +98,10 @@ assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-read', '#7180
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--text-read-hover', '#465646'), '晴野已读 hover 恢复清晰可辨');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--border', '#dfe8df'), '晴野边框带轻草绿质感');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--accent', '#477f55'), '晴野交互强调使用草绿');
-assert(hasDeclaration(themeCssByName['clear-light'] || '', '--rail', '#8fae95'), '晴野普通未读轨道使用淡草灰绿');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--rail', '#6f9877'), '晴野普通未读轨道使用更清晰的中草绿');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--rail-strong', '#477f55'), '晴野特关未读轨道使用明确草绿');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--rule-rail', '#b8cdbd'), '晴野规则卡片轨道使用轻草绿');
+assert(hasDeclaration(themeCssByName['clear-light'] || '', '--scrollbar', '#d8dee4'), '晴野滚动条使用中性浅灰');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--cat-paper', '#3f8a58'), '晴野分类绿色干净有质感');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--hot', '#d85b2a'), '晴野保留 AI HOT 品牌热度色但不用于未读轨道');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--bg-unread', '#f7faf8'), '晴野未读背景使用近白提示不泛绿');
@@ -213,6 +214,7 @@ assert(hasDeclaration(watchBadgeRule, 'padding', '1px 6px'), '特关标签使用
 assert(!/box-shadow\s*:/.test(watchBadgeRule), '特关标签不使用额外立体效果，保持与分类协调');
 assert(/\.item\.unread\s*{[\s\S]*box-shadow:\s*inset 2px 0 0 var\(--rail, var\(--accent\)\)/i.test(popupHtml), '未读条目使用主题普通 Hot rail');
 assert(/\.item\.watch-item\.unread\s*{[\s\S]*box-shadow:\s*inset 2px 0 0 var\(--rail-strong, var\(--accent\)\)/i.test(popupHtml), '未读特关条目使用更明确的强 Hot rail');
+assert(/::-webkit-scrollbar-thumb\s*{[^}]*background:\s*var\(--scrollbar, var\(--border\)\)/i.test(popupHtml), '滚动条使用独立 scrollbar token 并回退 border');
 assert(/\.cat-tag\.cat-model\s*{[\s\S]*color-mix\(in srgb, var\(--cat-model\) 9%, transparent\)/i.test(popupHtml), '分类标签背景更克制');
 assert(/\.date-label\s*{[\s\S]*background:\s*var\(--bg-sub\)/i.test(popupHtml), '日期浮标使用面板背景降低按钮感');
 assert(/\.watch-rule-card::before\s*{[\s\S]*background:\s*var\(--rule-rail, var\(--accent\)\)/i.test(popupHtml), '特关规则卡片使用独立轻轨道色');
