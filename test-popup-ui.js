@@ -100,7 +100,7 @@ assert(hasDeclaration(themeCssByName['clear-light'] || '', '--border', '#dfe8df'
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--accent', '#477f55'), '晴野交互强调使用草绿');
 assert(!hasDeclaration(themeCssByName['clear-light'] || '', '--rail', /#[0-9a-f]{6}/), '晴野不定义普通未读轨道特例，回退主题主色');
 assert(!hasDeclaration(themeCssByName['clear-light'] || '', '--rail-strong', /#[0-9a-f]{6}/), '晴野不定义特关未读轨道特例，回退主题主色');
-assert(hasDeclaration(themeCssByName['clear-light'] || '', '--rule-rail', '#b8cdbd'), '晴野规则卡片轨道使用轻草绿');
+assert(!hasDeclaration(themeCssByName['clear-light'] || '', '--rule-rail', /#[0-9a-f]{6}/), '晴野不定义特关规则轨道特例，回退主题主色');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--scrollbar', '#d8dee4'), '晴野滚动条使用中性浅灰');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--cat-paper', '#3f8a58'), '晴野分类绿色干净有质感');
 assert(hasDeclaration(themeCssByName['clear-light'] || '', '--hot', '#d85b2a'), '晴野保留 AI HOT 品牌热度色但不用于未读轨道');
@@ -217,7 +217,7 @@ assert(/\.item\.watch-item\.unread\s*{[\s\S]*box-shadow:\s*inset 2px 0 0 var\(--
 assert(/::-webkit-scrollbar-thumb\s*{[^}]*background:\s*var\(--scrollbar, var\(--border\)\)/i.test(popupHtml), '滚动条使用独立 scrollbar token 并回退 border');
 assert(/\.cat-tag\.cat-model\s*{[\s\S]*color-mix\(in srgb, var\(--cat-model\) 9%, transparent\)/i.test(popupHtml), '分类标签背景更克制');
 assert(/\.date-label\s*{[\s\S]*background:\s*var\(--bg-sub\)/i.test(popupHtml), '日期浮标使用面板背景降低按钮感');
-assert(/\.watch-rule-card::before\s*{[\s\S]*background:\s*var\(--rule-rail, var\(--accent\)\)/i.test(popupHtml), '特关规则卡片使用独立轻轨道色');
+assert(/\.watch-rule-card::before\s*{[\s\S]*background:\s*var\(--accent\)/i.test(popupHtml), '特关规则卡片左侧轨道使用主题主色');
 assert(!/pinnedUrls\.has\(item\.url\) \? '特别关注'/.test(popupJs), '置顶重点条目不额外显示悬浮分组标签');
 assert(/'readAllBeforeByMode', 'watchRules'/.test(popupJs), '初始化时从 chrome.storage.local 读取特关规则');
 assert(/renderWatchRules\(data\.watchRules \|\| \[\]\)/.test(popupJs), '加载配置时渲染已保存规则');
