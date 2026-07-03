@@ -118,38 +118,39 @@
 
     [data-theme="clear-light"] {
       --color-scheme: light;
-      --bg: #fbfdff;
+      --bg: #ffffff;
       --bg-sub: #ffffff;
-      --bg-hover: #f4f8fc;
-      --bg-item-hover: #f4f8fc;
-      --bg-unread: #f4faff;
-      --border: #e4ebf3;
-      --border-light: #edf2f7;
-      --text: #202833;
-      --text-2: #5f6b7a;
-      --text-3: #6f7d8e;
-      --text-unread: #202833;
-      --text-unread-2: #526272;
-      --text-unread-3: #7f8c9b;
-      --text-read: #687789;
-      --text-read-hover: #46586c;
-      --accent: #527a9e;
-      --accent-soft: rgba(82,122,158,0.13);
-      --hot: #d85b2a;
-      --hot-soft: rgba(216,91,42,0.10);
-      --state-ok: #4f8f7a;
-      --state-ok-soft: rgba(79,143,122,0.18);
-      --state-ok-softer: rgba(79,143,122,0.10);
-      --state-fail: #bd5a55;
-      --state-fail-soft: rgba(189,90,85,0.17);
-      --state-fail-softer: rgba(189,90,85,0.09);
-      --cat-model: #7f79bd;
-      --cat-products: #5f86b8;
-      --cat-industry: #a97d35;
-      --cat-paper: #4f8f7a;
-      --cat-tips: #bd6a64;
-      --cat-default: #7b8795;
-      --shadow: 0 1px 3px rgba(42,55,70,0.09);
+      --bg-hover: #f6faf6;
+      --bg-item-hover: #f6faf6;
+      --bg-unread: #fff8f0;
+      --border: #dfe8df;
+      --border-light: #edf3ed;
+      --text: #202820;
+      --text-2: #596759;
+      --text-3: #748174;
+      --text-unread: #202820;
+      --text-unread-2: #4f5f4f;
+      --text-unread-3: #748174;
+      --text-read: #718071;
+      --text-read-hover: #465646;
+      --accent: #477f55;
+      --accent-soft: rgba(71,127,85,0.11);
+      --rail: #e86f2e;
+      --hot: #e86f2e;
+      --hot-soft: rgba(232,111,46,0.10);
+      --state-ok: #2f7d46;
+      --state-ok-soft: rgba(47,125,70,0.14);
+      --state-ok-softer: rgba(47,125,70,0.08);
+      --state-fail: #c2413a;
+      --state-fail-soft: rgba(194,65,58,0.14);
+      --state-fail-softer: rgba(194,65,58,0.08);
+      --cat-model: #7c65b8;
+      --cat-products: #3977a8;
+      --cat-industry: #9a6a22;
+      --cat-paper: #3f8a58;
+      --cat-tips: #b95d53;
+      --cat-default: #748174;
+      --shadow: 0 1px 2px rgba(32,40,32,0.07);
     }
 
     [data-theme="slate-night"] {
@@ -965,7 +966,7 @@
 
     .item.unread {
       background: var(--bg-unread);
-      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 62%, transparent);
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--rail, var(--accent)) 62%, transparent);
     }
 
     .item.unread:hover {
@@ -973,7 +974,7 @@
     }
 
     .item.watch-item.unread {
-      box-shadow: inset 2px 0 0 var(--accent);
+      box-shadow: inset 2px 0 0 var(--rail, var(--accent));
     }
 
     .item.read .item-title {
@@ -1170,7 +1171,7 @@
               <option value="dark">墨夜</option>
               <option value="green-dark">暗森</option>
               <option value="chrome-dark">铬墨</option>
-              <option value="clear-light">晨雾</option>
+              <option value="clear-light">晴野</option>
               <option value="slate-night">石青</option>
             </select>
           </div>
