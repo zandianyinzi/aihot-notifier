@@ -105,7 +105,7 @@ assert(hasDeclaration(themeCssByName['slate-night'] || '', '--bg-hover', '#1f263
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--text', '#f0f6fc'), '石青主文字使用 Primer dark fgColor-default');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--text-2', '#9198a1'), '石青次级文字使用 Primer dark fgColor-muted');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--border', '#343b46'), '石青边框降低噪声');
-assert(hasDeclaration(themeCssByName['slate-night'] || '', '--accent', '#4493f8'), '石青交互强调使用 Primer dark fgColor-accent');
+assert(hasDeclaration(themeCssByName['slate-night'] || '', '--accent', '#39c5bb'), '石青交互强调使用石青青蓝以区别铬墨');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--hot', '#ff7a45'), '石青保留 AI HOT 签名热度色');
 
 console.log('\n[简约设置分组]');
