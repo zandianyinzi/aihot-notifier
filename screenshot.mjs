@@ -1,6 +1,6 @@
 /**
  * 生成 Chrome Web Store 全部商店素材：
- *   - 3 张主题截图（1280x800）
+ *   - 4 张主题截图（1280x800）
  *   - 1 张宣传图（440x280）
  *   - 1 张顶部宣传图块（1400x560 JPEG）
  *
@@ -84,6 +84,18 @@ const themes = [
     frameBorder: '1px solid rgba(232,234,237,0.14)',
     subtitle: '铬墨主题，清晰克制的深色界面。',
   },
+  {
+    name: 'slate-night',
+    filename: 'screenshot-slate-night.png',
+    bg: 'linear-gradient(135deg, #0d1117 0%, #1f2630 100%)',
+    textColor: '#f0f6fc',
+    textColor2: '#a6adb8',
+    featureColor: '#a6adb8',
+    accentDot: '#39c5bb',
+    frameShadow: '0 20px 60px rgba(1,4,9,0.45), 0 4px 16px rgba(1,4,9,0.34)',
+    frameBorder: '1px solid rgba(201,209,217,0.14)',
+    subtitle: '石青主题，为高密度资讯扫描设计。',
+  },
 ];
 
 function buildWrapperHtml(theme) {
@@ -164,7 +176,7 @@ function buildWrapperHtml(theme) {
     <ul class="features">
       <li>精选 + 全量两种模式</li>
       <li>桌面通知即时推送</li>
-      <li>三主题 / 字体风格可选</li>
+      <li>四主题 / 字体风格可选</li>
       <li>轻量无依赖，隐私友好</li>
     </ul>
   </div>
@@ -245,7 +257,7 @@ function buildWrapperHtml(theme) {
     width: ${PROMO_WIDTH}px;
     height: ${PROMO_HEIGHT}px;
     background:
-      linear-gradient(112deg, #1a1a2e 0%, #16213e 34%, #132218 34.2%, #0d1a12 67%, #222832 67.2%, #151922 100%);
+      linear-gradient(112deg, #1a1a2e 0%, #16213e 25%, #132218 25.2%, #0d1a12 50%, #222832 50.2%, #151922 75%, #0d1117 75.2%, #1f2630 100%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -255,13 +267,13 @@ function buildWrapperHtml(theme) {
   }
   .cards {
     position: relative;
-    width: 330px;
-    height: 240px;
+    width: 392px;
+    height: 252px;
   }
   .card {
     position: absolute;
-    width: 180px;
-    height: 260px;
+    width: 158px;
+    height: 228px;
     border-radius: 8px;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.2);
@@ -270,23 +282,28 @@ function buildWrapperHtml(theme) {
     width: 420px;
     height: 600px;
     border: none;
-    transform: scale(0.4286);
+    transform: scale(0.3762);
     transform-origin: top left;
   }
   .card-1 {
-    left: 0; top: 18px; z-index: 1;
+    left: 0; top: 24px; z-index: 1;
     transform: rotate(-7deg);
     border: 1px solid rgba(255,255,255,0.1);
   }
   .card-2 {
-    left: 75px; top: 2px; z-index: 2;
-    transform: rotate(1deg);
+    left: 78px; top: 6px; z-index: 2;
+    transform: rotate(-2deg);
     border: 1px solid rgba(255,255,255,0.12);
   }
   .card-3 {
-    left: 150px; top: 18px; z-index: 3;
-    transform: rotate(7deg);
+    left: 156px; top: 24px; z-index: 3;
+    transform: rotate(3deg);
     border: 1px solid rgba(232,234,237,0.14);
+  }
+  .card-4 {
+    left: 234px; top: 6px; z-index: 4;
+    transform: rotate(7deg);
+    border: 1px solid rgba(57,197,187,0.22);
   }
 </style>
 </head>
@@ -295,11 +312,12 @@ function buildWrapperHtml(theme) {
     <div class="card card-1"><iframe src="popup.html" data-theme="dark"></iframe></div>
     <div class="card card-2"><iframe src="popup.html" data-theme="green-dark"></iframe></div>
     <div class="card card-3"><iframe src="popup.html" data-theme="chrome-dark"></iframe></div>
+    <div class="card card-4"><iframe src="popup.html" data-theme="slate-night"></iframe></div>
   </div>
 </body>
 </html>`;
 
-  const promoThemes = ['dark', 'green-dark', 'chrome-dark'];
+  const promoThemes = ['dark', 'green-dark', 'chrome-dark', 'slate-night'];
   const promoItems = mockItems.slice(0, 5);
 
   const promoPage = await browser.newPage();
@@ -370,8 +388,9 @@ function buildWrapperHtml(theme) {
     width: ${MARQUEE_WIDTH}px;
     height: ${MARQUEE_HEIGHT}px;
     background:
-      radial-gradient(circle at 75% 42%, rgba(153,195,255,0.22), transparent 30%),
-      linear-gradient(118deg, #151922 0%, #111827 44%, #0d1a12 100%);
+      radial-gradient(circle at 80% 42%, rgba(57,197,187,0.18), transparent 28%),
+      radial-gradient(circle at 68% 42%, rgba(153,195,255,0.18), transparent 30%),
+      linear-gradient(118deg, #151922 0%, #111827 38%, #0d1a12 68%, #0d1117 100%);
     overflow: hidden;
     position: relative;
     font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
@@ -406,15 +425,15 @@ function buildWrapperHtml(theme) {
   }
   .cards {
     position: absolute;
-    right: 86px;
-    top: 54px;
-    width: 700px;
-    height: 470px;
+    right: 50px;
+    top: 70px;
+    width: 740px;
+    height: 420px;
   }
   .card {
     position: absolute;
-    width: 300px;
-    height: 430px;
+    width: 260px;
+    height: 372px;
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 22px 70px rgba(0,0,0,0.44);
@@ -423,29 +442,36 @@ function buildWrapperHtml(theme) {
     width: 420px;
     height: 600px;
     border: none;
-    transform: scale(0.7143);
+    transform: scale(0.619);
     transform-origin: top left;
   }
   .card-1 {
-    left: 10px;
-    top: 36px;
+    left: 0;
+    top: 32px;
     z-index: 1;
     transform: rotate(-6deg);
     border: 1px solid rgba(255,140,90,0.25);
   }
   .card-2 {
-    left: 208px;
-    top: 10px;
+    left: 160px;
+    top: 6px;
     z-index: 2;
-    transform: rotate(0deg);
+    transform: rotate(-2deg);
     border: 1px solid rgba(143,189,178,0.22);
   }
   .card-3 {
-    left: 406px;
-    top: 36px;
+    left: 320px;
+    top: 32px;
     z-index: 3;
-    transform: rotate(6deg);
+    transform: rotate(3deg);
     border: 1px solid rgba(153,195,255,0.26);
+  }
+  .card-4 {
+    left: 480px;
+    top: 6px;
+    z-index: 4;
+    transform: rotate(7deg);
+    border: 1px solid rgba(57,197,187,0.24);
   }
 </style>
 </head>
@@ -458,11 +484,12 @@ function buildWrapperHtml(theme) {
     <div class="card card-1"><iframe src="popup.html"></iframe></div>
     <div class="card card-2"><iframe src="popup.html"></iframe></div>
     <div class="card card-3"><iframe src="popup.html"></iframe></div>
+    <div class="card card-4"><iframe src="popup.html"></iframe></div>
   </div>
 </body>
 </html>`;
 
-  const marqueeThemes = ['dark', 'green-dark', 'chrome-dark'];
+  const marqueeThemes = ['dark', 'green-dark', 'chrome-dark', 'slate-night'];
   const marqueeItems = mockItems.slice(0, 5);
   const marqueePage = await browser.newPage();
   await marqueePage.setViewport({ width: MARQUEE_WIDTH, height: MARQUEE_HEIGHT, deviceScaleFactor: 1 });

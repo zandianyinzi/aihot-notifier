@@ -24,14 +24,17 @@
       --border-light: #222222;
       --text: #f2f2ee;
       --text-2: #b7b5ad;
-      --text-3: #85837b;
+      --text-3: #8f8d85;
       --text-unread: #f6f5ef;
       --text-unread-2: #c7c5bd;
       --text-unread-3: #96938b;
-      --text-read: #77756e;
+      --text-read: #8b8981;
       --text-read-hover: #a5a29a;
       --accent: #ff7a3d;
       --accent-soft: rgba(255,122,61,0.10);
+      --scrollbar: #2a2a2a;
+      --hot: #ff7a3d;
+      --hot-soft: rgba(255,122,61,0.10);
       --state-ok: #3ccf7a;
       --state-ok-soft: rgba(60,207,122,0.22);
       --state-ok-softer: rgba(60,207,122,0.12);
@@ -43,7 +46,7 @@
       --cat-industry: #f2c45a;
       --cat-paper: #62d69f;
       --cat-tips: #ff8a82;
-      --cat-default: #7f8389;
+      --cat-default: #8d9298;
       --shadow: 0 1px 3px rgba(0,0,0,0.32);
     }
 
@@ -58,14 +61,17 @@
       --border-light: #202821;
       --text: #ecebe2;
       --text-2: #bab8ae;
-      --text-3: #8b897f;
+      --text-3: #949187;
       --text-unread: #f1f0e8;
       --text-unread-2: #c8c6bc;
       --text-unread-3: #96938a;
-      --text-read: #7f7d74;
+      --text-read: #8f8c82;
       --text-read-hover: #a19f96;
       --accent: #8fbca8;
       --accent-soft: rgba(143,188,168,0.13);
+      --scrollbar: #28332b;
+      --hot: #d8955f;
+      --hot-soft: rgba(216,149,95,0.13);
       --state-ok: #8fbca8;
       --state-ok-soft: rgba(143,188,168,0.24);
       --state-ok-softer: rgba(143,188,168,0.14);
@@ -77,7 +83,7 @@
       --cat-industry: #e4ba48;
       --cat-paper: #62d69f;
       --cat-tips: #ef8a84;
-      --cat-default: #858277;
+      --cat-default: #929083;
       --shadow: 0 1px 3px rgba(0,0,0,0.34);
     }
 
@@ -100,6 +106,9 @@
       --text-read-hover: #aab2bb;
       --accent: #4493f8;
       --accent-soft: rgba(68,147,248,0.13);
+      --scrollbar: #303641;
+      --hot: #ff8a45;
+      --hot-soft: rgba(255,138,69,0.13);
       --state-ok: #81c995;
       --state-ok-soft: rgba(129,201,149,0.24);
       --state-ok-softer: rgba(129,201,149,0.14);
@@ -115,44 +124,6 @@
       --shadow: 0 2px 8px rgba(0,0,0,0.40);
     }
 
-
-    [data-theme="clear-light"] {
-      --color-scheme: light;
-      --bg: #ffffff;
-      --bg-sub: #ffffff;
-      --bg-hover: #f3f5f4;
-      --bg-item-hover: #eef1f0;
-      --bg-unread: #fbfcfd;
-      --border: #dfe5e1;
-      --border-light: #edf0ee;
-      --text: #202820;
-      --text-2: #5b635d;
-      --text-3: #68736d;
-      --text-unread: #202820;
-      --text-unread-2: #4f5f4f;
-      --text-unread-3: #68736d;
-      --text-read: #69756d;
-      --text-read-hover: #465646;
-      --accent: #477f55;
-      --accent-soft: rgba(71,127,85,0.10);
-      --scrollbar: #d8dee4;
-      --hot: #d85b2a;
-      --hot-soft: rgba(216,91,42,0.10);
-      --state-ok: #2f7d46;
-      --state-ok-soft: rgba(47,125,70,0.14);
-      --state-ok-softer: rgba(47,125,70,0.08);
-      --state-fail: #c2413a;
-      --state-fail-soft: rgba(194,65,58,0.14);
-      --state-fail-softer: rgba(194,65,58,0.08);
-      --cat-model: #7c65b8;
-      --cat-products: #3977a8;
-      --cat-industry: #9a6a22;
-      --cat-paper: #3f8a58;
-      --cat-tips: #b95d53;
-      --cat-default: #68736d;
-      --shadow: 0 1px 2px rgba(32,40,32,0.07);
-    }
-
     [data-theme="slate-night"] {
       --color-scheme: dark;
       --bg: #0d1117;
@@ -164,14 +135,15 @@
       --border-light: #2b313b;
       --text: #f0f6fc;
       --text-2: #9198a1;
-      --text-3: #6e7681;
+      --text-3: #858d98;
       --text-unread: #f0f6fc;
       --text-unread-2: #a6adb8;
-      --text-unread-3: #7d8590;
+      --text-unread-3: #89919c;
       --text-read: #858d98;
       --text-read-hover: #c9d1d9;
       --accent: #39c5bb;
       --accent-soft: rgba(57,197,187,0.14);
+      --scrollbar: #343b46;
       --hot: #ff7a45;
       --hot-soft: rgba(255,122,69,0.14);
       --state-ok: #3fb950;
@@ -195,6 +167,7 @@
     [data-size="xxlarge"] { --fs-base: 19px; --fs-title: 19px; --fs-meta: 15px; --item-pad: 20px; }
 
     :root {
+      --hairline: 0.5px;
       --control-size: 30px;
       --control-radius: 6px;
       --control-icon-size: 16px;
@@ -672,6 +645,9 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 6px;
+      padding: 8px;
+      border: 1px dashed var(--border-light);
+      border-radius: 6px;
     }
 
     .watch-input {
@@ -703,19 +679,21 @@
 
     .watch-action-row {
       grid-column: 1 / 3;
-      display: flex;
-      align-items: center;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: stretch;
       gap: 6px;
       min-width: 0;
     }
 
     .watch-action-row .watch-input-full {
-      flex: 1 1 auto;
+      width: 100%;
       min-width: 0;
     }
 
     .watch-action-row .watch-add-btn {
-      flex: 0 0 auto;
+      width: 100%;
+      min-width: 0;
     }
 
     .watch-rules-list {
@@ -738,22 +716,11 @@
       align-items: start;
       width: 100%;
       min-width: 0;
-      padding: 9px 8px 9px 11px;
-      border: 1px solid var(--border-light);
+      padding: 9px 8px;
+      border: 1px dashed var(--border-light);
       border-radius: 6px;
       background: color-mix(in srgb, var(--bg) 76%, var(--bg-sub));
       position: relative;
-      overflow: hidden;
-    }
-
-    .watch-rule-card::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 3px;
-      background: var(--accent);
     }
 
     .watch-rule-card.disabled {
@@ -798,21 +765,32 @@
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
+      min-width: 0;
     }
 
     .watch-keyword-tag {
       display: inline-flex;
       align-items: center;
+      min-width: 0;
+      max-width: 100%;
       font-size: 10px;
       line-height: 1.2;
       color: var(--text-3);
       border: 1px solid var(--border-light);
       border-radius: 3px;
-      padding: 1px 4px 1px 5px;
+      padding: 1px 5px;
       gap: 4px;
     }
 
+    .watch-keyword-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .watch-keyword-remove {
+      flex: 0 0 auto;
       border: 0;
       background: transparent;
       color: var(--text-3);
@@ -868,10 +846,6 @@
       border: 1px dashed var(--border-light);
       border-radius: 6px;
       background: var(--bg);
-    }
-
-    .item.watch-item {
-      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--rail-strong, var(--accent)) 38%, transparent);
     }
 
     .watch-badge {
@@ -932,9 +906,8 @@
       position: sticky;
       top: 6px;
       z-index: 2;
-      float: right;
-      margin-right: 6px;
-      margin-bottom: -24px;
+      width: max-content;
+      margin: 6px 18px 6px auto;
       font-size: 10px;
       font-weight: 500;
       color: var(--text-3);
@@ -966,7 +939,7 @@
 
     .item.unread {
       background: var(--bg-unread);
-      box-shadow: inset 2px 0 0 var(--rail, var(--accent));
+      box-shadow: inset var(--hairline) 0 0 var(--rail, var(--accent));
     }
 
     .item.unread:hover {
@@ -974,7 +947,7 @@
     }
 
     .item.watch-item.unread {
-      box-shadow: inset 2px 0 0 var(--rail-strong, var(--accent));
+      box-shadow: inset var(--hairline) 0 0 var(--rail-strong, var(--accent));
     }
 
     .item.read .item-title {
@@ -1171,7 +1144,6 @@
               <option value="dark">墨夜</option>
               <option value="green-dark">暗森</option>
               <option value="chrome-dark">铬墨</option>
-              <option value="clear-light">晴野</option>
               <option value="slate-night">石青</option>
             </select>
           </div>
@@ -1246,4 +1218,3 @@
   <script src="popup.js"></script>
 </body>
 </html>
-

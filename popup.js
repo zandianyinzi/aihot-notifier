@@ -48,7 +48,7 @@ const CATEGORY_MAP = {
   'tips': { cls: 'cat-tips', label: '技巧' }
 };
 
-const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark', 'clear-light', 'slate-night']);
+const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark', 'slate-night']);
 const DEFAULT_HISTORY_DAYS = 2;
 const BADGE_COLOR = '#e2231a';
 const POPUP_CACHE_KEY = 'popupDataSnapshot';
@@ -223,11 +223,10 @@ function normalizeWatchRules(rules) {
 }
 
 function getWatchRuleLabel(rule) {
-  const parts = [];
-  if (rule.source) parts.push(rule.source);
-  if (rule.author) parts.push(rule.author);
-  if (rule.keywords.length > 0) parts.push(rule.keywords.join(', '));
-  return parts.join(' · ') || '未配置规则';
+  const sourceText = rule.source ? `来源：${rule.source}` : '来源不限';
+  const authorText = rule.author ? `作者：${rule.author}` : '作者不限';
+  const keywordText = rule.keywords.length > 0 ? `关键词：${rule.keywords.join('、')}` : '关键词不限';
+  return [sourceText, authorText, keywordText].join('；');
 }
 
 function mergeWatchRuleInput(rules, input) {
@@ -267,7 +266,7 @@ function renderWatchRules(rules) {
   if (!watchRulesList) return;
   const normalized = normalizeWatchRules(rules);
   if (normalized.length === 0) {
-    watchRulesList.innerHTML = '<div class="watch-rule-text">暂无规则，添加来源/作者/关键词开始关注</div>';
+    watchRulesList.innerHTML = '<div class="watch-rule-text">暂无特关规则</div>';
     return;
   }
   watchRulesList.innerHTML = normalized.map(rule => `
@@ -281,7 +280,7 @@ function renderWatchRules(rules) {
             <button class="btn-mini watch-rule-btn" data-action="delete" title="删除">×</button>
           </div>
         </div>
-        ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag">${escapeHtml(keyword)}<button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词">×</button></span>`).join('')}</div>` : ''}
+        ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag"><span class="watch-keyword-text">${escapeHtml(keyword)}</span><button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词">×</button></span>`).join('')}</div>` : ''}
       </div>
     </div>
   `).join('');
@@ -525,11 +524,10 @@ function applyTheme(theme) {
     'dark': '#101010',
     'green-dark': '#0f1411',
     'chrome-dark': '#111317',
-    'clear-light': '#ffffff',
     'slate-night': '#0d1117'
   };
   document.documentElement.style.background = themeBackgrounds[theme] || '#101010';
-  document.documentElement.style.colorScheme = theme === 'clear-light' ? 'light' : 'dark';
+  document.documentElement.style.colorScheme = 'dark';
   localStorage.setItem('theme', theme);
 }
 
@@ -823,15 +821,15 @@ markAllReadBtn.addEventListener('click', async () => {
 });
 
 const settingGroups = Array.from(settingsPanel.querySelectorAll('.setting-group'));
-function ensureDefaultSettingsGroupOpen() {
-  if (settingGroups.some(group => group.open)) return;
-  const generalGroup = settingsPanel.querySelector('[data-setting-group="general"]');
-  if (generalGroup) generalGroup.open = true;
+function collapseSettingsGroups() {
+  settingGroups.forEach(group => {
+    group.open = false;
+  });
 }
 
 settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.toggle('open');
-  if (settingsPanel.classList.contains('open')) ensureDefaultSettingsGroupOpen();
+  if (settingsPanel.classList.contains('open')) collapseSettingsGroups();
 });
 
 settingGroups.forEach(group => {
@@ -986,4 +984,3 @@ pollBtn.addEventListener('click', async () => {
   markPopupSessionWarm();
   if (reconciled.changed) chrome.storage.local.set({ readIds: data.readIds });
 })();
-

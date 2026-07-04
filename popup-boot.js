@@ -5,7 +5,7 @@
   var font = localStorage.getItem('fontFamily') || 'system';
   var size = localStorage.getItem('fontSize') || 'medium';
 
-  if (!['dark', 'green-dark', 'chrome-dark', 'clear-light', 'slate-night'].includes(theme)) {
+  if (!['dark', 'green-dark', 'chrome-dark', 'slate-night'].includes(theme)) {
     theme = 'dark';
     localStorage.setItem('theme', theme);
   }
@@ -28,10 +28,9 @@
     'dark': '#101010',
     'green-dark': '#0f1411',
     'chrome-dark': '#111317',
-    'clear-light': '#ffffff',
     'slate-night': '#0d1117'
   };
   document.documentElement.style.background = themeBackgrounds[theme] || '#101010';
-  document.documentElement.style.colorScheme = theme === 'clear-light' ? 'light' : 'dark';
+  document.documentElement.style.colorScheme = 'dark';
   perfLog('boot-ready', { theme, font, size });
 })();

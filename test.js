@@ -169,7 +169,7 @@ function hoursAgo(hours) {
 
 const VALID_FONTS = new Set(['system', 'noto-serif', 'lxgw']);
 const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
-const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark', 'clear-light', 'slate-night']);
+const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark', 'slate-night']);
 
 function normalizeFontFamily(font) {
   if (font === 'noto-sans') return 'system';
@@ -621,7 +621,7 @@ console.log('\n[主题默认值]');
   assert(normalizeTheme('bad-theme') === 'dark', '异常主题值回退dark');
   assert(normalizeTheme('green-dark') === 'green-dark', '保留暗森主题');
   assert(normalizeTheme('chrome-dark') === 'chrome-dark', '保留铬墨主题');
-  assert(normalizeTheme('clear-light') === 'clear-light', '保留晨雾主题');
+  assert(normalizeTheme('clear-light') === 'dark', '已删除晴野主题配置回退dark');
   assert(normalizeTheme('slate-night') === 'slate-night', '保留石青主题');
   assert(normalizeTheme('paper-light') === 'dark', '旧浅色主题配置回退dark');
 })();
@@ -797,4 +797,3 @@ console.log('\n[特别关注-停用规则不回放旧提醒]');
 console.log(`\n${'='.repeat(40)}`);
 console.log(`结果: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
-
