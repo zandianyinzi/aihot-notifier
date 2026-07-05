@@ -266,7 +266,7 @@ function renderWatchRules(rules) {
   if (!watchRulesList) return;
   const normalized = normalizeWatchRules(rules);
   if (normalized.length === 0) {
-    watchRulesList.innerHTML = '<div class="watch-rule-text">暂无特关规则</div>';
+    watchRulesList.innerHTML = '';
     return;
   }
   watchRulesList.innerHTML = normalized.map(rule => `
@@ -634,6 +634,7 @@ function renderHistory(data, options = {}) {
 
   let html = '';
   if (pinnedWatch.length > 0) {
+    html += `<div class="date-label">特关</div>`;
     pinnedWatch.forEach(item => {
       html += renderItemHtml(item, true);
     });
