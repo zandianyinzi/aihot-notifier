@@ -634,7 +634,7 @@ function renderHistory(data, options = {}) {
 
   let html = '';
   if (pinnedWatch.length > 0) {
-    html += `<div class="date-label">特关</div>`;
+    html += `<div class="date-label date-label--watch">特关</div>`;
     pinnedWatch.forEach(item => {
       html += renderItemHtml(item, true);
     });
