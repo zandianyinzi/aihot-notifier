@@ -12,7 +12,7 @@ Automatically tracks the latest AI updates and delivers desktop notifications, s
 
 ✦ Personalization
 
-• 3 carefully crafted themes: Obsidian Night / Dark Forest / Chrome Ink
+• 4 carefully crafted themes: Obsidian Night / Dark Forest / Chrome Ink / Slate Cyan
 • 3 font styles: System / Serif / Kai
 • 5 font size levels: Small / Default / Large / Extra Large / Huge
 • Position mode: Free Browse / Unread First

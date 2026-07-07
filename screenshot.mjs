@@ -55,7 +55,7 @@ const themes = [
     textColor: '#f0f0f0',
     textColor2: '#aaa',
     featureColor: '#aaa',
-    accentDot: '#ff8c5a',
+    accentDot: '#f2bc90',
     frameShadow: '0 20px 60px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3)',
     frameBorder: '1px solid rgba(255,255,255,0.08)',
     subtitle: '墨夜主题，夜间阅读更舒适。',
@@ -63,11 +63,11 @@ const themes = [
   {
     name: 'green-dark',
     filename: 'screenshot-green-dark.png',
-    bg: 'linear-gradient(135deg, #0d1a12 0%, #1a2e1e 100%)',
+    bg: 'linear-gradient(135deg, #0c0f10 0%, #1a2022 100%)',
     textColor: '#e0e8de',
-    textColor2: '#8a9e88',
-    featureColor: '#8a9e88',
-    accentDot: '#5ccc6a',
+    textColor2: '#99a5a7',
+    featureColor: '#99a5a7',
+    accentDot: '#8fb2b8',
     frameShadow: '0 20px 60px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3)',
     frameBorder: '1px solid rgba(255,255,255,0.08)',
     subtitle: '暗森主题，沉浸感十足。',
@@ -79,7 +79,7 @@ const themes = [
     textColor: '#f1f3f4',
     textColor2: '#b4bac0',
     featureColor: '#b4bac0',
-    accentDot: '#99c3ff',
+    accentDot: '#96c8ee',
     frameShadow: '0 20px 60px rgba(0,0,0,0.42), 0 4px 16px rgba(0,0,0,0.32)',
     frameBorder: '1px solid rgba(232,234,237,0.14)',
     subtitle: '铬墨主题，清晰克制的深色界面。',
@@ -87,11 +87,11 @@ const themes = [
   {
     name: 'slate-night',
     filename: 'screenshot-slate-night.png',
-    bg: 'linear-gradient(135deg, #0d1117 0%, #1f2630 100%)',
+    bg: 'linear-gradient(135deg, #0b1418 0%, #19262c 100%)',
     textColor: '#f0f6fc',
-    textColor2: '#a6adb8',
-    featureColor: '#a6adb8',
-    accentDot: '#39c5bb',
+    textColor2: '#adb7c1',
+    featureColor: '#adb7c1',
+    accentDot: '#4bb6af',
     frameShadow: '0 20px 60px rgba(1,4,9,0.45), 0 4px 16px rgba(1,4,9,0.34)',
     frameBorder: '1px solid rgba(201,209,217,0.14)',
     subtitle: '石青主题，为高密度资讯扫描设计。',
@@ -128,57 +128,11 @@ function buildWrapperHtml(theme) {
     height: 100%;
     border: none;
   }
-  .side-text {
-    margin-left: 60px;
-    max-width: 320px;
-  }
-  .side-text h1 {
-    font-size: 28px;
-    font-weight: 600;
-    color: ${theme.textColor};
-    margin-bottom: 12px;
-    letter-spacing: -0.02em;
-  }
-  .side-text p {
-    font-size: 15px;
-    line-height: 1.7;
-    color: ${theme.textColor2};
-  }
-  .side-text .features {
-    margin-top: 20px;
-    list-style: none;
-  }
-  .side-text .features li {
-    font-size: 14px;
-    color: ${theme.featureColor};
-    padding: 6px 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .side-text .features li::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    background: ${theme.accentDot};
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
 </style>
 </head>
 <body>
   <div class="phone-frame">
     <iframe id="popup-frame" src="popup.html"></iframe>
-  </div>
-  <div class="side-text">
-    <h1>AI HOT Notifier</h1>
-    <p>${theme.subtitle}</p>
-    <ul class="features">
-      <li>精选 + 全量两种模式</li>
-      <li>桌面通知即时推送</li>
-      <li>四主题 / 字体风格可选</li>
-      <li>轻量无依赖，隐私友好</li>
-    </ul>
   </div>
 </body>
 </html>`;
@@ -257,7 +211,7 @@ function buildWrapperHtml(theme) {
     width: ${PROMO_WIDTH}px;
     height: ${PROMO_HEIGHT}px;
     background:
-      linear-gradient(112deg, #1a1a2e 0%, #16213e 25%, #132218 25.2%, #0d1a12 50%, #222832 50.2%, #151922 75%, #0d1117 75.2%, #1f2630 100%);
+      linear-gradient(112deg, #1a1a2e 0%, #16213e 25%, #0c0f10 25.2%, #1a2022 50%, #222832 50.2%, #151922 75%, #0b1418 75.2%, #19262c 100%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -303,7 +257,7 @@ function buildWrapperHtml(theme) {
   .card-4 {
     left: 234px; top: 6px; z-index: 4;
     transform: rotate(7deg);
-    border: 1px solid rgba(57,197,187,0.22);
+    border: 1px solid rgba(75,182,175,0.22);
   }
 </style>
 </head>
@@ -388,9 +342,9 @@ function buildWrapperHtml(theme) {
     width: ${MARQUEE_WIDTH}px;
     height: ${MARQUEE_HEIGHT}px;
     background:
-      radial-gradient(circle at 80% 42%, rgba(57,197,187,0.18), transparent 28%),
-      radial-gradient(circle at 68% 42%, rgba(153,195,255,0.18), transparent 30%),
-      linear-gradient(118deg, #151922 0%, #111827 38%, #0d1a12 68%, #0d1117 100%);
+      radial-gradient(circle at 80% 42%, rgba(75,182,175,0.16), transparent 28%),
+      radial-gradient(circle at 68% 42%, rgba(150,200,238,0.16), transparent 30%),
+      linear-gradient(118deg, #151922 0%, #111827 38%, #0c0f10 68%, #0b1418 100%);
     overflow: hidden;
     position: relative;
     font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
@@ -450,28 +404,28 @@ function buildWrapperHtml(theme) {
     top: 32px;
     z-index: 1;
     transform: rotate(-6deg);
-    border: 1px solid rgba(255,140,90,0.25);
+    border: 1px solid rgba(242,188,144,0.24);
   }
   .card-2 {
     left: 160px;
     top: 6px;
     z-index: 2;
     transform: rotate(-2deg);
-    border: 1px solid rgba(143,189,178,0.22);
+    border: 1px solid rgba(143,178,184,0.22);
   }
   .card-3 {
     left: 320px;
     top: 32px;
     z-index: 3;
     transform: rotate(3deg);
-    border: 1px solid rgba(153,195,255,0.26);
+    border: 1px solid rgba(150,200,238,0.24);
   }
   .card-4 {
     left: 480px;
     top: 6px;
     z-index: 4;
     transform: rotate(7deg);
-    border: 1px solid rgba(57,197,187,0.24);
+    border: 1px solid rgba(75,182,175,0.22);
   }
 </style>
 </head>

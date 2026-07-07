@@ -26,9 +26,9 @@
 
   const themeBackgrounds = {
     'dark': '#101010',
-    'green-dark': '#0f1411',
+    'green-dark': '#0c0f10',
     'chrome-dark': '#111317',
-    'slate-night': '#0d1117'
+    'slate-night': '#0b1418'
   };
   document.documentElement.style.background = themeBackgrounds[theme] || '#101010';
   document.documentElement.style.colorScheme = 'dark';
