@@ -109,6 +109,20 @@ async function runTests() {
   assert(defaultPollResponse.ok === true, '未设置内容源时手动刷新成功');
   assert(requestedUrl.includes('mode=selected'), '未设置内容源时默认请求精选');
 
+  console.log('\n[自动轮询回退窗口]');
+  const lastCheck = '2026-07-07T12:00:00.000Z';
+  resetState({ interval: 5, lastCheck });
+  requestedUrl = '';
+  fetchImpl = (url) => {
+    requestedUrl = url;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], hasNext: false }) });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  const since = new URL(requestedUrl).searchParams.get('since');
+  assert(since === '2026-07-07T06:00:00.000Z', '自动轮询至少回退6小时，覆盖公开API延迟');
+
   console.log('\n[feedModeChanged失败]');
   resetState();
   const oldHistory = storageData.history;

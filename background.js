@@ -4,6 +4,7 @@ const DEFAULT_INTERVAL = 5;
 const MIN_INTERVAL = 2;
 const DEFAULT_HISTORY_DAYS = 2;
 const MAX_HISTORY_DAYS = 5;
+const AUTO_POLL_DELAY_BUFFER_MS = 6 * 60 * 60 * 1000;
 const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
 const WATCH_REMINDER_DELAYS = [0, 2 * 60 * 1000, 5 * 60 * 1000, 2 * 60 * 60 * 1000];
@@ -267,8 +268,8 @@ async function pollForUpdates() {
   const config = await getConfig();
   if (!config.enabled) return;
 
-  // API 公开接口有 30-80 分钟入库/缓存延迟，回退 2 小时确保不漏
-  const bufferMs = Math.max(config.interval * 2 * 60 * 1000, 2 * 60 * 60 * 1000);
+  // API 公开接口存在数小时级缓存/入库延迟，自动轮询保守回退避免空历史漏载。
+  const bufferMs = Math.max(config.interval * 2 * 60 * 1000, AUTO_POLL_DELAY_BUFFER_MS);
   const sinceTime = new Date(new Date(config.lastCheck).getTime() - bufferMs).toISOString();
   const now = new Date().toISOString();
   console.log(`[AI HOT] polling since=${sinceTime}`);

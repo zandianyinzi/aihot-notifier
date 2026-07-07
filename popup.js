@@ -31,6 +31,7 @@ const markAllReadBtn = document.getElementById('markAllRead');
 const pollBtn = document.getElementById('pollNow');
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsPanel = document.getElementById('settingsPanel');
+const settingsInnerEl = settingsPanel.querySelector('.settings-inner');
 const historyList = document.getElementById('historyList');
 const watchRulesList = document.getElementById('watchRulesList');
 const watchSourceEl = document.getElementById('watchSource');
@@ -262,11 +263,24 @@ function removeWatchRuleKeyword(rules, ruleId, keywordIndex) {
     .filter(rule => rule.source || rule.author || rule.keywords.length > 0);
 }
 
+function updateWatchRulesScrollHint() {
+  if (!watchRulesList) return;
+  const hasScrollTail = watchRulesList.scrollHeight - watchRulesList.scrollTop - watchRulesList.clientHeight > 1;
+  watchRulesList.classList.toggle('has-scroll-tail', hasScrollTail);
+}
+
+function updateSettingsScrollHint() {
+  if (!settingsInnerEl) return;
+  const hasScrollTail = settingsInnerEl.scrollHeight - settingsInnerEl.scrollTop - settingsInnerEl.clientHeight > 1;
+  settingsInnerEl.classList.toggle('has-scroll-tail', hasScrollTail);
+}
+
 function renderWatchRules(rules) {
   if (!watchRulesList) return;
   const normalized = normalizeWatchRules(rules);
   if (normalized.length === 0) {
     watchRulesList.innerHTML = '';
+    updateWatchRulesScrollHint();
     return;
   }
   watchRulesList.innerHTML = normalized.map(rule => `
@@ -284,6 +298,8 @@ function renderWatchRules(rules) {
       </div>
     </div>
   `).join('');
+  updateWatchRulesScrollHint();
+  requestAnimationFrame(updateSettingsScrollHint);
 }
 
 async function saveWatchRules(rules, options = {}) {
@@ -293,6 +309,8 @@ async function saveWatchRules(rules, options = {}) {
   if (options.scrollToEnd && watchRulesList) {
     watchRulesList.scrollTop = watchRulesList.scrollHeight;
   }
+  updateWatchRulesScrollHint();
+  requestAnimationFrame(updateSettingsScrollHint);
 }
 
 function renderItemHtml(item, isUnread, options = {}) {
@@ -831,6 +849,7 @@ function collapseSettingsGroups() {
 settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.toggle('open');
   if (settingsPanel.classList.contains('open')) collapseSettingsGroups();
+  requestAnimationFrame(updateSettingsScrollHint);
 });
 
 settingGroups.forEach(group => {
@@ -839,8 +858,16 @@ settingGroups.forEach(group => {
     settingGroups.forEach(otherGroup => {
       if (otherGroup !== group) otherGroup.open = false;
     });
+    if (group.dataset.settingGroup === 'watch') {
+      requestAnimationFrame(updateWatchRulesScrollHint);
+    }
+    requestAnimationFrame(updateSettingsScrollHint);
   });
 });
+
+if (settingsInnerEl) {
+  settingsInnerEl.addEventListener('scroll', updateSettingsScrollHint, { passive: true });
+}
 
 document.getElementById('copyLogs').addEventListener('click', function() {
   const log = window.__popupPerf && window.__popupPerf.snapshot ? window.__popupPerf.snapshot().join('\n') : _dbuf.join('\n');
@@ -865,6 +892,7 @@ if (addWatchRuleBtn) {
 }
 
 if (watchRulesList) {
+  watchRulesList.addEventListener('scroll', updateWatchRulesScrollHint, { passive: true });
   watchRulesList.addEventListener('click', async (e) => {
     const keywordRemoveBtn = e.target.closest('.watch-keyword-remove');
     if (keywordRemoveBtn) {
