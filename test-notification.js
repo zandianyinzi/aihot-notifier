@@ -104,8 +104,7 @@ globalThis.fetch = (url) => {
 const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
 const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
-const WATCH_REMINDER_DELAYS = [0, 2 * 60 * 1000, 5 * 60 * 1000, 2 * 60 * 60 * 1000];
-const WATCH_DAILY_REMINDER_MS = 24 * 60 * 60 * 1000;
+const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 
 function getApiUrl(mode) {
   return `${API_BASE}&mode=${mode}`;
@@ -172,8 +171,7 @@ function getNextWatchNotifyAt(firstMatchedAt, notifyCount, referenceNow) {
   const first = new Date(firstMatchedAt).getTime();
   if (!first) return '';
   if (notifyCount < WATCH_REMINDER_DELAYS.length) return new Date(first + WATCH_REMINDER_DELAYS[notifyCount]).toISOString();
-  const base = referenceNow ? new Date(referenceNow).getTime() : Date.now();
-  return new Date(base + WATCH_DAILY_REMINDER_MS).toISOString();
+  return '';
 }
 
 function buildWatchStateForItem(existingState, item, ruleIds, now) {
@@ -192,7 +190,8 @@ function buildWatchStateForItem(existingState, item, ruleIds, now) {
 
 function shouldNotifyWatchState(state, nowMs) {
   if (!state || state.viewedAt) return false;
-  const next = new Date(state.nextNotifyAt || state.firstMatchedAt || 0).getTime();
+  const nextNotifyAt = Object.prototype.hasOwnProperty.call(state, 'nextNotifyAt') ? state.nextNotifyAt : state.firstMatchedAt;
+  const next = new Date(nextNotifyAt || 0).getTime();
   return next > 0 && next <= nowMs;
 }
 
@@ -701,6 +700,17 @@ async function runTests() {
   await sendWatchNotifications([storageData.history[1]], storageData.watchNotifyState, new Date().toISOString());
   assert(notificationsCreated[0].title.startsWith('特关：'), `重复提醒标题不含提醒二字: ${notificationsCreated[0]?.title}`);
   assert(!notificationsCreated[0].title.includes('提醒：'), `重复提醒标题删除提醒二字: ${notificationsCreated[0]?.title}`);
+
+  notificationsCreated = [];
+  const stoppedUrl = storageData.history[2].url;
+  storageData.watchNotifyState[stoppedUrl] = {
+    ...storageData.watchNotifyState[stoppedUrl],
+    nextNotifyAt: '',
+    notifyCount: 3,
+    viewedAt: ''
+  };
+  await sendWatchNotifications([storageData.history[2]], storageData.watchNotifyState, new Date().toISOString());
+  assert(notificationsCreated.length === 0, '特关第三次提醒后停止重复提醒');
 
   console.log('\n[场景14: 停用规则后不再重复提醒]');
 

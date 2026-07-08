@@ -58,8 +58,7 @@ function getApiUrl(mode) {
 }
 
 
-const WATCH_REMINDER_DELAYS = [0, 2 * 60 * 1000, 5 * 60 * 1000, 2 * 60 * 60 * 1000];
-const WATCH_DAILY_REMINDER_MS = 24 * 60 * 60 * 1000;
+const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 
 function splitWatchKeywords(value) {
   if (Array.isArray(value)) return value.flatMap(v => splitWatchKeywords(v)).filter(Boolean);
@@ -150,12 +149,13 @@ function getNextWatchNotifyAt(firstMatchedAt, notifyCount, referenceNow) {
   const first = new Date(firstMatchedAt).getTime();
   if (!first) return '';
   if (notifyCount < WATCH_REMINDER_DELAYS.length) return new Date(first + WATCH_REMINDER_DELAYS[notifyCount]).toISOString();
-  return new Date(new Date(referenceNow).getTime() + WATCH_DAILY_REMINDER_MS).toISOString();
+  return '';
 }
 
 function shouldNotifyWatchState(state, nowMs) {
   if (!state || state.viewedAt) return false;
-  const next = new Date(state.nextNotifyAt || state.firstMatchedAt || 0).getTime();
+  const nextNotifyAt = Object.prototype.hasOwnProperty.call(state, 'nextNotifyAt') ? state.nextNotifyAt : state.firstMatchedAt;
+  const next = new Date(nextNotifyAt || 0).getTime();
   return next > 0 && next <= nowMs;
 }
 
@@ -772,10 +772,10 @@ console.log('\n[特别关注-提醒节奏]');
 (function() {
   const first = '2026-06-26T02:00:00.000Z';
   assert(getNextWatchNotifyAt(first, 0, first) === first, '首次提醒立即');
-  assert(getNextWatchNotifyAt(first, 1, first) === '2026-06-26T02:02:00.000Z', '第二次提醒间隔2分钟');
-  assert(getNextWatchNotifyAt(first, 2, first) === '2026-06-26T02:05:00.000Z', '第三次提醒间隔5分钟');
-  assert(getNextWatchNotifyAt(first, 3, first) === '2026-06-26T04:00:00.000Z', '第四次提醒间隔2小时');
-  assert(getNextWatchNotifyAt(first, 4, '2026-06-26T04:00:00.000Z') === '2026-06-27T04:00:00.000Z', '后续每天最多一次');
+  assert(getNextWatchNotifyAt(first, 1, first) === '2026-06-26T10:00:00.000Z', '第二次提醒间隔8小时');
+  assert(getNextWatchNotifyAt(first, 2, first) === '2026-06-27T02:00:00.000Z', '第三次提醒间隔24小时');
+  assert(getNextWatchNotifyAt(first, 3, '2026-06-27T02:00:00.000Z') === '', '第三次后停止提醒');
+  assert(!shouldNotifyWatchState({ firstMatchedAt: first, nextNotifyAt: '', viewedAt: '' }, new Date('2026-06-28T02:00:00.000Z').getTime()), '没有下次提醒时间时不再提醒');
 })();
 
 console.log('\n[特别关注-已查看抑制]');

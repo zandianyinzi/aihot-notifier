@@ -7,8 +7,7 @@ const MAX_HISTORY_DAYS = 5;
 const AUTO_POLL_DELAY_BUFFER_MS = 6 * 60 * 60 * 1000;
 const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
-const WATCH_REMINDER_DELAYS = [0, 2 * 60 * 1000, 5 * 60 * 1000, 2 * 60 * 60 * 1000];
-const WATCH_DAILY_REMINDER_MS = 24 * 60 * 60 * 1000;
+const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 async function getConfig() {
   const data = await chrome.storage.local.get(['enabled', 'interval', 'lastCheck', 'feedMode']);
   return {
@@ -105,8 +104,7 @@ function getNextWatchNotifyAt(firstMatchedAt, notifyCount, referenceNow) {
   if (notifyCount < WATCH_REMINDER_DELAYS.length) {
     return new Date(first + WATCH_REMINDER_DELAYS[notifyCount]).toISOString();
   }
-  const base = referenceNow ? new Date(referenceNow).getTime() : Date.now();
-  return new Date(base + WATCH_DAILY_REMINDER_MS).toISOString();
+  return '';
 }
 
 function isWatchViewed(state) {
@@ -129,7 +127,8 @@ function buildWatchStateForItem(existingState, item, ruleIds, now) {
 
 function shouldNotifyWatchState(state, nowMs) {
   if (!state || isWatchViewed(state)) return false;
-  const next = new Date(state.nextNotifyAt || state.firstMatchedAt || 0).getTime();
+  const nextNotifyAt = Object.prototype.hasOwnProperty.call(state, 'nextNotifyAt') ? state.nextNotifyAt : state.firstMatchedAt;
+  const next = new Date(nextNotifyAt || 0).getTime();
   return next > 0 && next <= nowMs;
 }
 
