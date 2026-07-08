@@ -159,6 +159,7 @@ assert(hasDeclaration(themeCssByName['dark'] || '', '--accent', '#ecb07f'), '墨
 assert(hasDeclaration(themeCssByName['green-dark'] || '', '--bg', '#0c0f10'), '暗森背景使用更深邃的冷黑底色');
 assert(hasDeclaration(themeCssByName['green-dark'] || '', '--border-light', '#2a3033'), '暗森轻边界更清晰且偏冷');
 assert(hasDeclaration(themeCssByName['green-dark'] || '', '--accent', '#8fb2b8'), '暗森强调色使用冷调蓝绿灰');
+assert(hasDeclaration(themeCssByName['green-dark'] || '', '--state-ok', '#8fbea8'), '暗森成功态与主题强调色轻微分离');
 assert(hasDeclaration(themeCssByName['chrome-dark'] || '', '--accent', '#67a8dc'), '铬墨强调色使用克制工具蓝');
 assert(hasDeclaration(themeCssByName['chrome-dark'] || '', '--border', '#303641'), '铬墨边框使用稳定冷灰');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--color-scheme', 'dark'), '石青使用 dark color-scheme');
@@ -169,6 +170,9 @@ assert(hasDeclaration(themeCssByName['slate-night'] || '', '--text', '#f0f6fc'),
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--text-2', '#9da8b1'), '石青次级文字层级更清晰');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--border', '#2d3c43'), '石青边框使用青灰边界');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--accent', '#4bb6af'), '石青交互强调使用收敛石青青蓝');
+assert(hasDeclaration(themeCssByName['slate-night'] || '', '--cat-products', '#5f9fd3'), '石青产品分类色降低硬蓝感');
+assert(hasDeclaration(themeCssByName['slate-night'] || '', '--cat-paper', '#55aa72'), '石青论文分类色降低模板绿感');
+assert(hasDeclaration(themeCssByName['slate-night'] || '', '--cat-tips', '#df6f68'), '石青观点分类色降低硬红感');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--hot', '#ff7a45'), '石青保留 AI HOT 签名热度色');
 
 console.log('\n[主题辅助文字对比度]');
