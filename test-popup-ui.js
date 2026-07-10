@@ -31,6 +31,14 @@ function readDeclaration(css, property) {
   return css.match(new RegExp(`(?:^|;)\\s*${escapedProperty}\\s*:\\s*([^;]+)`, 'i'))?.[1]?.trim() || '';
 }
 
+function selectorSetsDeclaration(css, selectorPattern, property, valuePattern = /[^;]+/) {
+  return [...css.matchAll(/([^{}]+)\s*{([^{}]*)}/g)].some(([, selectorText, ruleBody]) => {
+    const selectors = selectorText.split(',').map(selector => selector.trim());
+    return selectors.some(selector => selectorPattern.test(selector)) &&
+      hasDeclaration(ruleBody, property, valuePattern);
+  });
+}
+
 function parseHexColor(value) {
   const match = value.match(/^#([0-9a-f]{6})$/i);
   if (!match) return null;
@@ -344,12 +352,14 @@ assert(!/background\s*:/.test(itemHoverRule), '条目 hover 不再改变背景')
 
 const itemUnreadHoverRule = popupHtml.match(/\.item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(itemUnreadHoverRule, 'background', /var\(--bg-unread\)/), '未读条目 hover 保持未读背景');
-assert(/box-shadow\s*:\s*inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\)/i.test(itemUnreadHoverRule), '未读条目 hover 同时显示左侧未读 rail 与右侧 hover rail');
+assert(hasDeclaration(itemUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\)/), '未读条目 hover 同时显示左侧未读 rail 与右侧 hover rail');
 
 const watchUnreadHoverRule = popupHtml.match(/\.item\.watch-item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(/box-shadow\s*:\s*inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail-strong, var\(--accent\)\)/i.test(watchUnreadHoverRule), '特关未读 hover 左右两侧都使用 strong rail');
+assert(hasDeclaration(watchUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail-strong, var\(--accent\)\)/), '特关未读 hover 左右两侧都使用 strong rail');
 
-assert(!/\.item\.read:hover \.item-title,\s*\.item\.read:hover \.item-summary,\s*\.item\.read:hover \.item-meta\s*{/i.test(popupHtml), '已读条目 hover 不再提亮标题摘要与元信息');
+const readHoverTextSelectorPattern = /^\.item\.read:hover\s+\.item-(?:title|summary|meta)$/i;
+assert(!selectorSetsDeclaration(popupHtml, readHoverTextSelectorPattern, 'color'), '已读条目 hover 不再对标题摘要与元信息设置颜色');
+assert(!selectorSetsDeclaration(popupHtml, readHoverTextSelectorPattern, 'color', /var\(--text-read-hover\)/), '已读条目 hover 不再使用 --text-read-hover 提亮标题摘要与元信息');
 assert(/\.item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\)/i.test(popupHtml), '未读条目使用 hairline Hot rail');
 assert(!/\.item\.watch-item\s*{[\s\S]*box-shadow\s*:/.test(popupHtml), '已读特关条目不保留左侧颜色条');
 assert(/\.item\.watch-item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\)/i.test(popupHtml), '未读特关条目使用 hairline Hot rail');
