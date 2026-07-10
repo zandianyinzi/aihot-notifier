@@ -32,7 +32,9 @@ Separate visual meanings:
 
 ### Watch item behavior
 
-- Watch unread items currently use the stronger unread rail token.
+- Watch unread items use the stronger unread rail token.
+- `--rail-strong` should stay in the same hue family as `--rail`, but be deeper and more grounded rather than brighter or more saturated.
+- The stronger rail should not be wider, glowing, red/orange, or alarm-like.
 - When a watch unread item is hovered, its right hover rail should use the same stronger style as its left unread rail.
 
 ## CSS-level direction
@@ -42,7 +44,13 @@ Use box-shadow composition rather than adding new DOM elements:
 - Unread left rail: `inset var(--hairline) 0 0 var(--rail, var(--accent))`.
 - Hover right rail: `inset calc(-1 * var(--hairline)) 0 0 var(--rail, var(--accent))`.
 - Unread + hover: combine both shadows in one declaration.
-- Watch unread + hover: combine both shadows using `--rail-strong` fallback.
+- Watch unread + hover: combine both shadows using `--rail-strong` fallback, where `--rail-strong` is a deeper same-hue emphasis token rather than a brighter accent.
+
+## Color token guidance
+
+- Define `--rail` as the normal unread rail token, falling back to `--accent` if needed.
+- Define `--rail-strong` per theme as a deeper, calmer version of that theme's rail/accent hue.
+- Emphasis comes from tonal depth, not increased brightness, line width, glow, or warning colors.
 
 ## Non-goals
 
@@ -55,3 +63,4 @@ Use box-shadow composition rather than adding new DOM elements:
 - Visually confirm read hover shows only the right rail and no background brightening.
 - Visually confirm unread hover keeps unread background and shows both left and right rails.
 - Run existing tests after implementation: `node test.js` and `node test-notification.js`.
+
