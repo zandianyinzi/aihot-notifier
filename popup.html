@@ -966,13 +966,12 @@
       -webkit-user-select: none;
       -moz-user-select: none;
       -ms-user-select: none;
-      transition: background 0.12s ease;
     }
 
     .item:last-child { border-bottom: none; }
 
     .item:hover {
-      background: var(--bg-item-hover, var(--bg-hover));
+      box-shadow: inset calc(-1 * var(--hairline)) 0 0 var(--rail, var(--accent));
     }
 
     .item.unread {
@@ -981,11 +980,20 @@
     }
 
     .item.unread:hover {
-      background: var(--bg-item-hover, var(--bg-hover));
+      background: var(--bg-unread);
+      box-shadow:
+        inset var(--hairline) 0 0 var(--rail, var(--accent)),
+        inset calc(-1 * var(--hairline)) 0 0 var(--rail, var(--accent));
     }
 
     .item.watch-item.unread {
       box-shadow: inset var(--hairline) 0 0 var(--rail-strong, var(--accent));
+    }
+
+    .item.watch-item.unread:hover {
+      box-shadow:
+        inset var(--hairline) 0 0 var(--rail-strong, var(--accent)),
+        inset calc(-1 * var(--hairline)) 0 0 var(--rail-strong, var(--accent));
     }
 
     .item.read .item-title {
@@ -1059,12 +1067,6 @@
 
     .item.read .item-summary {
       color: var(--text-read);
-    }
-
-    .item.read:hover .item-title,
-    .item.read:hover .item-summary,
-    .item.read:hover .item-meta {
-      color: var(--text-read-hover, var(--text-read));
     }
 
     .item-meta {
