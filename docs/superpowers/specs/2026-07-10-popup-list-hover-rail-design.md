@@ -13,19 +13,22 @@ Separate visual meanings:
 - Left rail: unread state.
 - Right rail: current hover position.
 - No background brightening on hover for either read or unread items.
+- No text brightening on hover; content tone remains determined by read/unread state.
 
 ## Design
 
-### Item background
+### Item background and content tone
 
 - Remove the shared hover background highlight from list items.
 - Read items keep their normal background on hover.
 - Unread items keep `--bg-unread` on hover.
+- Remove read-item hover text brightening; title, summary, and metadata colors should not change just because the pointer is over the row.
+- Content tone remains the read/unread signal; hover only marks pointer position.
 
 ### Rail semantics
 
 - Unread items keep the existing left rail style.
-- Hovered items show a right rail using the same visual language as the unread rail.
+- Hovered items show a right rail using the same visual language as the unread rail, without changing background or text color.
 - For unread hovered items, both rails appear at once:
   - Left rail means unread.
   - Right rail means hovered.
@@ -49,8 +52,8 @@ Use box-shadow composition rather than adding new DOM elements:
 ## Color token guidance
 
 - Define `--rail` as the normal unread rail token, falling back to `--accent` if needed.
-- Define `--rail-strong` per theme as a deeper, calmer version of that theme's rail/accent hue.
-- Emphasis comes from tonal depth, not increased brightness, line width, glow, or warning colors.
+- Define `--rail-strong` per theme as a deeper, denser, calmer version of that theme's rail/accent hue; it should remain visible on dark backgrounds.
+- Emphasis comes from tonal depth and density, not increased brightness, line width, glow, or warning colors.
 
 ## Non-goals
 
@@ -60,7 +63,8 @@ Use box-shadow composition rather than adding new DOM elements:
 
 ## Validation
 
-- Visually confirm read hover shows only the right rail and no background brightening.
+- Visually confirm read hover shows only the right rail and no background or text brightening.
 - Visually confirm unread hover keeps unread background and shows both left and right rails.
 - Run existing tests after implementation: `node test.js` and `node test-notification.js`.
+
 
