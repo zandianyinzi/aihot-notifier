@@ -31,6 +31,14 @@ function readDeclaration(css, property) {
   return css.match(new RegExp(`(?:^|;)\\s*${escapedProperty}\\s*:\\s*([^;]+)`, 'i'))?.[1]?.trim() || '';
 }
 
+function selectorSetsDeclaration(css, selectorPattern, property, valuePattern = /[^;]+/) {
+  return [...css.matchAll(/([^{}]+)\s*{([^{}]*)}/g)].some(([, selectorText, ruleBody]) => {
+    const selectors = selectorText.split(',').map(selector => selector.trim());
+    return selectors.some(selector => selectorPattern.test(selector)) &&
+      hasDeclaration(ruleBody, property, valuePattern);
+  });
+}
+
 function parseHexColor(value) {
   const match = value.match(/^#([0-9a-f]{6})$/i);
   if (!match) return null;
@@ -116,7 +124,7 @@ assert(!/box-shadow\s*:/.test(bodyRule), '主窗口不额外绘制应用内外�
 assert(!/border\s*:\s*1px\s+solid\s+var\(--window-edge\)/i.test(bodyRule), '主窗口不使用 window-edge 真实 border');
 assert(!/--window-edge\s*:/.test(rootRule), '全局不保留 window-edge token，避免边框体系分叉');
 assert(!/--window-edge-highlight\s*:/.test(rootRule), '全局不保留 window-edge-highlight token');
-assert(hasDeclaration(rootRule, '--hairline', '0.5px'), '全局 hairline token 使用 0.5px');
+assert(hasDeclaration(rootRule, '--hairline', '1.25px'), '全局 hairline token 使用 1.25px');
 
 assert(themeRules.length >= 3, '存在主题 CSS 变量规则');
 for (const [_, themeName, themeCss] of themeRules) {
@@ -135,7 +143,8 @@ for (const [themeName, varNames] of Object.entries(themeVarNamesByTheme)) {
   const missing = canonicalThemeVars.filter(name => !varNames.includes(name));
   const extra = varNames.filter(name => !canonicalThemeVars.includes(name));
   assert(missing.length === 0 && extra.length === 0, `${themeName} 主题 token 结构与墨夜一致`);
-  assert(!varNames.includes('--rail') && !varNames.includes('--rail-strong') && !varNames.includes('--rule-rail'), `${themeName} 主题不定义 rail 机制特例`);
+  assert(varNames.includes('--rail') && varNames.includes('--rail-strong'), `${themeName} 主题定义 rail 与 rail-strong 语义 token`);
+  assert(!varNames.includes('--rule-rail'), `${themeName} 主题不使用旧 rule-rail token`);
 }
 
 
@@ -155,12 +164,21 @@ assert(!/theme\s*===\s*'clear-light'/.test(popupBootJs), 'boot 阶段不再按�
 assert(!/theme\s*===\s*'clear-light'/.test(popupJs), '运行时不再按晴野切换 light color-scheme');
 assert(!themeCssByName['clear-light'], '主题 token 不再包含晴野');
 assert(hasDeclaration(themeCssByName['dark'] || '', '--bg', '#101010'), '墨夜背景使用更稳深黑');
-assert(hasDeclaration(themeCssByName['dark'] || '', '--accent', '#ecb07f'), '墨夜强调色使用克制暖铜');
+assert(hasDeclaration(themeCssByName['dark'] || '', '--accent', '#caa85a'), '墨夜强调色往行业黄 signal 靠拢');
+assert(hasDeclaration(themeCssByName['dark'] || '', '--accent-soft', 'rgba(202,168,90,0.12)'), '墨夜强调轻染跟随行业黄 signal');
+assert(hasDeclaration(themeCssByName['dark'] || '', '--rail', '#e4ba48'), '墨夜 rail 使用沉稳行业黄信号色');
+assert(hasDeclaration(themeCssByName['dark'] || '', '--rail-strong', '#b98b32'), '墨夜 strong rail 使用更深沉黄褐同色系');
 assert(hasDeclaration(themeCssByName['green-dark'] || '', '--bg', '#0c0f10'), '暗森背景使用更深邃的冷黑底色');
 assert(hasDeclaration(themeCssByName['green-dark'] || '', '--border-light', '#2a3033'), '暗森轻边界更清晰且偏冷');
-assert(hasDeclaration(themeCssByName['green-dark'] || '', '--accent', '#8fb2b8'), '暗森强调色使用冷调蓝绿灰');
+assert(hasDeclaration(themeCssByName['green-dark'] || '', '--accent', '#91ad79'), '暗森强调色使用苔藓绿，和石青拉开');
+assert(hasDeclaration(themeCssByName['green-dark'] || '', '--accent-soft', 'rgba(145,173,121,0.14)'), '暗森强调轻染跟随苔藓绿 signal');
+assert(hasDeclaration(themeCssByName['green-dark'] || '', '--rail', '#9fbd73'), '暗森 rail 使用苔藓绿信号色');
+assert(hasDeclaration(themeCssByName['green-dark'] || '', '--rail-strong', '#6f8a52'), '暗森 strong rail 使用更深橄榄绿');
 assert(hasDeclaration(themeCssByName['green-dark'] || '', '--state-ok', '#8fbea8'), '暗森成功态与主题强调色轻微分离');
-assert(hasDeclaration(themeCssByName['chrome-dark'] || '', '--accent', '#67a8dc'), '铬墨强调色使用克制工具蓝');
+assert(hasDeclaration(themeCssByName['chrome-dark'] || '', '--accent', '#82b2e6'), '铬墨强调色往产品蓝 signal 靠拢');
+assert(hasDeclaration(themeCssByName['chrome-dark'] || '', '--accent-soft', 'rgba(130,178,230,0.14)'), '铬墨强调轻染跟随产品蓝 signal');
+assert(hasDeclaration(themeCssByName['chrome-dark'] || '', '--rail', '#8ab4f8'), '铬墨 rail 使用稳定产品蓝信号色');
+assert(hasDeclaration(themeCssByName['chrome-dark'] || '', '--rail-strong', '#5f8fc8'), '铬墨 strong rail 使用更深产品蓝');
 assert(hasDeclaration(themeCssByName['chrome-dark'] || '', '--border', '#303641'), '铬墨边框使用稳定冷灰');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--color-scheme', 'dark'), '石青使用 dark color-scheme');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--bg', '#0b1418'), '石青背景使用更独立的青黑底色');
@@ -169,7 +187,10 @@ assert(hasDeclaration(themeCssByName['slate-night'] || '', '--bg-hover', '#19262
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--text', '#f0f6fc'), '石青主文字保持高可读性');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--text-2', '#9da8b1'), '石青次级文字层级更清晰');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--border', '#2d3c43'), '石青边框使用青灰边界');
-assert(hasDeclaration(themeCssByName['slate-night'] || '', '--accent', '#4bb6af'), '石青交互强调使用收敛石青青蓝');
+assert(hasDeclaration(themeCssByName['slate-night'] || '', '--accent', '#62bcb5'), '石青交互强调往青绿 signal 靠拢');
+assert(hasDeclaration(themeCssByName['slate-night'] || '', '--accent-soft', 'rgba(98,188,181,0.13)'), '石青强调轻染跟随青绿 signal');
+assert(hasDeclaration(themeCssByName['slate-night'] || '', '--rail', '#5ecdc3'), '石青 rail 使用青绿信号色');
+assert(hasDeclaration(themeCssByName['slate-night'] || '', '--rail-strong', '#3f928c'), '石青 strong rail 使用更深青绿');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--cat-products', '#5f9fd3'), '石青产品分类色降低硬蓝感');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--cat-paper', '#55aa72'), '石青论文分类色降低模板绿感');
 assert(hasDeclaration(themeCssByName['slate-night'] || '', '--cat-tips', '#df6f68'), '石青观点分类色降低硬红感');
@@ -326,9 +347,23 @@ assert(hasDeclaration(watchBadgeRule, 'border-radius', '3px'), '特关标签使�
 assert(hasDeclaration(watchBadgeRule, 'font-weight', '500'), '特关标签使用与分类一致的字重');
 assert(hasDeclaration(watchBadgeRule, 'padding', '1px 6px'), '特关标签使用与分类一致的内边距');
 assert(!/box-shadow\s*:/.test(watchBadgeRule), '特关标签不使用额外立体效果，保持与分类协调');
-assert(/\.item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\)/i.test(popupHtml), '未读条目使用 hairline Hot rail');
+const itemHoverRule = popupHtml.match(/\.item:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(itemHoverRule, 'box-shadow', /inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/), '条目 hover 使用右侧 rail 与增强轻底板表示鼠标位置');
+assert(!/background\s*:/.test(itemHoverRule), '条目 hover 不再改变背景');
+
+const itemUnreadHoverRule = popupHtml.match(/\.item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(itemUnreadHoverRule, 'background', /var\(--bg-unread\)/), '未读条目 hover 保持未读背景');
+assert(hasDeclaration(itemUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\)/), '未读条目 hover 使用 strong rail 与增强轻底板');
+
+const watchUnreadHoverRule = popupHtml.match(/\.item\.watch-item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/), '特关未读 hover 使用更亮 rail 与增强轻底板');
+
+const readHoverTextSelectorPattern = /^\.item\.read:hover\s+\.item-(?:title|summary|meta)$/i;
+assert(!selectorSetsDeclaration(popupHtml, readHoverTextSelectorPattern, 'color'), '已读条目 hover 不再对标题摘要与元信息设置颜色');
+assert(!selectorSetsDeclaration(popupHtml, readHoverTextSelectorPattern, 'color', /var\(--text-read-hover\)/), '已读条目 hover 不再使用 --text-read-hover 提亮标题摘要与元信息');
+assert(/\.item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\)/i.test(popupHtml), '未读条目使用 strong rail 与增强轻底板');
 assert(!/\.item\.watch-item\s*{[\s\S]*box-shadow\s*:/.test(popupHtml), '已读特关条目不保留左侧颜色条');
-assert(/\.item\.watch-item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\)/i.test(popupHtml), '未读特关条目使用 hairline Hot rail');
+assert(/\.item\.watch-item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/i.test(popupHtml), '未读特关条目使用更亮 rail 与增强轻底板');
 assert(/::-webkit-scrollbar-thumb\s*{[^}]*background:\s*var\(--scrollbar, var\(--border\)\)/i.test(popupHtml), '滚动条使用独立 scrollbar token 并回退 border');
 assert(/\.cat-tag\.cat-model\s*{[\s\S]*color-mix\(in srgb, var\(--cat-model\) 9%, transparent\)/i.test(popupHtml), '分类标签背景更克制');
 assert(/\.date-label\s*{[\s\S]*background:\s*var\(--bg-sub\)/i.test(popupHtml), '日期浮标使用面板背景降低按钮感');
