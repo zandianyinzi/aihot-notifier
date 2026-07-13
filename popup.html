@@ -22,10 +22,10 @@
       --text-unread-3: #96938b;
       --text-read: #aaa69d;
       --text-read-hover: #bdb9b0;
-      --accent: #d6a06f;
-      --accent-soft: rgba(214,160,111,0.12);
-      --rail: #d6a06f;
-      --rail-strong: #b57a52;
+      --accent: #caa85a;
+      --accent-soft: rgba(202,168,90,0.12);
+      --rail: #e4ba48;
+      --rail-strong: #b98b32;
       --scrollbar: #2a2a2a;
       --hot: #ff5520;
       --hot-soft: rgba(255,85,32,0.10);
@@ -63,10 +63,10 @@
       --text-unread-3: #96938a;
       --text-read: #aaa69d;
       --text-read-hover: #bdb9b0;
-      --accent: #8fb2b8;
-      --accent-soft: rgba(143,178,184,0.14);
-      --rail: #8fb2b8;
-      --rail-strong: #6f969d;
+      --accent: #91ad79;
+      --accent-soft: rgba(145,173,121,0.14);
+      --rail: #9fbd73;
+      --rail-strong: #6f8a52;
       --scrollbar: #252d30;
       --hot: #d8955f;
       --hot-soft: rgba(216,149,95,0.13);
@@ -104,10 +104,10 @@
       --text-unread-3: #98a2ad;
       --text-read: #848d97;
       --text-read-hover: #aab2bb;
-      --accent: #7daed2;
-      --accent-soft: rgba(125,174,210,0.14);
-      --rail: #7daed2;
-      --rail-strong: #5f8dac;
+      --accent: #82b2e6;
+      --accent-soft: rgba(130,178,230,0.14);
+      --rail: #8ab4f8;
+      --rail-strong: #5f8fc8;
       --scrollbar: #303641;
       --hot: #ff8a45;
       --hot-soft: rgba(255,138,69,0.13);
@@ -145,10 +145,10 @@
       --text-unread-3: #8c98a3;
       --text-read: #87939e;
       --text-read-hover: #c9d1d9;
-      --accent: #68aaa5;
-      --accent-soft: rgba(104,170,165,0.13);
-      --rail: #68aaa5;
-      --rail-strong: #4d8782;
+      --accent: #62bcb5;
+      --accent-soft: rgba(98,188,181,0.13);
+      --rail: #5ecdc3;
+      --rail-strong: #3f928c;
       --scrollbar: #343b46;
       --hot: #ff7a45;
       --hot-soft: rgba(255,122,69,0.14);
@@ -175,7 +175,7 @@
     [data-size="xxlarge"] { --fs-base: 19px; --fs-title: 19px; --fs-meta: 15px; --item-pad: 20px; }
 
     :root {
-      --hairline: 0.5px;
+      --hairline: 1.25px;
       --control-size: 30px;
       --control-radius: 6px;
       --control-icon-size: 16px;
@@ -971,29 +971,39 @@
     .item:last-child { border-bottom: none; }
 
     .item:hover {
-      box-shadow: inset calc(-1 * var(--hairline)) 0 0 var(--rail, var(--accent));
+      box-shadow:
+        inset calc(-1 * var(--hairline)) 0 0 var(--rail, var(--accent)),
+        inset -5px 0 0 color-mix(in srgb, var(--rail, var(--accent)) 8%, transparent);
     }
 
     .item.unread {
       background: var(--bg-unread);
-      box-shadow: inset var(--hairline) 0 0 var(--rail, var(--accent));
+      box-shadow:
+        inset var(--hairline) 0 0 var(--rail-strong, var(--accent)),
+        inset 5px 0 0 color-mix(in srgb, var(--rail-strong, var(--accent)) 8%, transparent);
     }
 
     .item.unread:hover {
       background: var(--bg-unread);
       box-shadow:
-        inset var(--hairline) 0 0 var(--rail, var(--accent)),
-        inset calc(-1 * var(--hairline)) 0 0 var(--rail, var(--accent));
+        inset var(--hairline) 0 0 var(--rail-strong, var(--accent)),
+        inset 5px 0 0 color-mix(in srgb, var(--rail-strong, var(--accent)) 8%, transparent),
+        inset calc(-1 * var(--hairline)) 0 0 var(--rail-strong, var(--accent)),
+        inset -5px 0 0 color-mix(in srgb, var(--rail-strong, var(--accent)) 8%, transparent);
     }
 
     .item.watch-item.unread {
-      box-shadow: inset var(--hairline) 0 0 var(--rail-strong, var(--accent));
+      box-shadow:
+        inset var(--hairline) 0 0 var(--rail, var(--accent)),
+        inset 5px 0 0 color-mix(in srgb, var(--rail, var(--accent)) 8%, transparent);
     }
 
     .item.watch-item.unread:hover {
       box-shadow:
-        inset var(--hairline) 0 0 var(--rail-strong, var(--accent)),
-        inset calc(-1 * var(--hairline)) 0 0 var(--rail-strong, var(--accent));
+        inset var(--hairline) 0 0 var(--rail, var(--accent)),
+        inset 5px 0 0 color-mix(in srgb, var(--rail, var(--accent)) 8%, transparent),
+        inset calc(-1 * var(--hairline)) 0 0 var(--rail, var(--accent)),
+        inset -5px 0 0 color-mix(in srgb, var(--rail, var(--accent)) 8%, transparent);
     }
 
     .item.read .item-title {
