@@ -348,22 +348,22 @@ assert(hasDeclaration(watchBadgeRule, 'font-weight', '500'), '特关标签使用
 assert(hasDeclaration(watchBadgeRule, 'padding', '1px 6px'), '特关标签使用与分类一致的内边距');
 assert(!/box-shadow\s*:/.test(watchBadgeRule), '特关标签不使用额外立体效果，保持与分类协调');
 const itemHoverRule = popupHtml.match(/\.item:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(itemHoverRule, 'box-shadow', /inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\),\s*inset -5px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/), '条目 hover 使用右侧 rail 与增强轻底板表示鼠标位置');
+assert(hasDeclaration(itemHoverRule, 'box-shadow', /inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/), '条目 hover 使用右侧 rail 与增强轻底板表示鼠标位置');
 assert(!/background\s*:/.test(itemHoverRule), '条目 hover 不再改变背景');
 
 const itemUnreadHoverRule = popupHtml.match(/\.item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(itemUnreadHoverRule, 'background', /var\(--bg-unread\)/), '未读条目 hover 保持未读背景');
-assert(hasDeclaration(itemUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset 5px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset -5px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\)/), '未读条目 hover 使用 strong rail 与增强轻底板');
+assert(hasDeclaration(itemUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\)/), '未读条目 hover 使用 strong rail 与增强轻底板');
 
 const watchUnreadHoverRule = popupHtml.match(/\.item\.watch-item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(watchUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset 5px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\),\s*inset -5px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/), '特关未读 hover 使用更亮 rail 与增强轻底板');
+assert(hasDeclaration(watchUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/), '特关未读 hover 使用更亮 rail 与增强轻底板');
 
 const readHoverTextSelectorPattern = /^\.item\.read:hover\s+\.item-(?:title|summary|meta)$/i;
 assert(!selectorSetsDeclaration(popupHtml, readHoverTextSelectorPattern, 'color'), '已读条目 hover 不再对标题摘要与元信息设置颜色');
 assert(!selectorSetsDeclaration(popupHtml, readHoverTextSelectorPattern, 'color', /var\(--text-read-hover\)/), '已读条目 hover 不再使用 --text-read-hover 提亮标题摘要与元信息');
-assert(/\.item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset 5px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\)/i.test(popupHtml), '未读条目使用 strong rail 与增强轻底板');
+assert(/\.item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\)/i.test(popupHtml), '未读条目使用 strong rail 与增强轻底板');
 assert(!/\.item\.watch-item\s*{[\s\S]*box-shadow\s*:/.test(popupHtml), '已读特关条目不保留左侧颜色条');
-assert(/\.item\.watch-item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset 5px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/i.test(popupHtml), '未读特关条目使用更亮 rail 与增强轻底板');
+assert(/\.item\.watch-item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/i.test(popupHtml), '未读特关条目使用更亮 rail 与增强轻底板');
 assert(/::-webkit-scrollbar-thumb\s*{[^}]*background:\s*var\(--scrollbar, var\(--border\)\)/i.test(popupHtml), '滚动条使用独立 scrollbar token 并回退 border');
 assert(/\.cat-tag\.cat-model\s*{[\s\S]*color-mix\(in srgb, var\(--cat-model\) 9%, transparent\)/i.test(popupHtml), '分类标签背景更克制');
 assert(/\.date-label\s*{[\s\S]*background:\s*var\(--bg-sub\)/i.test(popupHtml), '日期浮标使用面板背景降低按钮感');
