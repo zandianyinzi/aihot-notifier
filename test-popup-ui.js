@@ -124,7 +124,7 @@ assert(!/box-shadow\s*:/.test(bodyRule), '主窗口不额外绘制应用内外�
 assert(!/border\s*:\s*1px\s+solid\s+var\(--window-edge\)/i.test(bodyRule), '主窗口不使用 window-edge 真实 border');
 assert(!/--window-edge\s*:/.test(rootRule), '全局不保留 window-edge token，避免边框体系分叉');
 assert(!/--window-edge-highlight\s*:/.test(rootRule), '全局不保留 window-edge-highlight token');
-assert(hasDeclaration(rootRule, '--hairline', '1.25px'), '全局 hairline token 使用 1.25px');
+assert(hasDeclaration(rootRule, '--hairline', '1px'), '全局 hairline token 使用 1px');
 
 assert(themeRules.length >= 3, '存在主题 CSS 变量规则');
 for (const [_, themeName, themeCss] of themeRules) {
