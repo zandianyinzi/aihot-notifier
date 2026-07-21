@@ -1,5 +1,7 @@
 # Popup Hover Rail Implementation Plan
 
+> Superseded on 2026-07-21 by the press-dark hover feedback follow-up. The final popup list no longer renders permanent or hover rails; see `docs/superpowers/specs/2026-07-10-popup-list-hover-feedback-design.md` for the current behavior note.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace row-wide hover brightening in the popup tweet list with a right-side hover rail, tune theme accents toward the comfortable category palette, and preserve read/unread content tone.
@@ -501,7 +503,7 @@ Run:
 
 ```powershell
 git log --oneline -6
-git diff HEAD~4..HEAD -- popup.html test-popup-ui.js manifest.json docs/superpowers/specs/2026-07-10-popup-list-hover-rail-design.md
+git diff HEAD~4..HEAD -- popup.html test-popup-ui.js manifest.json docs/superpowers/specs/2026-07-10-popup-list-hover-feedback-design.md
 ```
 
 Expected: the diff only includes the approved spec, tests, CSS token/rule changes, and manifest version bump.

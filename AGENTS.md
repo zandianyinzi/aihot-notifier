@@ -10,14 +10,14 @@
 - `icons/`：扩展图标，包含 16、32、48、128px 等尺寸。
 - `store/`：Chrome Web Store 文案、隐私政策和截图素材。
 - `test*.js`：独立 Node 测试脚本，目前没有单独的 `tests/` 目录。
-- 设置面板按 `常规 / 外观 / 特关 / 调试` 分组，默认只展开 `常规`；特关规则首行保持 `来源 / 作者 / 停用 / 删除` 同行，来源完整显示，作者在操作按钮前省略，关键词只在存在时另起一行；除输入框外，弹窗内其它区域不应出现文本插入光标。
+- 设置面板按 `常规 / 外观 / 特关 / 调试` 分组，默认不展开任何分组；主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧颜色条；特关规则首行保持 `来源 / 作者 / 停用 / 删除` 同行，来源完整显示，作者在操作按钮前省略，关键词只在存在时另起一行；除输入框外，弹窗内其它区域不应出现文本插入光标。
 
 ## 构建、测试与开发命令
 
 - `node test.js`：运行纯逻辑测试，覆盖去重、排序、时间窗口和 API URL。
 - `node test-notification.js`：使用 mock 的 Chrome API 验证通知和 badge 逻辑。
 - `node test-e2e.js`：请求 `https://aihot.virxact.com`，验证线上 API 数据假设。
-- `bash pack.sh`：生成用于分发的 `aihot-notifier.zip`。
+- `bash pack.sh`：生成用于分发的 `aihot-notifier.zip`；Windows 无 bash 时使用 PowerShell `Compress-Archive`，保持包内只含清单、JS、HTML、`fonts/`、`icons/`。
 - `node screenshot.mjs`：重新生成商店截图；首次使用前执行 `npm install --no-save puppeteer`。
 
 仓库没有 `package.json`。除非明确切换到 Node 包管理流程，否则不要新增依赖清单。
