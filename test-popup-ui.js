@@ -386,7 +386,7 @@ const itemHoverRule = popupHtml.match(/\.item:hover\s*{([\s\S]*?)}/i)?.[1] || ''
 assert(hasDeclaration(itemHoverRule, 'background', /color-mix\(in srgb, var\(--bg-item-hover\) 88%, #000\)/), '条目 hover 使用轻微压暗反馈');
 assert(!readDeclaration(itemHoverRule, 'box-shadow'), '条目 hover 不再使用右侧细线反馈');
 const itemReadHoverRule = popupHtml.match(/\.item\.read:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(itemReadHoverRule, 'background', /color-mix\(in srgb, var\(--bg-item-hover\) 64%, #000\)/), '已读条目 hover 使用可见但低于未读的亮度反馈');
+assert(hasDeclaration(itemReadHoverRule, 'background', /color-mix\(in srgb, var\(--bg-item-hover\) 68%, #000\)/), '已读条目 hover 使用可见但低于未读的亮度反馈');
 assert(!readDeclaration(itemReadHoverRule, 'box-shadow'), '已读条目 hover 不使用额外颜色条反馈');
 
 const itemUnreadHoverRule = popupHtml.match(/\.item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
