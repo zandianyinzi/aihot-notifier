@@ -1,7 +1,7 @@
 # Popup List Hover Feedback Design
 
 Date: 2026-07-10
-Updated: 2026-07-21
+Updated: 2026-07-24
 
 ## Context
 
@@ -42,7 +42,7 @@ Separate visual meanings:
 
 Use background color only, without extra DOM elements:
 
-- Read hover: `color-mix(in srgb, var(--bg-item-hover) 88%, #000)`.
+- Read hover: `color-mix(in srgb, var(--bg-item-hover) 64%, #000)`; this keeps pointer feedback visible while remaining quieter than unread/normal hover.
 - Unread hover: `color-mix(in srgb, var(--bg-unread) 84%, #000)`.
 - Unread and watch unread static state: no `box-shadow` rail.
 - Hover state: no `box-shadow` rail.

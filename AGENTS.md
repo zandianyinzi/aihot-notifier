@@ -16,6 +16,7 @@
 
 - `node test.js`：运行纯逻辑测试，覆盖去重、排序、时间窗口和 API URL。
 - `node test-notification.js`：使用 mock 的 Chrome API 验证通知和 badge 逻辑。
+- `node test-background.js`：直接加载真实 `background.js`，验证消息通道、fingerprint、分页和失败语义。
 - `node test-e2e.js`：请求 `https://aihot.virxact.com`，验证线上 API 数据假设。
 - `bash pack.sh`：生成用于分发的 `aihot-notifier.zip`；Windows 无 bash 时使用 PowerShell `Compress-Archive`，保持包内只含清单、JS、HTML、`fonts/`、`icons/`。
 - `node screenshot.mjs`：重新生成商店截图；首次使用前执行 `npm install --no-save puppeteer`。
@@ -30,7 +31,7 @@
 
 ## 测试指南
 
-修改逻辑前后至少运行 `node test.js` 和 `node test-notification.js`。涉及 API 模式、分页、日期窗口或线上 feed 假设时，运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。
+修改逻辑前后至少运行 `node test.js`、`node test-notification.js` 和相关 UI/API 测试。涉及 background 消息、fingerprint、分页或失败语义时运行 `node test-background.js`；涉及线上 feed 假设时运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。
 
 ## 发布流程
 

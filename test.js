@@ -58,8 +58,8 @@ function calcSinceTime(lastCheck, intervalMinutes) {
   return new Date(new Date(lastCheck).getTime() - bufferMs).toISOString();
 }
 
-function calcManualSince(historyDays) {
-  return new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
+function calcManualSince(lastCheck, lastItemsPollAt = '') {
+  return calcSinceTime(lastItemsPollAt || lastCheck, 5);
 }
 
 function getApiUrl(mode) {
@@ -264,8 +264,8 @@ console.log('\n[cutoff过滤]');
     { title: 'Recent', time: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString() },
     { title: 'Old', time: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString() },
   ];
-  const result = mergeAndSort(entries, [], 7);
-  assert(result.length === 1, '超过7天的条目被过滤');
+  const result = mergeAndSort(entries, [], 5);
+  assert(result.length === 1, '超过5天的条目被过滤');
   assert(result[0].title === 'Recent', '保留近期条目');
 })();
 
@@ -332,15 +332,11 @@ console.log('\n[回退时间-自动poll]');
 
 console.log('\n[回退时间-手动poll]');
 (function() {
-  const since2 = calcManualSince(2);
-  const diff2 = Date.now() - new Date(since2).getTime();
-  const days2 = diff2 / (24 * 60 * 60 * 1000);
-  assert(Math.abs(days2 - 2) < 0.01, 'historyDays=2 回退约2天');
+  const sinceLastItems = calcManualSince('2026-06-05T06:00:00.000Z', '2026-06-05T05:00:00.000Z');
+  assert(sinceLastItems === '2026-06-04T23:00:00.000Z', '手动刷新基于lastItemsPollAt回退6小时');
 
-  const since7 = calcManualSince(7);
-  const diff7 = Date.now() - new Date(since7).getTime();
-  const days7 = diff7 / (24 * 60 * 60 * 1000);
-  assert(Math.abs(days7 - 7) < 0.01, 'historyDays=7 回退约7天');
+  const sinceFallback = calcManualSince('2026-06-05T06:00:00.000Z');
+  assert(sinceFallback === '2026-06-05T00:00:00.000Z', '缺lastItemsPollAt时手动刷新基于lastCheck回退6小时');
 })();
 
 console.log('\n[mapEntries字段映射]');
@@ -557,12 +553,12 @@ console.log('\n[resetAndPoll-cutoff过滤]');
     { url: 'https://a.com/1', title: 'Recent', publishedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString() },
     { url: 'https://a.com/2', title: 'Old', publishedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString() },
   ];
-  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - 5 * 24 * 60 * 60 * 1000;
   const newHistory = apiItems
     .map(i => ({ title: i.title, url: i.url, source: '', category: '', summary: '', time: i.publishedAt }))
     .filter(i => new Date(i.time).getTime() > cutoff)
     .sort((a, b) => new Date(b.time) - new Date(a.time));
-  assert(newHistory.length === 1, '超过7天的条目被过滤');
+  assert(newHistory.length === 1, '超过5天的条目被过滤');
   assert(newHistory[0].title === 'Recent', '只保留近期条目');
 })();
 
