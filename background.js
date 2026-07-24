@@ -1,4 +1,5 @@
 const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
+const FINGERPRINT_URL = 'https://aihot.virxact.com/api/public/fingerprint';
 const ALARM_NAME = 'aihot-poll';
 const DEFAULT_INTERVAL = 5;
 const MIN_INTERVAL = 2;
@@ -7,6 +8,12 @@ const MAX_HISTORY_DAYS = 5;
 const AUTO_POLL_DELAY_BUFFER_MS = 6 * 60 * 60 * 1000;
 const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
+const SELECTED_MAX_PAGES = 3;
+const ALL_MAX_PAGES = 20;
+const PAGE_DELAY_MS = Number.isFinite(globalThis.__AIHOT_TEST_PAGE_DELAY_MS) ? globalThis.__AIHOT_TEST_PAGE_DELAY_MS : 1100;
+const RETRY_AFTER_FALLBACK_MS = 45 * 1000;
+const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
+const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 2 * 60 * 1000, 5 * 60 * 1000, 2 * 60 * 60 * 1000];
 const WATCH_DAILY_REMINDER_MS = 24 * 60 * 60 * 1000;
 async function getConfig() {
@@ -21,6 +28,136 @@ async function getConfig() {
 
 function getApiUrl(mode) {
   return `${API_BASE}&mode=${mode}`;
+}
+
+function getMaxPages(mode) {
+  return normalizeFeedMode(mode) === 'all' ? ALL_MAX_PAGES : SELECTED_MAX_PAGES;
+}
+
+function sleep(ms) {
+  if (!ms || ms <= 0) return Promise.resolve();
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getResponseHeader(response, name) {
+  if (!response || !response.headers) return '';
+  if (typeof response.headers.get === 'function') return response.headers.get(name) || '';
+  return response.headers[name] || response.headers[name.toLowerCase()] || '';
+}
+
+function getRetryAfterMs(response, status) {
+  const retryAfter = getResponseHeader(response, 'Retry-After');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const dateMs = new Date(retryAfter).getTime();
+    if (dateMs > Date.now()) return dateMs - Date.now();
+  }
+  if (status === 429) return RETRY_AFTER_FALLBACK_MS;
+  if (status === 567 || status === 502 || status === 503 || status === 504) return TEMPORARY_FAILURE_BACKOFF_MS;
+  return 0;
+}
+
+async function recordApiFailure(responseOrStatus) {
+  const status = typeof responseOrStatus === 'number' ? responseOrStatus : responseOrStatus?.status;
+  await incrementFailCount();
+  const backoffMs = getRetryAfterMs(responseOrStatus, status);
+  if (backoffMs > 0) {
+    await chrome.storage.local.set({ nextAllowedPollAt: new Date(Date.now() + backoffMs).toISOString() });
+  }
+}
+
+function getItemKey(item) {
+  return item && (item.id || item.url || item.permalink || item.title || '');
+}
+
+function getExistingItemKeys(history) {
+  return new Set((history || []).flatMap(item => [item.id, item.url, item.permalink].filter(Boolean)));
+}
+
+function isSafetyItemsPollDue(lastItemsPollAt) {
+  const last = new Date(lastItemsPollAt || 0).getTime();
+  return !last || Date.now() - last >= ITEMS_SAFETY_POLL_MS;
+}
+
+function isNewApiItem(item, existingKeys) {
+  return !existingKeys.has(getItemKey(item)) && !existingKeys.has(item.url) && !existingKeys.has(item.permalink);
+}
+
+async function probeFingerprint(mode) {
+  const normalizedMode = normalizeFeedMode(mode);
+  const { apiFingerprints = {}, apiFingerprintEtags = {} } = await chrome.storage.local.get(['apiFingerprints', 'apiFingerprintEtags']);
+  const headers = {};
+  if (apiFingerprintEtags.current) headers['If-None-Match'] = apiFingerprintEtags.current;
+
+  const res = await fetch(FINGERPRINT_URL, Object.keys(headers).length > 0 ? { headers } : undefined);
+  if (res.status === 304) {
+    return { ok: true, changed: false, fingerprints: apiFingerprints, etag: apiFingerprintEtags.current || '' };
+  }
+  if (!res.ok) {
+    return { ok: false, status: res.status, response: res };
+  }
+
+  const json = await res.json();
+  const nextFingerprint = json && json[normalizedMode];
+  if (!nextFingerprint) {
+    return { ok: true, changed: true, unavailable: true, fingerprints: apiFingerprints, etag: '' };
+  }
+
+  const etag = getResponseHeader(res, 'ETag');
+  const changed = apiFingerprints[normalizedMode] !== nextFingerprint;
+  return {
+    ok: true,
+    changed,
+    fingerprints: {
+      ...apiFingerprints,
+      ...(json.selected ? { selected: json.selected } : {}),
+      ...(json.all ? { all: json.all } : {})
+    },
+    etag
+  };
+}
+
+async function saveFingerprintProbe(probe) {
+  if (!probe || probe.unavailable) return;
+  const data = {};
+  if (probe.fingerprints) data.apiFingerprints = probe.fingerprints;
+  if (probe.etag) {
+    const { apiFingerprintEtags = {} } = await chrome.storage.local.get('apiFingerprintEtags');
+    data.apiFingerprintEtags = { ...apiFingerprintEtags, current: probe.etag };
+  }
+  if (Object.keys(data).length > 0) await chrome.storage.local.set(data);
+}
+
+async function fetchItemsPage(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw Object.assign(new Error(`API returned ${res.status}`), { response: res, status: res.status });
+  return res.json();
+}
+
+async function fetchItems({ mode, sinceTime = '', cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '' }) {
+  const normalizedMode = normalizeFeedMode(mode);
+  let allItems = [];
+  let cursor = null;
+
+  for (let page = 0; page < maxPages; page++) {
+    let url = baseUrl || getApiUrl(normalizedMode);
+    if (sinceTime) url += `&since=${encodeURIComponent(sinceTime)}`;
+    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+
+    const json = await fetchItemsPage(url);
+    if (!json.items || json.items.length === 0) break;
+
+    allItems = allItems.concat(json.items);
+
+    if (!json.hasNext || !json.nextCursor) break;
+    const oldest = json.items[json.items.length - 1];
+    if (new Date(oldest.publishedAt).getTime() < cutoff) break;
+    cursor = json.nextCursor;
+    await sleep(PAGE_DELAY_MS);
+  }
+
+  return allItems;
 }
 
 function splitWatchKeywords(value) {
@@ -235,10 +372,16 @@ function isWithinHistoryWindow(item, cutoff) {
 function toHistoryEntry(item, discoveredAt, watchMatches = []) {
   const entry = {
     title: item.title,
-    url: item.url,
+    id: item.id || '',
+    titleEn: item.title_en || '',
+    url: item.url || item.permalink || '',
+    permalink: item.permalink || item.url || '',
     source: item.source || '',
     category: item.category || '',
     summary: item.summary || '',
+    score: item.score ?? null,
+    selected: item.selected === true,
+    attribution: item.attribution || null,
     time: item.publishedAt,
     discoveredAt
   };
@@ -268,6 +411,12 @@ async function pollForUpdates() {
   const config = await getConfig();
   if (!config.enabled) return;
 
+  const { nextAllowedPollAt = '', lastItemsPollAt = '' } = await chrome.storage.local.get(['nextAllowedPollAt', 'lastItemsPollAt']);
+  if (nextAllowedPollAt && new Date(nextAllowedPollAt).getTime() > Date.now()) {
+    console.log(`[AI HOT] polling paused until ${nextAllowedPollAt}`);
+    return;
+  }
+
   // API 公开接口存在数小时级缓存/入库延迟，自动轮询保守回退避免空历史漏载。
   const bufferMs = Math.max(config.interval * 2 * 60 * 1000, AUTO_POLL_DELAY_BUFFER_MS);
   const sinceTime = new Date(new Date(config.lastCheck).getTime() - bufferMs).toISOString();
@@ -275,19 +424,29 @@ async function pollForUpdates() {
   console.log(`[AI HOT] polling since=${sinceTime}`);
 
   try {
-    const res = await fetch(`${getApiUrl(config.feedMode)}&since=${encodeURIComponent(sinceTime)}`);
-    if (!res.ok) {
-      console.warn(`[AI HOT] API returned ${res.status}`);
-      await incrementFailCount();
+    const fingerprintProbe = await probeFingerprint(config.feedMode);
+    if (!fingerprintProbe.ok) {
+      console.warn(`[AI HOT] fingerprint returned ${fingerprintProbe.status}`);
+      await recordApiFailure(fingerprintProbe.response || fingerprintProbe.status);
+      return;
+    }
+    const safetyPollDue = isSafetyItemsPollDue(lastItemsPollAt);
+    if (!fingerprintProbe.changed && !safetyPollDue) {
+      await saveFingerprintProbe(fingerprintProbe);
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      await updateBadge();
+      console.log('[AI HOT] fingerprint unchanged, skip items');
       return;
     }
 
-    const json = await res.json();
+    const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+    const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff });
     const { history = [] } = await chrome.storage.local.get('history');
-    const existingUrls = new Set(history.map(i => i.url));
-    const newItems = (json.items || []).filter(i => !existingUrls.has(i.url));
-    console.log(`[AI HOT] got ${json.items?.length || 0} items, ${newItems.length} new`);
-    await chrome.storage.local.set({ lastCheck: now, failCount: 0 });
+    const existingKeys = getExistingItemKeys(history);
+    const newItems = allItems.filter(i => isNewApiItem(i, existingKeys));
+    console.log(`[AI HOT] got ${allItems.length} items, ${newItems.length} new`);
+    await saveFingerprintProbe(fingerprintProbe);
+    await chrome.storage.local.set({ lastCheck: now, lastItemsPollAt: now, failCount: 0, nextAllowedPollAt: '' });
 
     if (newItems.length > 0) {
       await showNotification(newItems);
@@ -296,7 +455,7 @@ async function pollForUpdates() {
     }
   } catch (e) {
     console.error(`[AI HOT] fetch error:`, e);
-    await incrementFailCount();
+    await recordApiFailure(e.response || e.status || 0);
   }
 }
 
@@ -397,48 +556,27 @@ async function manualPoll() {
   console.log(`[AI HOT] manual poll since=${sinceTime}`);
 
   try {
-    let allItems = [];
-    let cursor = null;
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-    const maxPages = 3;
-
-    for (let page = 0; page < maxPages; page++) {
-      let url = `${getApiUrl(mode)}&since=${encodeURIComponent(sinceTime)}`;
-      if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(`API returned ${res.status}`);
-      }
-      const json = await res.json();
-      if (!json.items || json.items.length === 0) break;
-
-      allItems = allItems.concat(json.items);
-
-      if (!json.hasNext || !json.nextCursor) break;
-      const oldest = json.items[json.items.length - 1];
-      if (new Date(oldest.publishedAt).getTime() < cutoff) break;
-      cursor = json.nextCursor;
-    }
+    const allItems = await fetchItems({ mode, sinceTime, cutoff });
 
     if (allItems.length === 0) return;
 
-    const existingUrls = new Set(history.map(i => i.url));
+    const existingKeys = getExistingItemKeys(history);
     const discoveredAt = new Date().toISOString();
     const newEntries = allItems
-      .filter(i => !existingUrls.has(i.url))
+      .filter(i => isNewApiItem(i, existingKeys))
       .map(i => toHistoryEntry(i, discoveredAt));
 
     const merged = [...newEntries, ...history]
       .filter(i => isWithinHistoryWindow(i, cutoff))
       .sort((a, b) => getItemTime(b) - getItemTime(a));
 
-    await chrome.storage.local.set({ history: merged, lastCheck: new Date().toISOString(), failCount: 0 });
+    await chrome.storage.local.set({ history: merged, lastCheck: new Date().toISOString(), lastItemsPollAt: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
     await updateBadge();
     console.log(`[AI HOT] manual poll done, ${merged.length} total items (fetched ${allItems.length})`);
   } catch (e) {
     console.error(`[AI HOT] manual poll error:`, e);
-    await incrementFailCount();
+    await recordApiFailure(e.response || e.status || 0);
     throw e;
   }
 }
@@ -465,40 +603,21 @@ async function resetAndPoll(feedMode) {
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
 
-    let allItems = [];
-    let cursor = null;
-    const maxPages = 3;
-
-    for (let page = 0; page < maxPages; page++) {
-      let url = `${getApiUrl(feedMode)}&since=${encodeURIComponent(sinceTime)}`;
-      if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(`API returned ${res.status}`);
-      }
-      const json = await res.json();
-      if (!json.items || json.items.length === 0) break;
-
-      allItems = allItems.concat(json.items);
-
-      if (!json.hasNext || !json.nextCursor) break;
-      const oldest = json.items[json.items.length - 1];
-      if (new Date(oldest.publishedAt).getTime() < cutoff) break;
-      cursor = json.nextCursor;
-    }
+    const allItems = await fetchItems({ mode: feedMode, sinceTime, cutoff });
 
     const history = allItems
       .map(i => toHistoryEntry(i, i.publishedAt))
       .filter(i => isWithinHistoryWindow(i, cutoff))
       .sort((a, b) => getItemTime(b) - getItemTime(a));
 
-    await chrome.storage.local.set({ history, feedMode: normalizeFeedMode(feedMode), lastCheck: new Date().toISOString(), failCount: 0 });
+    const fingerprintProbe = await probeFingerprint(feedMode).catch(() => null);
+    await saveFingerprintProbe(fingerprintProbe);
+    await chrome.storage.local.set({ history, feedMode: normalizeFeedMode(feedMode), lastCheck: new Date().toISOString(), lastItemsPollAt: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
     await updateBadge();
     console.log(`[AI HOT] resetAndPoll done, ${history.length} items from ${allItems.length} fetched`);
   } catch (e) {
     console.error(`[AI HOT] resetAndPoll error:`, e);
-    await incrementFailCount();
+    await recordApiFailure(e.response || e.status || 0);
     throw e;
   }
 }
@@ -539,32 +658,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       const { feedMode, historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
       const mode = normalizeFeedMode(feedMode);
       const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-      const maxPages = 3;
-      let allItems = [];
-      let cursor = null;
-
-      for (let page = 0; page < maxPages; page++) {
-        let url = getApiUrl(mode);
-        if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-
-        const res = await fetch(url);
-        if (!res.ok) break;
-        const json = await res.json();
-        if (!json.items || json.items.length === 0) break;
-
-        allItems = allItems.concat(json.items);
-
-        if (!json.hasNext || !json.nextCursor) break;
-        const oldest = json.items[json.items.length - 1];
-        if (new Date(oldest.publishedAt).getTime() < cutoff) break;
-        cursor = json.nextCursor;
-      }
+      const allItems = await fetchItems({ mode, cutoff });
 
       if (allItems.length > 0) {
         const { history = [] } = await chrome.storage.local.get('history');
-        const existingUrls = new Set(history.map(i => i.url));
+        const existingKeys = getExistingItemKeys(history);
         const newEntries = allItems
-          .filter(i => !existingUrls.has(i.url))
+          .filter(i => isNewApiItem(i, existingKeys))
           .map(i => toHistoryEntry(i, i.publishedAt));
         const merged = [...newEntries, ...history]
           .filter(i => isWithinHistoryWindow(i, cutoff))

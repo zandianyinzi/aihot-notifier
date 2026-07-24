@@ -18,8 +18,18 @@ function dedup(apiItems, history) {
 
 function mapEntries(items) {
   return items.map(i => ({
-    title: i.title, url: i.url, source: i.source || '',
-    category: i.category || '', summary: i.summary || '', time: i.publishedAt,
+    title: i.title,
+    id: i.id || '',
+    titleEn: i.title_en || '',
+    url: i.url || i.permalink || '',
+    permalink: i.permalink || i.url || '',
+    source: i.source || '',
+    category: i.category || '',
+    summary: i.summary || '',
+    score: i.score ?? null,
+    selected: i.selected === true,
+    attribution: i.attribution || null,
+    time: i.publishedAt,
     discoveredAt: i.discoveredAt
   }));
 }
@@ -336,15 +346,30 @@ console.log('\n[回退时间-手动poll]');
 console.log('\n[mapEntries字段映射]');
 (function() {
   const items = [{
-    title: 'Test', url: 'https://t.com', source: 'Src',
-    category: 'model', summary: 'Sum', publishedAt: '2026-06-05T00:00:00Z'
+    id: 'item-1',
+    title: 'Test',
+    title_en: 'Original Test',
+    url: 'https://t.com',
+    permalink: 'https://aihot.virxact.com/items/item-1',
+    source: 'Src',
+    category: 'model',
+    summary: 'Sum',
+    score: 88,
+    selected: true,
+    attribution: { source: 'AI HOT', canonical: 'https://aihot.virxact.com/items/item-1' },
+    publishedAt: '2026-06-05T00:00:00Z'
   }];
   const mapped = mapEntries(items);
   assert(mapped[0].title === 'Test', 'title映射正确');
+  assert(mapped[0].id === 'item-1', 'id映射正确');
   assert(mapped[0].url === 'https://t.com', 'url映射正确');
+  assert(mapped[0].permalink === 'https://aihot.virxact.com/items/item-1', 'permalink映射正确');
   assert(mapped[0].source === 'Src', 'source映射正确');
   assert(mapped[0].category === 'model', 'category映射正确');
   assert(mapped[0].summary === 'Sum', 'summary映射正确');
+  assert(mapped[0].score === 88, 'score映射正确');
+  assert(mapped[0].selected === true, 'selected映射正确');
+  assert(mapped[0].attribution.canonical.includes('/items/item-1'), 'attribution映射正确');
   assert(mapped[0].time === '2026-06-05T00:00:00Z', 'publishedAt→time映射正确');
 })();
 
@@ -355,6 +380,9 @@ console.log('\n[mapEntries缺失字段]');
   assert(mapped[0].source === '', '缺失source默认空串');
   assert(mapped[0].category === '', '缺失category默认空串');
   assert(mapped[0].summary === '', '缺失summary默认空串');
+  assert(mapped[0].permalink === 'https://x.com', '缺失permalink回落url');
+  assert(mapped[0].score === null, '缺失score默认null');
+  assert(mapped[0].selected === false, '缺失selected默认false');
 })();
 
 console.log('\n[onInstalled合并-更新不覆盖]');
