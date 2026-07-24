@@ -13,6 +13,8 @@ let badgeText = null;
 let openedTabs = [];
 let fetchImpl = null;
 let requestedUrls = [];
+let notificationCreateIds = [];
+let failSetWhen = null;
 globalThis.__AIHOT_TEST_PAGE_DELAY_MS = 0;
 
 function assert(condition, msg) {
@@ -41,6 +43,9 @@ function resetState(overrides = {}) {
   };
   badgeText = null;
   openedTabs = [];
+  requestedUrls = [];
+  notificationCreateIds = [];
+  failSetWhen = null;
 }
 
 globalThis.chrome = {
@@ -58,6 +63,9 @@ globalThis.chrome = {
         return Promise.resolve(storageData);
       },
       set: (obj) => {
+        if (failSetWhen && failSetWhen(obj)) {
+          return Promise.reject(new Error('mock storage set failed'));
+        }
         Object.assign(storageData, obj);
         return Promise.resolve();
       }
@@ -65,8 +73,12 @@ globalThis.chrome = {
     onChanged: { addListener: () => {} }
   },
   notifications: {
-    create: () => Promise.resolve(),
-    onClicked: { addListener: (fn) => { onClickedHandler = fn; } }
+    create: (id) => {
+      notificationCreateIds.push(id);
+      return Promise.resolve(id);
+    },
+    onClicked: { addListener: (fn) => { onClickedHandler = fn; } },
+    onClosed: { addListener: () => {} }
   },
   action: {
     setBadgeText: (opts) => { badgeText = opts.text; },
@@ -183,6 +195,36 @@ async function runTests() {
   assert(storageData.apiFingerprints.selected === 'fp-new', '保存新的selected fingerprint');
   assert(storageData.history.some(i => i.url === 'https://example.com/fp-new'), '指纹变化后新条目进入history');
 
+  console.log('\n[自动轮询-fingerprint变化后since仍基于lastItemsPollAt]');
+  const previousItemsPollAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const advancedLastCheck = new Date().toISOString();
+  resetState({
+    feedMode: 'selected',
+    lastCheck: advancedLastCheck,
+    apiFingerprints: { selected: 'fp-old' },
+    lastItemsPollAt: previousItemsPollAt,
+    history: []
+  });
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fingerprint-newer"' },
+        json: () => Promise.resolve({ selected: 'fp-newer', all: 'fp-all' })
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], hasNext: false }) });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  const changedItemsUrl = requestedUrls.find(url => url.includes('/api/public/items'));
+  const changedSince = new URL(changedItemsUrl).searchParams.get('since');
+  const expectedChangedSince = new Date(new Date(previousItemsPollAt).getTime() - 6 * 60 * 60 * 1000).toISOString();
+  assert(changedSince === expectedChangedSince, '指纹变化后的items since基于lastItemsPollAt而不是lastCheck');
+
   console.log('\n[自动轮询-fingerprint未变化但兜底到期拉items]');
   resetState({
     feedMode: 'selected',
@@ -261,6 +303,99 @@ async function runTests() {
   assert(requestedUrls.some(url => url.includes('/api/public/items')), '304但缺all指纹时保守请求items');
   assert(storageData.history.some(i => i.url === 'https://example.com/304'), '304缺mode指纹后拉取内容进入history');
 
+  console.log('\n[自动轮询-缺当前mode指纹不发送条件ETag]');
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { selected: 'fp-selected' },
+    apiFingerprintEtags: { current: 'W/"fingerprint-old"' },
+    lastItemsPollAt: new Date().toISOString(),
+    history: []
+  });
+  let fingerprintOptions = null;
+  fetchImpl = (url, options) => {
+    if (url.includes('/api/public/fingerprint')) {
+      fingerprintOptions = options || {};
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fingerprint-new"' },
+        json: () => Promise.resolve({ selected: 'fp-selected', all: 'fp-all' })
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], hasNext: false }) });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  assert(!fingerprintOptions.headers || !fingerprintOptions.headers['If-None-Match'], '缺当前mode指纹时fingerprint请求不带If-None-Match');
+
+  console.log('\n[自动轮询-分页截断不提交fingerprint和lastItemsPollAt]');
+  const oldLastItemsPollAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'selected',
+    apiFingerprints: { selected: 'fp-old' },
+    lastItemsPollAt: oldLastItemsPollAt,
+    history: []
+  });
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fingerprint-truncated"' },
+        json: () => Promise.resolve({ selected: 'fp-truncated', all: 'fp-all' })
+      });
+    }
+    const cursor = new URL(url).searchParams.get('cursor');
+    const page = cursor ? Number(cursor.replace('page-', '')) : 1;
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        items: [{ id: `trunc-${page}`, title: `截断${page}`, url: `https://example.com/trunc-${page}`, publishedAt: new Date().toISOString() }],
+        hasNext: true,
+        nextCursor: `page-${page + 1}`
+      })
+    });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  assert(requestedUrls.filter(url => url.includes('/api/public/items')).length === 3, 'selected模式达到3页上限后停止');
+  assert(storageData.history.length === 3, '截断时已拉到的内容仍写入history');
+  assert(storageData.apiFingerprints.selected === 'fp-old', '截断时不提交新fingerprint');
+  assert(storageData.lastItemsPollAt === oldLastItemsPollAt, '截断时不提交lastItemsPollAt');
+
+  console.log('\n[自动轮询-history写入失败不提交fingerprint]');
+  const beforeFailedItemsPollAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'selected',
+    apiFingerprints: { selected: 'fp-old' },
+    lastItemsPollAt: beforeFailedItemsPollAt,
+    history: []
+  });
+  failSetWhen = (obj) => Object.prototype.hasOwnProperty.call(obj, 'history');
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fingerprint-after-fail"' },
+        json: () => Promise.resolve({ selected: 'fp-after-fail', all: 'fp-all' })
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ items: [{ title: '写入失败内容', url: 'https://example.com/storage-fail', publishedAt: new Date().toISOString() }], hasNext: false })
+    });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  assert(storageData.apiFingerprints.selected === 'fp-old', 'history写入失败时不保存新fingerprint');
+  assert(storageData.lastItemsPollAt === beforeFailedItemsPollAt, 'history写入失败时不推进lastItemsPollAt');
+  failSetWhen = null;
+
   console.log('\n[自动轮询-500也设置退避]');
   resetState({ feedMode: 'selected' });
   requestedUrls = [];
@@ -274,6 +409,39 @@ async function runTests() {
 
   assert(storageData.failCount === 1, '500失败递增failCount');
   assert(new Date(storageData.nextAllowedPollAt || 0).getTime() > Date.now(), '500失败设置nextAllowedPollAt退避');
+
+  console.log('\n[pollNow-退避期间不绕过API冷却]');
+  resetState({
+    nextAllowedPollAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    failCount: 2
+  });
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], hasNext: false }) });
+  };
+
+  const backoffManualResponse = await sendMessage({ type: 'pollNow' });
+
+  assert(backoffManualResponse.ok === false, '退避期间手动刷新返回失败提示');
+  assert(requestedUrls.length === 0, '退避期间手动刷新不请求API');
+  assert(storageData.failCount === 2, '退避期间手动刷新不额外递增failCount');
+
+  console.log('\n[pollNow-空结果也清理失败状态]');
+  resetState({
+    failCount: 2,
+    nextAllowedPollAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    lastItemsPollAt: ''
+  });
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], hasNext: false }) });
+  };
+
+  const emptyManualResponse = await sendMessage({ type: 'pollNow' });
+
+  assert(emptyManualResponse.ok === true, '手动刷新空结果仍返回成功');
+  assert(storageData.failCount === 0 && storageData.nextAllowedPollAt === '', '手动刷新空结果清理失败与退避状态');
+  assert(storageData.lastItemsPollAt, '手动刷新空结果也记录lastItemsPollAt');
 
   console.log('\n[feedModeChanged失败]');
   resetState();
@@ -397,6 +565,44 @@ async function runTests() {
   assert(dedupResponse.ok === true, '手动刷新同id返回成功');
   assert(storageData.history.length === 1, '手动刷新按id识别重复，不新增不同URL副本');
 
+  console.log('\n[pollNow-无稳定链接时使用组合指纹去重]');
+  resetState({ history: [] });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({
+      items: [
+        { title: '同标题', source: 'S', summary: 'A', publishedAt: '2026-07-24T00:00:00.000Z' },
+        { title: '同标题', source: 'S', summary: 'B', publishedAt: '2026-07-24T00:00:00.000Z' }
+      ],
+      hasNext: false
+    })
+  });
+
+  const noStableKeyResponse = await sendMessage({ type: 'pollNow' });
+
+  assert(noStableKeyResponse.ok === true, '无稳定链接条目刷新成功');
+  assert(storageData.history.length === 2, '同标题但摘要不同的无链接条目不互相误去重');
+
+  console.log('\n[pollNow-手动刷新也写入特关metadata]');
+  resetState({
+    history: [],
+    watchRules: [{ id: 'wr_manual', source: 'X', author: '目标作者', keywords: [], enabled: true }],
+    watchNotifyState: {}
+  });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({
+      items: [{ id: 'manual-watch', title: '手动特关', url: 'https://example.com/manual-watch', source: 'X：目标作者', publishedAt: new Date().toISOString() }],
+      hasNext: false
+    })
+  });
+
+  const manualWatchResponse = await sendMessage({ type: 'pollNow' });
+
+  assert(manualWatchResponse.ok === true, '手动刷新特关内容成功');
+  assert(storageData.history[0].watchMatched === true, '手动刷新写入特关标记');
+  assert(storageData.watchNotifyState['manual-watch'], '手动刷新初始化稳定特关提醒状态');
+
   console.log('\n[pollNow失败]');
   resetState();
   fetchImpl = () => Promise.resolve({ ok: false, status: 503 });
@@ -443,6 +649,77 @@ async function runTests() {
   assert(openedTabs[0] === 'https://example.com/watch-target', '点击通知打开持久化映射中的 URL');
   assert(!storageData.notificationUrlMap[notificationId], '点击后清理已使用的通知映射');
   assert(storageData.watchNotifyState['https://example.com/watch-target'].viewedAt, '点击特关通知后标记已查看');
+
+  console.log('\n[特关-permalink兜底也能通知和点击]');
+  resetState({
+    history: [],
+    notificationUrlMap: {},
+    watchRules: [
+      { id: 'wr_permalink', source: 'X', author: '作者', keywords: [], enabled: true }
+    ],
+    watchNotifyState: {}
+  });
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fp-permalink"' },
+        json: () => Promise.resolve({ selected: 'fp-permalink', all: 'fp-all' })
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        items: [{ id: 'permalink-id', title: '无URL特关', url: '', permalink: 'https://aihot.virxact.com/items/permalink-id', source: 'X：作者', publishedAt: new Date().toISOString() }],
+        hasNext: false
+      })
+    });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+  const permalinkNotificationId = Object.keys(storageData.notificationUrlMap || {})[0];
+  await onClickedHandler(permalinkNotificationId);
+
+  assert(permalinkNotificationId && permalinkNotificationId.startsWith('aihot-watch-'), 'url为空但有permalink时仍创建特关通知');
+  assert(openedTabs[0] === 'https://aihot.virxact.com/items/permalink-id', 'url为空时点击通知打开permalink');
+  assert(storageData.watchNotifyState['permalink-id'].viewedAt, 'url为空时点击通知按稳定key标记已查看');
+
+  console.log('\n[特关-同一alarm周期最多3条通知]');
+  resetState({
+    history: [],
+    watchRules: [
+      { id: 'wr_many', source: 'X', author: '作者', keywords: [], enabled: true }
+    ],
+    watchNotifyState: {}
+  });
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fp-many-watch"' },
+        json: () => Promise.resolve({ selected: 'fp-many-watch', all: 'fp-all' })
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        items: [1, 2, 3, 4].map(index => ({
+          id: `many-${index}`,
+          title: `特关${index}`,
+          url: `https://example.com/many-${index}`,
+          source: 'X：作者',
+          publishedAt: new Date(Date.now() - index * 1000).toISOString()
+        })),
+        hasNext: false
+      })
+    });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  assert(notificationCreateIds.filter(id => id.startsWith('aihot-watch-')).length === 3, '同一alarm周期特关通知总数限制为3');
 
   console.log(`\n${'='.repeat(40)}`);
   console.log(`结果: ${passed} passed, ${failed} failed`);

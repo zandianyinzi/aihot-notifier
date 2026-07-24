@@ -186,12 +186,14 @@ function writePopupCache(partialData) {
 }
 
 function formatTime(isoStr) {
-  const d = new Date(isoStr);
+  const d = new Date(isoStr || Date.now());
+  if (!Number.isFinite(d.getTime())) return '';
   return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
 }
 
 function getDateLabel(isoStr) {
-  const d = new Date(isoStr);
+  const d = new Date(isoStr || Date.now());
+  if (!Number.isFinite(d.getTime())) return '';
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
@@ -321,7 +323,9 @@ function renderItemHtml(item, isUnread, options = {}) {
   const watchTagHtml = item.watchMatched ? '<span class="watch-badge">特关</span>' : '';
   const summary = escapeHtml(item.summary || '');
   const summaryHtml = summary ? `<div class="item-summary">${summary}</div>` : '';
-  return `<div class="item ${isUnread ? 'unread' : 'read'} ${item.watchMatched ? 'watch-item' : ''}" data-url="${escapeHtml(item.url)}" role="link" tabindex="0">
+  const stateKey = getItemStateKey(item);
+  const openUrl = getItemOpenUrl(item);
+  return `<div class="item ${isUnread ? 'unread' : 'read'} ${item.watchMatched ? 'watch-item' : ''}" data-key="${escapeHtml(stateKey)}" data-url="${escapeHtml(openUrl)}" role="link" tabindex="0">
     <div class="item-body">
       <div class="item-title">${options.prefix || ''}${title}</div>
       ${summaryHtml}
@@ -351,6 +355,11 @@ async function markWatchUrlsViewed(urls) {
   }
 }
 
+async function markWatchItemsViewed(items) {
+  const keys = (items || []).flatMap(item => getItemAliases(item)).filter(Boolean);
+  await markWatchUrlsViewed([...new Set(keys)]);
+}
+
 function getCategory(category) {
   if (!category) return { cls: 'cat-default', label: '' };
   if (CATEGORY_MAP[category]) return CATEGORY_MAP[category];
@@ -360,6 +369,21 @@ function getCategory(category) {
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function getItemOpenUrl(item) {
+  return item && (item.url || item.permalink || '');
+}
+
+function getItemStateKey(item) {
+  return item && (item.id || item.permalink || item.url || '');
+}
+
+function getItemAliases(item) {
+  if (!item) return [];
+  return [getItemStateKey(item), item.id, item.permalink, item.url]
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
 }
 
 function normalizeTheme(theme) {
@@ -479,7 +503,7 @@ function getReadAllBeforeForMode(data) {
 }
 
 function getItemTime(item) {
-  return new Date(item.time).getTime();
+  return new Date(item.time || item.discoveredAt || 0).getTime();
 }
 
 function getUnreadReferenceTime(item) {
@@ -587,6 +611,8 @@ function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) 
     historyDays,
     items: history.map(item => [
       item.url,
+      item.id || '',
+      item.permalink || '',
       item.time,
       item.title,
       item.source || '',
@@ -647,8 +673,8 @@ function renderHistory(data, options = {}) {
   const pinnedWatch = history
     .filter(item => item.watchMatched && !isReadFast(item, readIdSet, readAllBeforeTime))
     .sort((a, b) => getItemTime(b) - getItemTime(a));
-  const pinnedUrls = new Set(pinnedWatch.map(item => item.url));
-  const displayHistory = [...pinnedWatch, ...history.filter(item => !pinnedUrls.has(item.url))];
+  const pinnedKeys = new Set(pinnedWatch.map(item => getItemStateKey(item)));
+  const displayHistory = [...pinnedWatch, ...history.filter(item => !pinnedKeys.has(getItemStateKey(item)))];
 
   let html = '';
   if (pinnedWatch.length > 0) {
@@ -659,7 +685,7 @@ function renderHistory(data, options = {}) {
   }
 
   const groups = {};
-  displayHistory.filter(item => !pinnedUrls.has(item.url)).forEach(item => {
+  displayHistory.filter(item => !pinnedKeys.has(getItemStateKey(item))).forEach(item => {
     const label = getDateLabel(item.time);
     if (!groups[label]) groups[label] = [];
     groups[label].push(item);
@@ -705,7 +731,7 @@ function cacheLoadedPopupData(data) {
 }
 
 function isReadFast(item, readIdSet, readAllBeforeTime) {
-  if (readIdSet.has(item.url)) return true;
+  if (getItemAliases(item).some(alias => readIdSet.has(alias))) return true;
   if (readAllBeforeTime && getUnreadReferenceTime(item) <= readAllBeforeTime) return true;
   return false;
 }
@@ -774,12 +800,15 @@ async function handleItemClick(e) {
 
 async function openHistoryItem(item) {
   const url = item.dataset.url;
+  const key = item.dataset.key || url;
+  if (!url) return;
 
   const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
   writeScrollPosition({ feedMode, historyDays });
 
-  if (!cachedReadIds.has(url)) {
-    cachedReadIds.add(url);
+  if (!cachedReadIds.has(key)) {
+    cachedReadIds.add(key);
+    if (url !== key) cachedReadIds.add(url);
     const arr = [...cachedReadIds];
     if (arr.length > 100) arr.splice(0, arr.length - 100);
     chrome.storage.local.set({ readIds: arr });
@@ -787,7 +816,7 @@ async function openHistoryItem(item) {
     lastRenderSignature = '';
   }
 
-  document.querySelectorAll(`.item[data-url="${CSS.escape(url)}"]`).forEach(el => {
+  document.querySelectorAll(`.item[data-key="${CSS.escape(key)}"], .item[data-url="${CSS.escape(url)}"]`).forEach(el => {
     el.classList.remove('unread');
     el.classList.add('read');
   });
@@ -801,7 +830,7 @@ async function openHistoryItem(item) {
   }
   chrome.action.setBadgeText({ text: unreadCount > 0 ? String(unreadCount) : '' });
 
-  await markWatchUrlsViewed(url);
+  await markWatchUrlsViewed([key, url]);
   chrome.tabs.create({ url });
 }
 
@@ -824,14 +853,17 @@ markAllReadBtn.addEventListener('click', async () => {
   markAllReadBtn.classList.remove('visible');
   chrome.action.setBadgeText({ text: '' });
 
-  const { feedMode = 'selected', readAllBeforeByMode = {} } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode']);
+  const { feedMode = 'selected', readAllBeforeByMode = {}, history = [], historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode', 'history', 'historyDays']);
   const mode = normalizeFeedMode(feedMode);
-  const visibleWatchUrls = Array.from(document.querySelectorAll('.item.watch-item')).map(el => el.dataset.url).filter(Boolean);
-  await markWatchUrlsViewed(visibleWatchUrls);
+  const now = new Date().toISOString();
+  const nowMs = new Date(now).getTime();
+  const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
+  const watchItemsToView = (history || []).filter(item => item.watchMatched && isWithinHistoryWindow(item, cutoff) && getUnreadReferenceTime(item) <= nowMs);
+  await markWatchItemsViewed(watchItemsToView);
   await chrome.storage.local.set({
     readAllBeforeByMode: {
       ...readAllBeforeByMode,
-      [mode]: new Date().toISOString()
+      [mode]: now
     }
   });
   showButtonConfirm(markAllReadBtn);

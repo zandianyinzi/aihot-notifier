@@ -373,7 +373,7 @@ assert(hasDeclaration(watchRulesListTailRule, '-webkit-mask-image', /linear-grad
 assert(hasDeclaration(watchRulesListTailRule, 'mask-image', /linear-gradient\(to bottom,\s*#000\s+calc\(100%\s*-\s*32px\),\s*rgba\(0,\s*0,\s*0,\s*0\.35\)\s+calc\(100%\s*-\s*12px\),\s*transparent\)/), '特关规则列表底部渐隐兼容标准 mask');
 assert(/\.watch-badge\s*{/.test(popupHtml), '主列表存在特别关注标签样式');
 assert(/pinnedWatch/.test(popupJs), '未读特别关注在主列表置顶');
-assert(/pinnedUrls/.test(popupJs), '置顶特别关注不重复渲染原始条目');
+assert(/pinnedKeys/.test(popupJs), '置顶特别关注按稳定key不重复渲染原始条目');
 assert(/watch-badge\">特关<\/span>/.test(popupJs), '特关条目使用紧凑标签');
 const watchBadgeRule = popupHtml.match(/\.watch-badge\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(watchBadgeRule, 'color', /var\(--accent\)/), '特关标签沿用原有强调色');
