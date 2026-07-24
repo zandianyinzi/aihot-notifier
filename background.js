@@ -10,6 +10,7 @@ const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
 const SELECTED_MAX_PAGES = 3;
 const ALL_MAX_PAGES = 20;
+const MANUAL_MAX_PAGES = 3;
 const PAGE_DELAY_MS = Number.isFinite(globalThis.__AIHOT_TEST_PAGE_DELAY_MS) ? globalThis.__AIHOT_TEST_PAGE_DELAY_MS : 1100;
 const RETRY_AFTER_FALLBACK_MS = 45 * 1000;
 const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
@@ -709,14 +710,29 @@ async function checkWatchReminders(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
 
 async function manualPoll() {
   await assertNotInBackoff();
-  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode, lastCheck = '', lastItemsPollAt = '' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode', 'lastCheck', 'lastItemsPollAt']);
   const mode = normalizeFeedMode(feedMode);
-  const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
-  console.log(`[AI HOT] manual poll since=${sinceTime}`);
+  const now = new Date().toISOString();
 
   try {
+    const fingerprintProbe = await probeFingerprint(mode);
+    if (!fingerprintProbe.ok) {
+      console.warn(`[AI HOT] manual fingerprint returned ${fingerprintProbe.status}`);
+      throw Object.assign(new Error(`API returned ${fingerprintProbe.status}`), { response: fingerprintProbe.response, status: fingerprintProbe.status });
+    }
+
+    if (!fingerprintProbe.changed) {
+      await saveFingerprintProbe(fingerprintProbe);
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      await updateBadge();
+      console.log('[AI HOT] manual fingerprint unchanged, skip items');
+      return;
+    }
+
+    const sinceTime = getAutoPollSinceTime({ interval: DEFAULT_INTERVAL, lastCheck: lastCheck || now }, false, lastItemsPollAt);
+    console.log(`[AI HOT] manual poll since=${sinceTime}`);
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-    const allItems = await fetchItems({ mode, sinceTime, cutoff });
+    const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES });
     const discoveredAt = new Date().toISOString();
     const { watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['watchRules', 'watchNotifyState']);
     const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, history, watchRules, watchNotifyState, discoveredAt);
@@ -725,6 +741,7 @@ async function manualPoll() {
     if (allItems.truncated) {
       await chrome.storage.local.set({ lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
     } else {
+      await saveFingerprintProbe(fingerprintProbe);
       await commitSuccessfulItemsPoll();
     }
     await updateBadge();

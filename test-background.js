@@ -124,6 +124,74 @@ async function runTests() {
   assert(defaultPollResponse.ok === true, '未设置内容源时手动刷新成功');
   assert(requestedUrl.includes('mode=selected'), '未设置内容源时默认请求精选');
 
+  console.log('\n[pollNow-fingerprint未变化跳过items]');
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { all: 'fp-all-old' },
+    apiFingerprintEtags: { current: 'W/"fp-etag"' },
+    lastItemsPollAt: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  });
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fp-etag"' },
+        json: () => Promise.resolve({ selected: 'fp-selected', all: 'fp-all-old' })
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [{ title: '不应手动拉取', url: 'https://example.com/manual-skip', publishedAt: new Date().toISOString() }], hasNext: false }) });
+  };
+
+  const manualSkipResponse = await sendMessage({ type: 'pollNow' });
+
+  assert(manualSkipResponse.ok === true, '手动刷新指纹未变化返回成功');
+  assert(requestedUrls.length === 1 && requestedUrls[0].includes('/api/public/fingerprint'), '手动刷新指纹未变化时只请求fingerprint');
+  assert(storageData.history.length === 1 && storageData.history[0].url === 'https://example.com/old', '手动刷新指纹未变化时不改写history');
+
+  console.log('\n[pollNow-fingerprint变化后统一最多3页并用6h回退]');
+  const manualLastItemsPollAt = '2026-07-07T12:00:00.000Z';
+  resetState({
+    feedMode: 'all',
+    lastCheck: '2026-07-07T17:50:00.000Z',
+    apiFingerprints: { all: 'fp-all-old' },
+    lastItemsPollAt: manualLastItemsPollAt,
+    history: []
+  });
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fp-manual-new"' },
+        json: () => Promise.resolve({ selected: 'fp-selected', all: 'fp-all-new' })
+      });
+    }
+    const cursor = new URL(url).searchParams.get('cursor');
+    const page = cursor ? Number(cursor.replace('page-', '')) : 1;
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        items: [{ id: `manual-page-${page}`, title: `手动第${page}页`, url: `https://example.com/manual-page-${page}`, publishedAt: new Date(Date.now() - page * 1000).toISOString() }],
+        hasNext: true,
+        nextCursor: `page-${page + 1}`
+      })
+    });
+  };
+
+  const manualPagedResponse = await sendMessage({ type: 'pollNow' });
+  const manualItemsUrls = requestedUrls.filter(url => url.includes('/api/public/items'));
+  const manualSince = new URL(manualItemsUrls[0]).searchParams.get('since');
+
+  assert(manualPagedResponse.ok === true, '手动刷新指纹变化后返回成功');
+  assert(manualItemsUrls.length === 3, '手动刷新 selected/all 统一最多拉3页');
+  assert(manualSince === '2026-07-07T06:00:00.000Z', '手动刷新since基于lastItemsPollAt回退6小时');
+  assert(storageData.history.length === 3, '手动刷新截断时已拉到内容仍写入history');
+  assert(storageData.apiFingerprints.all === 'fp-all-old', '手动刷新截断时不提交新fingerprint');
+  assert(storageData.lastItemsPollAt === manualLastItemsPollAt, '手动刷新截断时不推进lastItemsPollAt');
+
   console.log('\n[自动轮询回退窗口]');
   const lastCheck = '2026-07-07T12:00:00.000Z';
   resetState({ interval: 5, lastCheck });
