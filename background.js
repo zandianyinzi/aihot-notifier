@@ -54,7 +54,7 @@ function getRetryAfterMs(response, status) {
     if (dateMs > Date.now()) return dateMs - Date.now();
   }
   if (status === 429) return RETRY_AFTER_FALLBACK_MS;
-  if (status === 567 || status === 502 || status === 503 || status === 504) return TEMPORARY_FAILURE_BACKOFF_MS;
+  if (status === 567 || (status >= 500 && status < 600)) return TEMPORARY_FAILURE_BACKOFF_MS;
   return 0;
 }
 
@@ -80,8 +80,29 @@ function isSafetyItemsPollDue(lastItemsPollAt) {
   return !last || Date.now() - last >= ITEMS_SAFETY_POLL_MS;
 }
 
+function getAutoPollSinceTime(config, safetyPollDue, lastItemsPollAt) {
+  const bufferMs = Math.max(config.interval * 2 * 60 * 1000, AUTO_POLL_DELAY_BUFFER_MS);
+  const referenceTime = safetyPollDue && lastItemsPollAt ? lastItemsPollAt : config.lastCheck;
+  return new Date(new Date(referenceTime).getTime() - bufferMs).toISOString();
+}
+
+function addItemKeys(keySet, item) {
+  [item && getItemKey(item), item && item.url, item && item.permalink]
+    .filter(Boolean)
+    .forEach(key => keySet.add(key));
+}
+
 function isNewApiItem(item, existingKeys) {
   return !existingKeys.has(getItemKey(item)) && !existingKeys.has(item.url) && !existingKeys.has(item.permalink);
+}
+
+function filterNewApiItems(items, history) {
+  const seenKeys = getExistingItemKeys(history);
+  return (items || []).filter(item => {
+    if (!isNewApiItem(item, seenKeys)) return false;
+    addItemKeys(seenKeys, item);
+    return true;
+  });
 }
 
 async function probeFingerprint(mode) {
@@ -92,7 +113,7 @@ async function probeFingerprint(mode) {
 
   const res = await fetch(FINGERPRINT_URL, Object.keys(headers).length > 0 ? { headers } : undefined);
   if (res.status === 304) {
-    return { ok: true, changed: false, fingerprints: apiFingerprints, etag: apiFingerprintEtags.current || '' };
+    return { ok: true, changed: !apiFingerprints[normalizedMode], fingerprints: apiFingerprints, etag: apiFingerprintEtags.current || '' };
   }
   if (!res.ok) {
     return { ok: false, status: res.status, response: res };
@@ -417,11 +438,7 @@ async function pollForUpdates() {
     return;
   }
 
-  // API 公开接口存在数小时级缓存/入库延迟，自动轮询保守回退避免空历史漏载。
-  const bufferMs = Math.max(config.interval * 2 * 60 * 1000, AUTO_POLL_DELAY_BUFFER_MS);
-  const sinceTime = new Date(new Date(config.lastCheck).getTime() - bufferMs).toISOString();
   const now = new Date().toISOString();
-  console.log(`[AI HOT] polling since=${sinceTime}`);
 
   try {
     const fingerprintProbe = await probeFingerprint(config.feedMode);
@@ -431,6 +448,8 @@ async function pollForUpdates() {
       return;
     }
     const safetyPollDue = isSafetyItemsPollDue(lastItemsPollAt);
+    const sinceTime = getAutoPollSinceTime(config, safetyPollDue, lastItemsPollAt);
+    console.log(`[AI HOT] polling since=${sinceTime}`);
     if (!fingerprintProbe.changed && !safetyPollDue) {
       await saveFingerprintProbe(fingerprintProbe);
       await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
@@ -442,8 +461,7 @@ async function pollForUpdates() {
     const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff });
     const { history = [] } = await chrome.storage.local.get('history');
-    const existingKeys = getExistingItemKeys(history);
-    const newItems = allItems.filter(i => isNewApiItem(i, existingKeys));
+    const newItems = filterNewApiItems(allItems, history);
     console.log(`[AI HOT] got ${allItems.length} items, ${newItems.length} new`);
     await saveFingerprintProbe(fingerprintProbe);
     await chrome.storage.local.set({ lastCheck: now, lastItemsPollAt: now, failCount: 0, nextAllowedPollAt: '' });
@@ -478,14 +496,12 @@ async function showNotification(items) {
     watchNotifyState = {}
   } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState']);
 
-  const existingUrls = new Set(history.map(i => i.url));
   const newEntries = [];
   const watchItems = [];
   const normalItems = [];
   const nextWatchNotifyState = { ...watchNotifyState };
 
-  items
-    .filter(i => !existingUrls.has(i.url))
+  filterNewApiItems(items, history)
     .forEach(item => {
       const watchMatches = matchWatchRules(item, watchRules);
       const entry = toHistoryEntry(item, discoveredAt, watchMatches);
@@ -561,10 +577,8 @@ async function manualPoll() {
 
     if (allItems.length === 0) return;
 
-    const existingKeys = getExistingItemKeys(history);
     const discoveredAt = new Date().toISOString();
-    const newEntries = allItems
-      .filter(i => isNewApiItem(i, existingKeys))
+    const newEntries = filterNewApiItems(allItems, history)
       .map(i => toHistoryEntry(i, discoveredAt));
 
     const merged = [...newEntries, ...history]
@@ -662,9 +676,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
       if (allItems.length > 0) {
         const { history = [] } = await chrome.storage.local.get('history');
-        const existingKeys = getExistingItemKeys(history);
-        const newEntries = allItems
-          .filter(i => isNewApiItem(i, existingKeys))
+        const newEntries = filterNewApiItems(allItems, history)
           .map(i => toHistoryEntry(i, i.publishedAt));
         const merged = [...newEntries, ...history]
           .filter(i => isWithinHistoryWindow(i, cutoff))

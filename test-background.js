@@ -210,6 +210,71 @@ async function runTests() {
   assert(requestedUrls.some(url => url.includes('/api/public/items')), '兜底到期时即使指纹未变也请求items');
   assert(storageData.lastItemsPollAt, '兜底拉取后记录lastItemsPollAt');
 
+  console.log('\n[自动轮询-兜底since基于上次items拉取]');
+  const oldItemsPollAt = '2026-07-07T12:00:00.000Z';
+  resetState({
+    feedMode: 'selected',
+    lastCheck: '2026-07-07T17:50:00.000Z',
+    apiFingerprints: { selected: 'fp-old' },
+    lastItemsPollAt: oldItemsPollAt,
+    history: []
+  });
+  requestedUrls = [];
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'W/"fingerprint-test"' },
+        json: () => Promise.resolve({ selected: 'fp-old', all: 'fp-all' })
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], hasNext: false }) });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  const safetyItemsUrl = requestedUrls.find(url => url.includes('/api/public/items'));
+  const safetySince = new URL(safetyItemsUrl).searchParams.get('since');
+  assert(safetySince === '2026-07-07T06:00:00.000Z', '兜底拉取since基于lastItemsPollAt回退6小时');
+
+  console.log('\n[自动轮询-fingerprint 304但缺当前mode指纹时拉items]');
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { selected: 'fp-selected' },
+    apiFingerprintEtags: { current: 'W/"fingerprint-old"' },
+    lastItemsPollAt: new Date().toISOString(),
+    history: []
+  });
+  requestedUrls = [];
+  fetchImpl = (url, options) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) {
+      return Promise.resolve({ ok: true, status: 304, headers: { get: () => 'W/"fingerprint-old"' } });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [{ title: '304兜底', url: 'https://example.com/304', publishedAt: new Date().toISOString() }], hasNext: false }) });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  assert(requestedUrls.some(url => url.includes('/api/public/items')), '304但缺all指纹时保守请求items');
+  assert(storageData.history.some(i => i.url === 'https://example.com/304'), '304缺mode指纹后拉取内容进入history');
+
+  console.log('\n[自动轮询-500也设置退避]');
+  resetState({ feedMode: 'selected' });
+  requestedUrls = [];
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return Promise.resolve({ ok: false, status: 500 });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [], hasNext: false }) });
+  };
+
+  await onAlarmHandler({ name: 'aihot-poll' });
+
+  assert(storageData.failCount === 1, '500失败递增failCount');
+  assert(new Date(storageData.nextAllowedPollAt || 0).getTime() > Date.now(), '500失败设置nextAllowedPollAt退避');
+
   console.log('\n[feedModeChanged失败]');
   resetState();
   const oldHistory = storageData.history;
@@ -283,6 +348,31 @@ async function runTests() {
   assert(storageData.history.length === 5, 'all模式保存超过3页的结果');
   assert(storageData.history[0].id === 'id-1' && storageData.history[0].permalink.includes('/items/id-1'), 'history保留id和permalink字段');
   assert(storageData.history[0].score === 79 && storageData.history[0].selected === true, 'history保留score和selected字段');
+
+  console.log('\n[pollNow-本轮分页内部去重]');
+  resetState({ history: [] });
+  fetchImpl = (url) => {
+    const cursor = new URL(url).searchParams.get('cursor');
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        items: [{
+          id: 'dup-id',
+          title: cursor ? '重复第二页' : '重复第一页',
+          url: cursor ? 'https://example.com/dup-b' : 'https://example.com/dup-a',
+          permalink: 'https://aihot.virxact.com/items/dup-id',
+          publishedAt: new Date().toISOString()
+        }],
+        hasNext: !cursor,
+        nextCursor: cursor ? null : 'page-2'
+      })
+    });
+  };
+
+  const internalDedupResponse = await sendMessage({ type: 'pollNow' });
+
+  assert(internalDedupResponse.ok === true, '本轮内部重复手动刷新成功');
+  assert(storageData.history.length === 1, '本轮分页内部按id/permalink去重');
 
   console.log('\n[pollNow-id去重]');
   resetState({
