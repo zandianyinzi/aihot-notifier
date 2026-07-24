@@ -34,8 +34,10 @@
 
 ## 发布流程
 
-每次改动后，按顺序执行：
-1. 升级 `manifest.json` 中的版本号
+常规代码或文档改动不要自动升级 `manifest.json` 版本号。只有明确准备发布 / 上架新包时，才升级版本号并打包。
+
+发布时按顺序执行：
+1. 按发布语义升级 `manifest.json` 中的版本号
 2. 打包（`bash pack.sh` 或 PowerShell `Compress-Archive`）
 3. commit + push
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI HOT Notifier",
-  "version": "1.1.1",
+  "version": "1.1.0",
   "description": "随时感知 AI 前沿动态，桌面通知即时提醒，多主题随心切换，轻量不打扰。",
   "permissions": ["alarms", "notifications", "storage"],
   "host_permissions": ["https://aihot.virxact.com/*"],
