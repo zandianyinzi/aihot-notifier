@@ -43,13 +43,13 @@ node screenshot.mjs
 
 - **已读状态**：`readIds` 保存单条稳定 key（优先 `id`，再 `permalink`，再 `url`，并兼容旧 URL）+ `readAllBefore` 时间戳（批量清除）。两者共同决定是否已读。
 - **存储 vs 显示**：storage 保留 `Math.max(historyDays, 5)` 天数据避免切换天数时丢失；UI 和 badge 按用户设置的 `historyDays` 过滤显示。
-- **API 轮询缓冲**：自动轮询和手动刷新都先请求 `/api/public/fingerprint`；fingerprint 变化或自动 6 小时兜底到期才拉 `/api/public/items`。实际 items 拉取的 `since` 基于上次成功 items poll 回退至少 6 小时，避免 fingerprint 探测推进窗口导致漏掉延迟入库条目。手动刷新 items 最多拉 3 页。
+- **API 轮询缓冲**：自动轮询和手动刷新都先请求临时保留的 legacy `/api/public/fingerprint`；fingerprint 变化或自动 6 小时兜底到期才拉 v1 items。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
 - **feedMode 切换**：调用 `resetAndPoll()` 全量重拉并替换 history，成功后才提交新的 feedMode；失败时保留旧 history 和旧 feedMode，避免状态不一致。
 
 ## API
 
-- `GET https://aihot.virxact.com/api/public/fingerprint`：自动轮询优先探测。若本地缺当前 `feedMode` 的 fingerprint，不发送 `If-None-Match`，避免 304 无法补齐当前模式指纹。
-- `GET https://aihot.virxact.com/api/public/items?mode={selected|all}&since={ISO-8601}&take=100&cursor={nextCursor}`：响应 `{ items: [...], hasNext: bool, nextCursor: string }`。`cursor` 视为 opaque，原样传回。
+- `GET https://aihot.virxact.com/api/public/fingerprint`：当前仍临时保留的 legacy 变更探测端点；若本地缺当前 `feedMode` 的 fingerprint，不发送 `If-None-Match`，避免 304 无法补齐当前模式指纹。该依赖已标记为弃用追踪，items 数据不再使用 legacy API。
+- `GET https://aihot.virxact.com/api/v1/items?mode={selected|all}&window=7d&limit=100&cursor={nextCursor}`：v1 items 端点。响应为 `{ items: [...], page: { hasMore: bool, nextCursor: string|null } }`；以 `page.hasMore` 和 `page.nextCursor` 驱动分页，`cursor` 视为 opaque，原样传回。条目来源使用 `source.name`，链接使用 `links.original`（优先打开）和 `links.aihot`（permalink / HTTPS 回退）。
 
 只有 items 分页未截断且 history 持久化成功后，才提交新的 fingerprint / `lastItemsPollAt`。
 

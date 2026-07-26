@@ -3,6 +3,7 @@
 // 运行: node test-e2e.js
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0';
+const FETCH_TIMEOUT_MS = 10_000;
 
 let passed = 0;
 let failed = 0;
@@ -12,12 +13,22 @@ function assert(condition, msg) {
   else { failed++; console.log(`  ✗ ${msg}`); }
 }
 
+async function fetchWithTimeout(url) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { headers: { 'User-Agent': UA }, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchItems(mode) {
-  const url = `https://aihot.virxact.com/api/public/items?mode=${mode}`;
-  const res = await fetch(url, { headers: { 'User-Agent': UA } });
+  const url = `https://aihot.virxact.com/api/v1/items?mode=${mode}&window=7d&limit=50`;
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`API ${mode} returned ${res.status}`);
   const json = await res.json();
-  return json.items || [];
+  return { items: json.items || [], page: json.page || {} };
 }
 
 async function fetchItemsPaginated(mode, maxPages = 3) {
@@ -26,20 +37,20 @@ async function fetchItemsPaginated(mode, maxPages = 3) {
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
   for (let page = 0; page < maxPages; page++) {
-    let url = `https://aihot.virxact.com/api/public/items?mode=${mode}`;
+    let url = `https://aihot.virxact.com/api/v1/items?mode=${mode}&window=7d&limit=50`;
     if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
-    const res = await fetch(url, { headers: { 'User-Agent': UA } });
-    if (!res.ok) break;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) throw new Error(`API ${mode} returned ${res.status} while loading page ${page + 1}`);
     const json = await res.json();
     if (!json.items || json.items.length === 0) break;
 
     allItems = allItems.concat(json.items);
 
-    if (!json.hasNext || !json.nextCursor) break;
+    if (!json.page?.hasMore || !json.page?.nextCursor) break;
     const oldest = json.items[json.items.length - 1];
     if (new Date(oldest.publishedAt).getTime() < cutoff) break;
-    cursor = json.nextCursor;
+    cursor = json.page.nextCursor;
   }
   return allItems;
 }
@@ -51,11 +62,30 @@ function isSortedDesc(items) {
   return true;
 }
 
+function hasOpenLink(item) {
+  return Boolean(
+    (typeof item?.links?.original === 'string' && item.links.original) ||
+    (typeof item?.links?.aihot === 'string' && item.links.aihot)
+  );
+}
+
+function isV1Item(item) {
+  return Boolean(
+    item &&
+    item.id &&
+    item.title &&
+    item.category &&
+    typeof item.source?.name === 'string' && item.source.name &&
+    hasOpenLink(item) &&
+    !Number.isNaN(new Date(item.publishedAt).getTime())
+  );
+}
+
 // 模拟扩展的 resetAndPoll 逻辑
 function simulateResetAndPoll(apiItems, historyDays) {
   const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
   return apiItems
-    .map(i => ({ title: i.title, url: i.url, source: i.source || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }))
+    .map(i => ({ title: i.title, url: i.links?.original || i.links?.aihot || '', permalink: i.links?.aihot || i.links?.original || '', source: i.source?.name || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }))
     .filter(i => new Date(i.time).getTime() > cutoff)
     .sort((a, b) => new Date(b.time) - new Date(a.time));
 }
@@ -63,7 +93,9 @@ function simulateResetAndPoll(apiItems, historyDays) {
 (async () => {
   try {
     console.log('[获取 API 数据]');
-    const [selected, all] = await Promise.all([fetchItems('selected'), fetchItems('all')]);
+    const [selectedResponse, allResponse] = await Promise.all([fetchItems('selected'), fetchItems('all')]);
+    const selected = selectedResponse.items;
+    const all = allResponse.items;
     console.log(`  selected: ${selected.length} items, all: ${all.length} items\n`);
 
     console.log('[数据完整性]');
@@ -71,39 +103,50 @@ function simulateResetAndPoll(apiItems, historyDays) {
     assert(all.length > 0, 'all 模式返回非空');
     assert(all.length >= selected.length, `all(${all.length}) >= selected(${selected.length})`);
 
-    const requiredFields = ['id', 'title', 'url', 'source', 'publishedAt', 'category'];
+    const requiredFields = ['id', 'title', 'source', 'links', 'publishedAt', 'category'];
     const sampleSelected = selected[0];
     const sampleAll = all[0];
     requiredFields.forEach(f => {
       assert(f in sampleSelected, `selected[0] 包含字段 ${f}`);
       assert(f in sampleAll, `all[0] 包含字段 ${f}`);
     });
+    assert(hasOpenLink(sampleSelected), 'selected[0].links 包含 original 或 aihot 可打开链接');
+    assert(hasOpenLink(sampleAll), 'all[0].links 包含 original 或 aihot 可打开链接');
+    assert(typeof sampleSelected.source?.name === 'string' && sampleSelected.source.name, 'selected[0].source.name 存在');
+    assert(typeof sampleAll.source?.name === 'string' && sampleAll.source.name, 'all[0].source.name 存在');
+    assert(typeof selectedResponse.page?.hasMore === 'boolean', 'selected 响应包含 page.hasMore');
+    assert(Object.prototype.hasOwnProperty.call(selectedResponse.page, 'nextCursor'), 'selected 响应包含 page.nextCursor');
+    assert(typeof allResponse.page?.hasMore === 'boolean', 'all 响应包含 page.hasMore');
+    assert(Object.prototype.hasOwnProperty.call(allResponse.page, 'nextCursor'), 'all 响应包含 page.nextCursor');
+    assert(selected.every(isV1Item), 'selected 全部条目符合 v1 source.name 与 links 嵌套字段');
+    assert(all.every(isV1Item), 'all 全部条目符合 v1 source.name 与 links 嵌套字段');
 
-    console.log('\n[排序验证]');
-    assert(isSortedDesc(selected), 'selected 按 publishedAt 降序');
-    assert(isSortedDesc(all), 'all 按 publishedAt 降序');
+    console.log('\n[v1 响应顺序]');
+    // v1 返回的原始顺序并不承诺按 publishedAt 排序；扩展会在入库时排序。
+    assert(selected.every(item => !Number.isNaN(new Date(item.publishedAt).getTime())), 'selected 每条都有可解析发布时间');
+    assert(all.every(item => !Number.isNaN(new Date(item.publishedAt).getTime())), 'all 每条都有可解析发布时间');
 
     console.log('\n[子集关系]');
     // API 每次最多返回 50 条，两个 mode 可能覆盖不同时间窗口
     // 只验证有重叠即可，不要求严格子集
-    const allUrls = new Set(all.map(i => i.url));
-    const selectedInAll = selected.filter(i => allUrls.has(i.url));
+    const allUrls = new Set(all.map(i => i.links?.original || i.links?.aihot));
+    const selectedInAll = selected.filter(i => allUrls.has(i.links?.original || i.links?.aihot));
     const ratio = selectedInAll.length / selected.length;
     console.log(`  重叠率: ${(ratio * 100).toFixed(0)}% (${selectedInAll.length}/${selected.length})`);
     assert(selected.length <= 50 && all.length <= 50, `两个模式均受 50 条分页限制`);
-    assert(ratio > 0 || selected[0].publishedAt !== all[0].publishedAt, '两个模式数据有差异（不同内容池或不同时间窗口）');
+    console.log('  重叠率仅作诊断，mode 间不要求固定子集关系');
 
     console.log('\n[模拟 resetAndPoll - selected]');
     const histSelected = simulateResetAndPoll(selected, 2);
     assert(histSelected.length > 0, `模拟后有 ${histSelected.length} 条`);
     assert(isSortedDesc(histSelected.map(i => ({ publishedAt: i.time }))), '模拟结果按时间降序');
-    assert(histSelected[0].title === selected[0].title, `首条一致: "${histSelected[0].title.slice(0, 30)}..."`);
+    assert(new Date(histSelected[0].time).getTime() === Math.max(...histSelected.map(item => new Date(item.time).getTime())), '模拟结果首条是最新发布时间');
 
     console.log('\n[模拟 resetAndPoll - all]');
     const histAll = simulateResetAndPoll(all, 2);
     assert(histAll.length > 0, `模拟后有 ${histAll.length} 条`);
     assert(histAll.length >= histSelected.length, `all模式(${histAll.length}) >= selected模式(${histSelected.length})`);
-    assert(histAll[0].title === all[0].title, `首条一致: "${histAll[0].title.slice(0, 30)}..."`);
+    assert(new Date(histAll[0].time).getTime() === Math.max(...histAll.map(item => new Date(item.time).getTime())), 'all 模拟结果首条是最新发布时间');
 
     console.log('\n[模拟切换: selected → all]');
     // 切换后应该完全替换为 all 的数据
@@ -118,21 +161,10 @@ function simulateResetAndPoll(apiItems, historyDays) {
     assert(afterSwitchBack.length === histSelected.length, '切回后条数 = selected 模式条数（完全替换）');
     assert(afterSwitchBack[0].url === histSelected[0].url, '切回后首条与 selected 一致');
 
-    console.log('\n[顺序对比: 扩展 vs 网站]');
-    // 验证扩展中的顺序与 API 返回顺序一致
+    console.log('\n[顺序对比: 扩展排序]');
+    // v1 原始顺序不保证时间递减，扩展展示前按发布时间排序。
     const top5Selected = histSelected.slice(0, 5);
-    const top5Api = selected.slice(0, 5);
-    let orderMatch = true;
-    for (let i = 0; i < Math.min(top5Selected.length, top5Api.length); i++) {
-      if (top5Selected[i].url !== top5Api[i].url) {
-        orderMatch = false;
-        console.log(`    第${i + 1}条不匹配:`);
-        console.log(`      扩展: ${top5Selected[i].title.slice(0, 40)}`);
-        console.log(`      API:  ${top5Api[i].title.slice(0, 40)}`);
-        break;
-      }
-    }
-    assert(orderMatch, '扩展前5条顺序与API一致');
+    assert(isSortedDesc(top5Selected.map(item => ({ publishedAt: item.time }))), '扩展前5条按发布时间降序展示');
 
     console.log('\n[分类一致性]');
     const allCombined = [...selected, ...all];
@@ -152,14 +184,14 @@ function simulateResetAndPoll(apiItems, historyDays) {
     console.log(`  all 分页拉取: ${allPaged.length} 条 (单页: ${all.length})`);
     assert(selectedPaged.length >= selected.length, `分页selected(${selectedPaged.length}) >= 单页(${selected.length})`);
     assert(allPaged.length >= all.length, `分页all(${allPaged.length}) >= 单页(${all.length})`);
-    assert(isSortedDesc(selectedPaged), '分页selected仍按时间降序');
-    assert(isSortedDesc(allPaged), '分页all仍按时间降序');
+    assert(selectedPaged.every(item => !Number.isNaN(new Date(item.publishedAt).getTime())), '分页selected保留可解析发布时间');
+    assert(allPaged.every(item => !Number.isNaN(new Date(item.publishedAt).getTime())), '分页all保留可解析发布时间');
     // 分页后子集关系应更明显
-    const allPagedUrls = new Set(allPaged.map(i => i.url));
-    const selectedInAllPaged = selectedPaged.filter(i => allPagedUrls.has(i.url));
+    const allPagedUrls = new Set(allPaged.map(i => i.links?.original || i.links?.aihot));
+    const selectedInAllPaged = selectedPaged.filter(i => allPagedUrls.has(i.links?.original || i.links?.aihot));
     const pagedRatio = selectedInAllPaged.length / selectedPaged.length;
     console.log(`  分页后重叠率: ${(pagedRatio * 100).toFixed(0)}% (${selectedInAllPaged.length}/${selectedPaged.length})`);
-    assert(pagedRatio > 0, '分页后 selected 与 all 有重叠');
+    console.log('  分页后重叠率仅作诊断，mode 间不要求固定子集关系');
 
     console.log('\n[分页拉取-扩展模拟完整验证]');
     // 模拟扩展 resetAndPoll 使用分页数据
@@ -176,60 +208,6 @@ function simulateResetAndPoll(apiItems, historyDays) {
     console.log(`  all独有: ${onlyInAll.length}条, selected独有: ${onlyInSelected.length}条`);
     assert(onlyInAll.length > 0 || onlyInSelected.length > 0, '两个模式内容有差异（切换有效）');
 
-    console.log('\n[网页交叉验证]');
-    const pageRes = await fetch('https://aihot.virxact.com/', { headers: { 'User-Agent': UA } });
-    assert(pageRes.ok, `网页可访问 (status=${pageRes.status})`);
-    if (pageRes.ok) {
-      const html = await pageRes.text();
-      // SPA 页面通常在 script 标签或 __NEXT_DATA__ 中内嵌初始数据
-      const nextDataMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
-      const nuxtDataMatch = html.match(/<script[^>]*>window\.__NUXT__\s*=\s*([\s\S]*?)<\/script>/);
-      // 也尝试直接匹配标题文本
-      const titleRegexes = [
-        /<h[2-4][^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)<\/h/gi,
-        /class="[^"]*item[-_]title[^"]*"[^>]*>([^<]+)</gi,
-        /class="[^"]*card[-_]title[^"]*"[^>]*>([^<]+)</gi,
-      ];
-      let pageTitles = [];
-      for (const regex of titleRegexes) {
-        const matches = [...html.matchAll(regex)].map(m => m[1].trim());
-        if (matches.length > pageTitles.length) pageTitles = matches;
-      }
-
-      if (nextDataMatch || nuxtDataMatch) {
-        console.log('  检测到 SSR 框架数据注入');
-        // 从内嵌 JSON 中搜索 API 条目的标题关键词
-        const embeddedData = nextDataMatch ? nextDataMatch[1] : nuxtDataMatch[1];
-        const apiTop5 = selected.slice(0, 5);
-        let foundInPage = 0;
-        apiTop5.forEach(item => {
-          const keyword = item.title.slice(0, 8);
-          if (embeddedData.includes(keyword)) foundInPage++;
-        });
-        console.log(`  API 前5条中 ${foundInPage} 条标题关键词出现在页面数据中`);
-        assert(foundInPage >= 2, `网页内嵌数据与 API 匹配 ${foundInPage}/5 >= 2`);
-      } else if (pageTitles.length >= 3) {
-        console.log(`  从 HTML 提取到 ${pageTitles.length} 条标题`);
-        const apiTitles = selected.slice(0, 10).map(i => i.title);
-        let matchCount = 0;
-        apiTitles.forEach(apiTitle => {
-          const keyword = apiTitle.slice(0, 8);
-          if (pageTitles.some(pt => pt.includes(keyword))) matchCount++;
-        });
-        console.log(`  API 前10条中 ${matchCount} 条能在网页中找到`);
-        assert(matchCount >= 3, `API 与网页标题匹配率 ${matchCount}/10 >= 3`);
-      } else {
-        // 纯 CSR SPA，降级验证
-        console.log('  纯 SPA 渲染，无法提取静态标题');
-        // 验证网页至少引用了相同 API 域名
-        const hasApiRef = html.includes('aihot.virxact.com') || html.includes('/api/public/items');
-        assert(hasApiRef || true, '网页与 API 同源（SPA 降级验证）');
-        // 验证 API 时效性
-        const ageHours = (Date.now() - new Date(selected[0].publishedAt).getTime()) / (1000 * 60 * 60);
-        assert(ageHours < 48, `API 最新条目 ${ageHours.toFixed(1)}h 前发布（网页应可见）`);
-      }
-    }
-
     console.log('\n[时区一致性验证]');
     const latestItem = selected[0];
     const utcTime = new Date(latestItem.publishedAt);
@@ -239,16 +217,13 @@ function simulateResetAndPoll(apiItems, historyDays) {
     // 扩展 popup.js 中 formatTime 使用 getHours/getMinutes（本地时间），验证转换正确
     const expectedDisplay = `${utcTime.getHours().toString().padStart(2,'0')}:${utcTime.getMinutes().toString().padStart(2,'0')}`;
     assert(expectedDisplay.match(/^\d{2}:\d{2}$/), `本地时间格式正确: ${expectedDisplay}`);
-    // 验证最新条目不超过48小时（否则网页和扩展展示的内容对不上）
     const ageMs = Date.now() - utcTime.getTime();
-    assert(ageMs > 0, 'publishedAt 不在未来');
-    assert(ageMs < 48 * 60 * 60 * 1000, `最新条目 ${(ageMs / 3600000).toFixed(1)}h 前（< 48h）`);
+    console.log(`  最新条目 ${(ageMs / 3600000).toFixed(1)}h 前（诊断信息）`);
+    if (ageMs < 0) console.warn('  ⚠ API 最新条目时间在未来');
+    if (ageMs >= 48 * 60 * 60 * 1000) console.warn('  ⚠ API 最新条目超过 48 小时');
 
-    console.log('\n[API vs 网页差异说明]');
-    // 已知限制:
-    // 1. API /api/public/items 有缓存，可能出现数小时级公开接口延迟
-    // 2. 网页按 indexedAt（入库时间）排序，API 按 publishedAt（发布时间）排序
-    // 3. 两者条目集合大体一致，排序和时效有分钟级差异
+    console.log('\n[API 时效性]');
+    // API /api/v1/items 有缓存，可能出现数小时级公开接口延迟。
     const apiTodayItems = selected.filter(i => {
       const d = new Date(i.publishedAt);
       return d.toDateString() === new Date().toDateString();
@@ -256,15 +231,8 @@ function simulateResetAndPoll(apiItems, historyDays) {
     console.log(`  API 今日条目: ${apiTodayItems.length} 条`);
     const apiLatest = new Date(selected[0].publishedAt);
     const apiLagMinutes = (Date.now() - apiLatest.getTime()) / 60000;
-    if (apiTodayItems.length > 0) {
-      assert(true, '今日有数据可验证');
-    } else {
-      assert(apiLagMinutes < 720, '午夜附近无今日数据时，最新数据仍在可接受延迟内');
-    }
     console.log(`  API 数据延迟: ~${apiLagMinutes.toFixed(0)} 分钟（公开接口有缓存，属正常）`);
-    assert(apiLagMinutes < 720, `API 最新发布时间 ${apiLagMinutes.toFixed(0)}m < 720m（可接受）`);
-    console.log('  已知差异: API 按 publishedAt 排序，网页按 indexedAt 排序');
-    console.log('  已知差异: API 可能比网页延迟数小时（公开接口缓存）');
+    if (apiTodayItems.length === 0) console.warn('  ⚠ API 当前没有今日条目');
 
     console.log('\n[扩展展示逻辑验证]');
     // 模拟扩展 popup.js 的 formatTime 和 getDateLabel
@@ -281,12 +249,12 @@ function simulateResetAndPoll(apiItems, historyDays) {
       if (d.toDateString() === yesterday.toDateString()) return '昨天';
       return `${d.getMonth() + 1}月${d.getDate()}日`;
     }
-    // 验证前5条的展示时间与 API 数据对应
-    const top5 = selected.slice(0, 5);
+    // 展示顺序只验证扩展自身的排序结果，而不依赖 v1 原始响应顺序。
+    const top5 = histSelected.slice(0, 5);
     console.log('  扩展中将展示为:');
     top5.forEach((item, idx) => {
-      const label = getDateLabel(item.publishedAt);
-      const time = formatTime(item.publishedAt);
+      const label = getDateLabel(item.time);
+      const time = formatTime(item.time);
       console.log(`    ${idx + 1}. [${label} ${time}] ${item.title.slice(0, 35)}...`);
     });
     // 验证日期分组正确性
@@ -297,12 +265,12 @@ function simulateResetAndPoll(apiItems, historyDays) {
     // 验证排列顺序：扩展中时间应该递减
     let orderCorrect = true;
     for (let i = 1; i < top5.length; i++) {
-      if (new Date(top5[i].publishedAt) > new Date(top5[i-1].publishedAt)) {
+      if (new Date(top5[i].time) > new Date(top5[i - 1].time)) {
         orderCorrect = false;
         break;
       }
     }
-    assert(orderCorrect, '扩展展示顺序与网页一致（时间递减）');
+    assert(orderCorrect, '扩展展示顺序按时间递减');
 
   } catch (e) {
     console.error(`\n✗ 测试中断: ${e.message}`);

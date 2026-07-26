@@ -1132,12 +1132,27 @@
       color: var(--text-3);
       font-size: 12px;
       line-height: 1.6;
+      cursor: default;
+      user-select: none;
+    }
+
+    .popup-status {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
 
 
   </style>
   <script src="popup-log.js"></script>
   <script src="popup-boot.js"></script>
+  <script src="popup-reliability.js"></script>
 </head>
 <body style="width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: var(--bg, #101010); color-scheme: var(--color-scheme, dark);">
   <div class="header">
@@ -1176,13 +1191,13 @@
           <div class="setting-row">
             <label>推送通知</label>
             <label class="switch">
-              <input type="checkbox" id="enabled">
+              <input type="checkbox" id="enabled" aria-label="推送通知">
               <span class="switch-track"></span>
             </label>
           </div>
           <div class="setting-row">
             <label>检查频率</label>
-            <select class="select-mini" id="interval">
+            <select class="select-mini" id="interval" aria-label="检查频率">
               <option value="2">2 分钟</option>
               <option value="5">5 分钟</option>
               <option value="15">15 分钟</option>
@@ -1192,14 +1207,14 @@
           </div>
           <div class="setting-row">
             <label>内容源</label>
-            <select class="select-mini" id="feedMode">
+            <select class="select-mini" id="feedMode" aria-label="内容源">
               <option value="selected">精选</option>
               <option value="all">全部</option>
             </select>
           </div>
           <div class="setting-row">
             <label>显示天数</label>
-            <select class="select-mini" id="historyDays">
+            <select class="select-mini" id="historyDays" aria-label="显示天数">
               <option value="1">1 天</option>
               <option value="2" selected>2 天</option>
               <option value="3">3 天</option>
@@ -1208,7 +1223,7 @@
           </div>
           <div class="setting-row">
             <label>定位</label>
-            <select class="select-mini" id="openPositionMode">
+            <select class="select-mini" id="openPositionMode" aria-label="定位">
               <option value="free">自由浏览</option>
               <option value="unread">未读优先</option>
             </select>
@@ -1221,7 +1236,7 @@
         <div class="setting-group-body">
           <div class="setting-row">
             <label>主题</label>
-            <select class="select-mini" id="theme">
+            <select class="select-mini" id="theme" aria-label="主题">
               <option value="dark">墨夜</option>
               <option value="green-dark">暗森</option>
               <option value="chrome-dark">铬墨</option>
@@ -1230,7 +1245,7 @@
           </div>
           <div class="setting-row">
             <label>字体</label>
-            <select class="select-mini" id="fontFamily">
+            <select class="select-mini" id="fontFamily" aria-label="字体">
               <option value="system">系统</option>
               <option value="noto-serif">宋体</option>
               <option value="lxgw">楷体</option>
@@ -1238,7 +1253,7 @@
           </div>
           <div class="setting-row">
             <label>字号</label>
-            <select class="select-mini" id="fontSize">
+            <select class="select-mini" id="fontSize" aria-label="字号">
               <option value="small">小</option>
               <option value="medium">默认</option>
               <option value="large">大</option>
@@ -1253,10 +1268,10 @@
         <summary class="setting-group-title">特关</summary>
         <div class="setting-group-body">
           <div class="watch-rule-form">
-            <input class="watch-input" id="watchSource" placeholder="来源">
-            <input class="watch-input" id="watchAuthor" placeholder="作者">
+            <input class="watch-input" id="watchSource" placeholder="来源" aria-label="来源">
+            <input class="watch-input" id="watchAuthor" placeholder="作者" aria-label="作者">
             <div class="watch-action-row">
-              <input class="watch-input watch-input-full" id="watchKeywords" placeholder="关键词，逗号分隔">
+              <input class="watch-input watch-input-full" id="watchKeywords" placeholder="关键词，逗号分隔" aria-label="关键词，逗号分隔">
               <button class="btn-mini watch-add-btn" id="addWatchRule">添加</button>
             </div>
           </div>
@@ -1276,6 +1291,7 @@
     </div>
   </div>
 
+  <div class="popup-status" id="popupStatus" role="status" aria-live="polite" aria-atomic="true"></div>
   <div class="list" id="historyList">
     <div class="initial-skeleton" aria-hidden="true">
       <div class="skeleton-item">

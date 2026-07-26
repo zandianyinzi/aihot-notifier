@@ -11,27 +11,37 @@ function assert(condition, msg) {
 
 // ===== 辅助函数（从 background.js 提取的纯逻辑） =====
 
+// API v1 的解析由 test-background.js 和 test-e2e.js 覆盖。这里仅把 v1 fixture
+// 准备为已归一化的条目，以测试与传输格式无关的去重、排序和窗口算法。
+function v1Item({ id, title, original, aihot, sourceName = '测试来源', ...rest }) {
+  return {
+    id: id || title,
+    title,
+    source: { name: sourceName },
+    links: { original, aihot: aihot || original },
+    category: 'industry',
+    ...rest
+  };
+}
+
+function v1Page(items, { hasMore = false, nextCursor = null } = {}) {
+  return { items, page: { hasMore, nextCursor } };
+}
+
+function toNormalizedTestEntry(item) {
+  return {
+    title: item.title,
+    url: item.links.original || item.links.aihot,
+    source: item.source.name,
+    category: item.category,
+    summary: item.summary || '',
+    time: item.publishedAt
+  };
+}
+
 function dedup(apiItems, history) {
   const existingUrls = new Set(history.map(i => i.url));
   return apiItems.filter(i => !existingUrls.has(i.url));
-}
-
-function mapEntries(items) {
-  return items.map(i => ({
-    title: i.title,
-    id: i.id || '',
-    titleEn: i.title_en || '',
-    url: i.url || i.permalink || '',
-    permalink: i.permalink || i.url || '',
-    source: i.source || '',
-    category: i.category || '',
-    summary: i.summary || '',
-    score: i.score ?? null,
-    selected: i.selected === true,
-    attribution: i.attribution || null,
-    time: i.publishedAt,
-    discoveredAt: i.discoveredAt
-  }));
 }
 
 function getItemTime(item) {
@@ -61,12 +71,6 @@ function calcSinceTime(lastCheck, intervalMinutes) {
 function calcManualSince(lastCheck, lastItemsPollAt = '') {
   return calcSinceTime(lastItemsPollAt || lastCheck, 5);
 }
-
-function getApiUrl(mode) {
-  const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
-  return `${API_BASE}&mode=${mode}`;
-}
-
 
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 
@@ -202,12 +206,13 @@ console.log('\n[去重]');
     { url: 'https://a.com/1', title: 'A', time: '2026-06-04T10:00:00Z' },
     { url: 'https://a.com/2', title: 'B', time: '2026-06-04T08:00:00Z' },
   ];
-  const api = [
-    { url: 'https://a.com/3', title: 'C', publishedAt: '2026-06-05T06:00:00Z' },
-    { url: 'https://a.com/1', title: 'A-dup', publishedAt: '2026-06-04T10:00:00Z' },
-    { url: 'https://a.com/4', title: 'D', publishedAt: '2026-06-05T03:00:00Z' },
-  ];
-  const result = dedup(api, history);
+  const apiPage = v1Page([
+    v1Item({ title: 'C', original: 'https://a.com/3', publishedAt: '2026-06-05T06:00:00Z' }),
+    v1Item({ title: 'A-dup', original: 'https://a.com/1', publishedAt: '2026-06-04T10:00:00Z' }),
+    v1Item({ title: 'D', original: 'https://a.com/4', publishedAt: '2026-06-05T03:00:00Z' }),
+  ]);
+  const normalizedCandidates = apiPage.items.map(toNormalizedTestEntry);
+  const result = dedup(normalizedCandidates, history);
   assert(result.length === 2, '过滤掉1条重复，保留2条新');
   assert(result[0].url === 'https://a.com/3', '第一条是新条目C');
   assert(result[1].url === 'https://a.com/4', '第二条是新条目D');
@@ -215,15 +220,16 @@ console.log('\n[去重]');
 
 console.log('\n[去重-空history]');
 (function() {
-  const result = dedup([{ url: 'https://x.com', title: 'X' }], []);
+  const apiPage = v1Page([v1Item({ title: 'X', original: 'https://x.com' })]);
+  const result = dedup(apiPage.items.map(toNormalizedTestEntry), []);
   assert(result.length === 1, '空history时全部为新');
 })();
 
 console.log('\n[去重-全重复]');
 (function() {
   const history = [{ url: 'https://a.com/1', title: 'A', time: '2026-06-04T10:00:00Z' }];
-  const api = [{ url: 'https://a.com/1', title: 'A', publishedAt: '2026-06-04T10:00:00Z' }];
-  const result = dedup(api, history);
+  const apiPage = v1Page([v1Item({ title: 'A', original: 'https://a.com/1', publishedAt: '2026-06-04T10:00:00Z' })]);
+  const result = dedup(apiPage.items.map(toNormalizedTestEntry), history);
   assert(result.length === 0, '全重复时返回空');
 })();
 
@@ -339,79 +345,24 @@ console.log('\n[回退时间-手动poll]');
   assert(sinceFallback === '2026-06-05T00:00:00.000Z', '缺lastItemsPollAt时手动刷新基于lastCheck回退6小时');
 })();
 
-console.log('\n[mapEntries字段映射]');
-(function() {
-  const items = [{
-    id: 'item-1',
-    title: 'Test',
-    title_en: 'Original Test',
-    url: 'https://t.com',
-    permalink: 'https://aihot.virxact.com/items/item-1',
-    source: 'Src',
-    category: 'model',
-    summary: 'Sum',
-    score: 88,
-    selected: true,
-    attribution: { source: 'AI HOT', canonical: 'https://aihot.virxact.com/items/item-1' },
-    publishedAt: '2026-06-05T00:00:00Z'
-  }];
-  const mapped = mapEntries(items);
-  assert(mapped[0].title === 'Test', 'title映射正确');
-  assert(mapped[0].id === 'item-1', 'id映射正确');
-  assert(mapped[0].url === 'https://t.com', 'url映射正确');
-  assert(mapped[0].permalink === 'https://aihot.virxact.com/items/item-1', 'permalink映射正确');
-  assert(mapped[0].source === 'Src', 'source映射正确');
-  assert(mapped[0].category === 'model', 'category映射正确');
-  assert(mapped[0].summary === 'Sum', 'summary映射正确');
-  assert(mapped[0].score === 88, 'score映射正确');
-  assert(mapped[0].selected === true, 'selected映射正确');
-  assert(mapped[0].attribution.canonical.includes('/items/item-1'), 'attribution映射正确');
-  assert(mapped[0].time === '2026-06-05T00:00:00Z', 'publishedAt→time映射正确');
-})();
-
-console.log('\n[mapEntries缺失字段]');
-(function() {
-  const items = [{ title: 'X', url: 'https://x.com', publishedAt: '2026-06-05T00:00:00Z' }];
-  const mapped = mapEntries(items);
-  assert(mapped[0].source === '', '缺失source默认空串');
-  assert(mapped[0].category === '', '缺失category默认空串');
-  assert(mapped[0].summary === '', '缺失summary默认空串');
-  assert(mapped[0].permalink === 'https://x.com', '缺失permalink回落url');
-  assert(mapped[0].score === null, '缺失score默认null');
-  assert(mapped[0].selected === false, '缺失selected默认false');
-})();
-
 console.log('\n[onInstalled合并-更新不覆盖]');
 (function() {
   const existingHistory = [
     { title: 'UserRead', url: 'https://old.com/1', time: daysAgo(2) },
   ];
-  const apiItems = [
-    { url: 'https://new.com/1', title: 'Fresh', publishedAt: daysAgo(1) },
-    { url: 'https://old.com/1', title: 'UserRead-dup', publishedAt: daysAgo(2) },
-  ];
+  const apiPage = v1Page([
+    v1Item({ title: 'Fresh', original: 'https://new.com/1', publishedAt: daysAgo(1) }),
+    v1Item({ title: 'UserRead-dup', original: 'https://old.com/1', publishedAt: daysAgo(2) }),
+  ]);
+  const normalizedCandidates = apiPage.items.map(toNormalizedTestEntry);
   const existingUrls = new Set(existingHistory.map(i => i.url));
-  const newEntries = apiItems
+  const newEntries = normalizedCandidates
     .filter(i => !existingUrls.has(i.url))
-    .map(i => ({ title: i.title, url: i.url, source: '', category: '', summary: '', time: i.publishedAt }));
+    .map(i => ({ ...i }));
   const merged = mergeAndSort(newEntries, existingHistory, 7);
   assert(merged.length === 2, '合并后保留2条(1新+1旧)');
   assert(merged[0].title === 'Fresh', '新条目排前');
   assert(merged[1].title === 'UserRead', '旧条目保留不被覆盖');
-})();
-
-console.log('\n[feedMode API URL]');
-(function() {
-  const urlAll = getApiUrl('all');
-  assert(urlAll === 'https://aihot.virxact.com/api/public/items?take=100&mode=all', 'mode=all URL正确');
-  const urlSelected = getApiUrl('selected');
-  assert(urlSelected === 'https://aihot.virxact.com/api/public/items?take=100&mode=selected', 'mode=selected URL正确');
-  assert(urlAll.includes('mode='), 'URL包含mode查询参数');
-  assert(urlAll.includes('take=100'), 'URL包含take=100参数');
-  assert(!urlAll.includes('??'), 'URL无双?号');
-  assert(!urlAll.includes('&&'), 'URL无双&号');
-  const withSince = `${urlAll}&since=2026-06-05T00:00:00Z`;
-  assert(withSince === 'https://aihot.virxact.com/api/public/items?take=100&mode=all&since=2026-06-05T00:00:00Z', 'URL拼接since参数正确');
 })();
 
 console.log('\n[feedMode默认值]');
@@ -437,17 +388,18 @@ console.log('\n[feedMode切换-数据隔离]');
     { title: '精选B', url: 'https://a.com/selected-2', time: hoursAgo(8) },
   ];
   // all 模式返回更多条目（包含精选的 + 额外的）
-  const apiAllItems = [
-    { url: 'https://a.com/selected-1', title: '精选A', publishedAt: hoursAgo(6) },
-    { url: 'https://a.com/all-1', title: '全量C', publishedAt: hoursAgo(7) },
-    { url: 'https://a.com/selected-2', title: '精选B', publishedAt: hoursAgo(8) },
-    { url: 'https://a.com/all-2', title: '全量D', publishedAt: hoursAgo(9) },
-  ];
+  const apiAllPage = v1Page([
+    v1Item({ title: '精选A', original: 'https://a.com/selected-1', publishedAt: hoursAgo(6) }),
+    v1Item({ title: '全量C', original: 'https://a.com/all-1', publishedAt: hoursAgo(7) }),
+    v1Item({ title: '精选B', original: 'https://a.com/selected-2', publishedAt: hoursAgo(8) }),
+    v1Item({ title: '全量D', original: 'https://a.com/all-2', publishedAt: hoursAgo(9) }),
+  ]);
+  const normalizedAllCandidates = apiAllPage.items.map(toNormalizedTestEntry);
 
   const existingUrls = new Set(historyFromSelected.map(i => i.url));
-  const newEntries = apiAllItems
+  const newEntries = normalizedAllCandidates
     .filter(i => !existingUrls.has(i.url))
-    .map(i => ({ title: i.title, url: i.url, source: '', category: '', summary: '', time: i.publishedAt }));
+    .map(i => ({ ...i }));
   const merged = [...newEntries, ...historyFromSelected]
     .filter(i => new Date(i.time).getTime() > Date.now() - 7 * 24 * 60 * 60 * 1000)
     .sort((a, b) => new Date(b.time) - new Date(a.time));
@@ -468,14 +420,15 @@ console.log('\n[feedMode切换-从all到selected不丢数据]');
     { title: '全量C', url: 'https://a.com/3', time: hoursAgo(8) },
   ];
   // selected 模式 API 返回只有部分
-  const apiSelectedItems = [
-    { url: 'https://a.com/1', title: '全量A', publishedAt: hoursAgo(6) },
-  ];
+  const apiSelectedPage = v1Page([
+    v1Item({ title: '全量A', original: 'https://a.com/1', publishedAt: hoursAgo(6) }),
+  ]);
+  const normalizedSelectedCandidates = apiSelectedPage.items.map(toNormalizedTestEntry);
 
   const existingUrls = new Set(historyFromAll.map(i => i.url));
-  const newEntries = apiSelectedItems
+  const newEntries = normalizedSelectedCandidates
     .filter(i => !existingUrls.has(i.url))
-    .map(i => ({ title: i.title, url: i.url, source: '', category: '', summary: '', time: i.publishedAt }));
+    .map(i => ({ ...i }));
   const merged = [...newEntries, ...historyFromAll]
     .filter(i => new Date(i.time).getTime() > Date.now() - 7 * 24 * 60 * 60 * 1000)
     .sort((a, b) => new Date(b.time) - new Date(a.time));
@@ -492,15 +445,13 @@ console.log('\n[resetAndPoll-清空后重建history]');
     { title: '旧B', url: 'https://old.com/2', time: '2026-06-04T08:00:00Z' },
   ];
   // 模拟切换后 API 返回全新数据
-  const apiItems = [
-    { url: 'https://new.com/1', title: '新A', source: 'X', category: 'model', summary: 's1', publishedAt: '2026-06-05T10:00:00Z' },
-    { url: 'https://new.com/2', title: '新B', source: 'Y', category: 'paper', summary: 's2', publishedAt: '2026-06-05T08:00:00Z' },
-  ];
-  // resetAndPoll 逻辑：清空旧 history，用 API 数据重建
-  const newHistory = apiItems.map(i => ({
-    title: i.title, url: i.url, source: i.source || '',
-    category: i.category || '', summary: i.summary || '', time: i.publishedAt
-  })).sort((a, b) => new Date(b.time) - new Date(a.time));
+  const apiPage = v1Page([
+    v1Item({ title: '新A', original: 'https://new.com/1', sourceName: 'X', category: 'model', summary: 's1', publishedAt: '2026-06-05T10:00:00Z' }),
+    v1Item({ title: '新B', original: 'https://new.com/2', sourceName: 'Y', category: 'paper', summary: 's2', publishedAt: '2026-06-05T08:00:00Z' }),
+  ]);
+  // 下面的 newHistory 是已归一化的历史记录，不是 API 响应。
+  const newHistory = apiPage.items.map(toNormalizedTestEntry)
+    .sort((a, b) => new Date(b.time) - new Date(a.time));
 
   assert(newHistory.length === 2, '重建后只有API返回的条目');
   assert(newHistory[0].title === '新A', '按时间降序排列');
@@ -549,13 +500,13 @@ console.log('\n[内容源-单条已读全局共享]');
 console.log('\n[resetAndPoll-cutoff过滤]');
 (function() {
   // 重建时也应用 cutoff 过滤
-  const apiItems = [
-    { url: 'https://a.com/1', title: 'Recent', publishedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString() },
-    { url: 'https://a.com/2', title: 'Old', publishedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString() },
-  ];
+  const apiPage = v1Page([
+    v1Item({ title: 'Recent', original: 'https://a.com/1', publishedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString() }),
+    v1Item({ title: 'Old', original: 'https://a.com/2', publishedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString() }),
+  ]);
   const cutoff = Date.now() - 5 * 24 * 60 * 60 * 1000;
-  const newHistory = apiItems
-    .map(i => ({ title: i.title, url: i.url, source: '', category: '', summary: '', time: i.publishedAt }))
+  const newHistory = apiPage.items
+    .map(toNormalizedTestEntry)
     .filter(i => new Date(i.time).getTime() > cutoff)
     .sort((a, b) => new Date(b.time) - new Date(a.time));
   assert(newHistory.length === 1, '超过5天的条目被过滤');
@@ -656,18 +607,18 @@ console.log('\n[主题默认值]');
 console.log('\n[分页拉取-多页合并去重]');
 (function() {
   // 模拟 3 页 API 返回，部分重叠
-  const page1 = [
-    { url: 'https://a.com/1', title: 'A', publishedAt: '2026-06-05T10:00:00Z' },
-    { url: 'https://a.com/2', title: 'B', publishedAt: '2026-06-05T09:00:00Z' },
-  ];
-  const page2 = [
-    { url: 'https://a.com/3', title: 'C', publishedAt: '2026-06-05T08:00:00Z' },
-    { url: 'https://a.com/2', title: 'B-dup', publishedAt: '2026-06-05T09:00:00Z' }, // 跨页重复
-  ];
-  const page3 = [
-    { url: 'https://a.com/4', title: 'D', publishedAt: '2026-06-04T20:00:00Z' },
-  ];
-  const allItems = [...page1, ...page2, ...page3];
+  const page1 = v1Page([
+    v1Item({ title: 'A', original: 'https://a.com/1', publishedAt: '2026-06-05T10:00:00Z' }),
+    v1Item({ title: 'B', original: 'https://a.com/2', publishedAt: '2026-06-05T09:00:00Z' }),
+  ], { hasMore: true, nextCursor: 'page-2' });
+  const page2 = v1Page([
+    v1Item({ title: 'C', original: 'https://a.com/3', publishedAt: '2026-06-05T08:00:00Z' }),
+    v1Item({ title: 'B-dup', original: 'https://a.com/2', publishedAt: '2026-06-05T09:00:00Z' }), // 跨页重复
+  ], { hasMore: true, nextCursor: 'page-3' });
+  const page3 = v1Page([
+    v1Item({ title: 'D', original: 'https://a.com/4', publishedAt: '2026-06-04T20:00:00Z' }),
+  ]);
+  const allItems = [...page1.items, ...page2.items, ...page3.items].map(toNormalizedTestEntry);
   // 去重 by URL（保留首次出现的）
   const seen = new Set();
   const unique = allItems.filter(i => {
@@ -676,7 +627,6 @@ console.log('\n[分页拉取-多页合并去重]');
     return true;
   });
   const history = unique
-    .map(i => ({ title: i.title, url: i.url, source: '', category: '', summary: '', time: i.publishedAt }))
     .sort((a, b) => new Date(b.time) - new Date(a.time));
   assert(history.length === 4, '3页合并去重后得4条');
   assert(history[0].title === 'A', '排序正确:A第一');
@@ -689,26 +639,24 @@ console.log('\n[分页拉取-cutoff截断]');
   // 模拟：第2页数据已超出 cutoff，应提前停止
   const cutoffDays = 2;
   const cutoff = Date.now() - cutoffDays * 24 * 60 * 60 * 1000;
-  const page1 = [
-    { url: 'u1', title: 'Recent', publishedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString() },
-  ];
-  const page2 = [
-    { url: 'u2', title: 'Old', publishedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString() },
-  ];
+  const page1 = v1Page([
+    v1Item({ title: 'Recent', original: 'u1', publishedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString() }),
+  ], { hasMore: true, nextCursor: 'page-2' });
+  const page2 = v1Page([
+    v1Item({ title: 'Old', original: 'u2', publishedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString() }),
+  ]);
   // 模拟分页循环中的 cutoff 检查
-  const allItems = [...page1];
-  const oldestPage1 = page1[page1.length - 1];
-  const shouldContinue = new Date(oldestPage1.publishedAt).getTime() >= cutoff;
+  const allItems = page1.items.map(toNormalizedTestEntry);
+  const oldestPage1 = page1.items[page1.items.length - 1];
+  const shouldContinue = page1.page.hasMore && new Date(oldestPage1.publishedAt).getTime() >= cutoff;
   if (shouldContinue) {
     // 第2页的 oldest 超出 cutoff
-    const oldestPage2 = page2[page2.length - 1];
+    const oldestPage2 = page2.items[page2.items.length - 1];
     const page2Continue = new Date(oldestPage2.publishedAt).getTime() >= cutoff;
     assert(!page2Continue, '第2页oldest超出cutoff，应停止分页');
-    allItems.push(...page2); // 仍然加入（最终由 filter 过滤）
+    allItems.push(...page2.items.map(toNormalizedTestEntry)); // 仍然加入（最终由 filter 过滤）
   }
-  const history = allItems
-    .map(i => ({ title: i.title, url: i.url, time: i.publishedAt }))
-    .filter(i => new Date(i.time).getTime() > cutoff);
+  const history = allItems.filter(i => new Date(i.time).getTime() > cutoff);
   assert(history.length === 1, 'cutoff过滤后只保留Recent');
 })();
 
@@ -719,9 +667,9 @@ console.log('\n[分页拉取-maxPages限制]');
   let pagesFetched = 0;
   for (let page = 0; page < maxPages; page++) {
     pagesFetched++;
-    // 模拟每页都有 hasNext
-    const hasNext = true;
-    if (!hasNext) break;
+    // 模拟 v1 page.hasMore 驱动循环。
+    const responsePage = { hasMore: true, nextCursor: `page-${page + 2}` };
+    if (!responsePage.hasMore || !responsePage.nextCursor) break;
   }
   assert(pagesFetched === 3, `最多拉取 ${maxPages} 页`);
   assert(pagesFetched <= 3, '不超过 maxPages 上限');

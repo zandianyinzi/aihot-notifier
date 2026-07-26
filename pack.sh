@@ -8,6 +8,7 @@ zip -r aihot-notifier.zip \
   popup.html \
   popup-log.js \
   popup-boot.js \
+  popup-reliability.js \
   popup.js \
   fonts/ \
   icons/ \

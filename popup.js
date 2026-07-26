@@ -38,6 +38,9 @@ const watchSourceEl = document.getElementById('watchSource');
 const watchAuthorEl = document.getElementById('watchAuthor');
 const watchKeywordsEl = document.getElementById('watchKeywords');
 const addWatchRuleBtn = document.getElementById('addWatchRule');
+const popupStatusEl = document.getElementById('popupStatus');
+const popupReliability = window.PopupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController } = popupReliability;
 
 const CATEGORY_MAP = {
   'ai-models': { cls: 'cat-model', label: '模型' },
@@ -70,6 +73,12 @@ const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
 let cachedReadIds = new Set();
 let lastRenderSignature = '';
 let scrollSaveTimer = 0;
+let sourceSwitchInFlight = 0;
+const enqueuePopupMutation = popupReliability.createMutationQueue();
+
+function showPopupStatus(message) {
+  if (popupStatusEl) popupStatusEl.textContent = message;
+}
 
 function clearButtonFeedback(button) {
   button.classList.remove(...BUTTON_TRANSIENT_CLASSES);
@@ -372,7 +381,7 @@ function escapeHtml(str) {
 }
 
 function getItemOpenUrl(item) {
-  return item && (item.url || item.permalink || '');
+  return getSafeHttpsUrl(item && (item.url || item.permalink || ''));
 }
 
 function getItemStateKey(item) {
@@ -764,13 +773,13 @@ async function saveConfig(options = {}) {
   const config = {
     enabled: enabledEl.checked,
     interval: Number(intervalEl.value),
-    feedMode,
     theme,
     fontFamily,
     fontSize,
     openPositionMode,
     historyDays
   };
+  if (!sourceSwitchInFlight) config.feedMode = feedMode;
   applyTheme(theme);
   applyFontFamily(fontFamily);
   applyFontSize(fontSize);
@@ -799,39 +808,40 @@ async function handleItemClick(e) {
 }
 
 async function openHistoryItem(item) {
-  const url = item.dataset.url;
-  const key = item.dataset.key || url;
-  if (!url) return;
+  const result = await openHttpsUrl(item.dataset.url, chrome.tabs.create.bind(chrome.tabs), async url => {
+    const key = item.dataset.key || url;
+    const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+    writeScrollPosition({ feedMode, historyDays });
 
-  const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
-  writeScrollPosition({ feedMode, historyDays });
+    if (!cachedReadIds.has(key)) {
+      cachedReadIds.add(key);
+      if (url !== key) cachedReadIds.add(url);
+      const arr = [...cachedReadIds];
+      if (arr.length > 100) arr.splice(0, arr.length - 100);
+      chrome.storage.local.set({ readIds: arr });
+      writePopupCache({ readIds: arr });
+      lastRenderSignature = '';
+    }
 
-  if (!cachedReadIds.has(key)) {
-    cachedReadIds.add(key);
-    if (url !== key) cachedReadIds.add(url);
-    const arr = [...cachedReadIds];
-    if (arr.length > 100) arr.splice(0, arr.length - 100);
-    chrome.storage.local.set({ readIds: arr });
-    writePopupCache({ readIds: arr });
-    lastRenderSignature = '';
-  }
+    document.querySelectorAll(`.item[data-key="${CSS.escape(key)}"], .item[data-url="${CSS.escape(url)}"]`).forEach(el => {
+      el.classList.remove('unread');
+      el.classList.add('read');
+    });
 
-  document.querySelectorAll(`.item[data-key="${CSS.escape(key)}"], .item[data-url="${CSS.escape(url)}"]`).forEach(el => {
-    el.classList.remove('unread');
-    el.classList.add('read');
+    const unreadEls = document.querySelectorAll('.item.unread');
+    const unreadCount = unreadEls.length;
+    if (unreadCount > 0) {
+      markAllReadBtn.classList.add('visible');
+    } else {
+      markAllReadBtn.classList.remove('visible');
+    }
+    chrome.action.setBadgeText({ text: unreadCount > 0 ? String(unreadCount) : '' });
+
+    await markWatchUrlsViewed([key, url]);
   });
-
-  const unreadEls = document.querySelectorAll('.item.unread');
-  const unreadCount = unreadEls.length;
-  if (unreadCount > 0) {
-    markAllReadBtn.classList.add('visible');
-  } else {
-    markAllReadBtn.classList.remove('visible');
+  if (!result.ok) {
+    showPopupStatus(result.reason === 'unsafe-url' ? '无法打开此条目：链接必须使用 HTTPS。' : '打开条目失败，请重试。');
   }
-  chrome.action.setBadgeText({ text: unreadCount > 0 ? String(unreadCount) : '' });
-
-  await markWatchUrlsViewed([key, url]);
-  chrome.tabs.create({ url });
 }
 
 // Event delegation for item clicks
@@ -916,63 +926,92 @@ if (addWatchRuleBtn) {
     const author = watchAuthorEl.value.trim();
     const keywords = splitWatchKeywords(watchKeywordsEl.value);
     if (!source && !author && keywords.length === 0) return;
-    const { watchRules = [] } = await chrome.storage.local.get('watchRules');
-    const nextRules = mergeWatchRuleInput(watchRules, { source, author, keywords });
-    watchKeywordsEl.value = '';
-    await saveWatchRules(nextRules, { scrollToEnd: true });
+    try {
+      await enqueuePopupMutation(async () => {
+        const { watchRules = [] } = await chrome.storage.local.get('watchRules');
+        const nextRules = mergeWatchRuleInput(watchRules, { source, author, keywords });
+        await saveWatchRules(nextRules, { scrollToEnd: true });
+        watchKeywordsEl.value = '';
+      });
+    } catch (_e) {
+      showPopupStatus('保存特关规则失败，请重试。');
+    }
   });
 }
 
 if (watchRulesList) {
   watchRulesList.addEventListener('scroll', updateWatchRulesScrollHint, { passive: true });
   watchRulesList.addEventListener('click', async (e) => {
-    const keywordRemoveBtn = e.target.closest('.watch-keyword-remove');
-    if (keywordRemoveBtn) {
-      const card = keywordRemoveBtn.closest('.watch-rule-card');
-      const ruleId = card?.dataset.ruleId;
-      const keywordIndex = Number(keywordRemoveBtn.dataset.keywordIndex);
-      if (!ruleId || !Number.isInteger(keywordIndex)) return;
-      const { watchRules = [] } = await chrome.storage.local.get('watchRules');
-      await saveWatchRules(removeWatchRuleKeyword(watchRules, ruleId, keywordIndex));
-      return;
-    }
+    try {
+      await enqueuePopupMutation(async () => {
+        const keywordRemoveBtn = e.target.closest('.watch-keyword-remove');
+        if (keywordRemoveBtn) {
+          const card = keywordRemoveBtn.closest('.watch-rule-card');
+          const ruleId = card?.dataset.ruleId;
+          const keywordIndex = Number(keywordRemoveBtn.dataset.keywordIndex);
+          if (!ruleId || !Number.isInteger(keywordIndex)) return;
+          const { watchRules = [] } = await chrome.storage.local.get('watchRules');
+          await saveWatchRules(removeWatchRuleKeyword(watchRules, ruleId, keywordIndex));
+          return;
+        }
 
-    const button = e.target.closest('.watch-rule-btn');
-    if (!button) return;
-    const card = button.closest('.watch-rule-card');
-    const ruleId = card?.dataset.ruleId;
-    if (!ruleId) return;
-    const { watchRules = [] } = await chrome.storage.local.get('watchRules');
-    const rules = normalizeWatchRules(watchRules);
-    const action = button.dataset.action;
-    const nextRules = action === 'delete'
-      ? rules.filter(rule => rule.id !== ruleId)
-      : rules.map(rule => rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule);
-    await saveWatchRules(nextRules);
+        const button = e.target.closest('.watch-rule-btn');
+        if (!button) return;
+        const card = button.closest('.watch-rule-card');
+        const ruleId = card?.dataset.ruleId;
+        if (!ruleId) return;
+        const { watchRules = [] } = await chrome.storage.local.get('watchRules');
+        const rules = normalizeWatchRules(watchRules);
+        const action = button.dataset.action;
+        const nextRules = action === 'delete'
+          ? rules.filter(rule => rule.id !== ruleId)
+          : rules.map(rule => rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule);
+        await saveWatchRules(nextRules);
+      });
+    } catch (_e) {
+      showPopupStatus('更新特关规则失败，请重试。');
+    }
   });
 }
 
 enabledEl.addEventListener('change', () => saveConfig());
 intervalEl.addEventListener('change', () => saveConfig());
+const feedModeSwitchController = createFeedModeSwitchController({
+  enqueue: enqueuePopupMutation,
+  setDisabled: disabled => { feedModeEl.disabled = disabled; },
+  sendChange: feedMode => chrome.runtime.sendMessage({ type: 'feedModeChanged', feedMode }),
+  getFailCount: async () => {
+    const { failCount = 0 } = await chrome.storage.local.get('failCount');
+    return failCount;
+  },
+  clearScrollPosition,
+  loadHistory,
+  persist: feedMode => writePopupCache({ feedMode }),
+  rollback: async feedMode => {
+    feedModeEl.value = feedMode;
+    await chrome.storage.local.set({ feedMode });
+    writePopupCache({ feedMode });
+  },
+  onSuccess: (failCount, feedbackStartedAt) => {
+    showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
+  },
+  onFailure: feedbackStartedAt => {
+    showButtonResult(pollBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
+    showPopupStatus('切换内容源失败，已恢复原选择。');
+  }
+});
+
 feedModeEl.addEventListener('change', async () => {
   const feedbackStartedAt = Date.now();
   const nextFeedMode = normalizeFeedMode(feedModeEl.value);
   const previousFeedMode = normalizeFeedMode(readPopupCache()?.feedMode || 'selected');
-
   clearButtonFeedback(pollBtn);
   pollBtn.classList.add('is-loading');
+  sourceSwitchInFlight++;
   try {
-    const response = await chrome.runtime.sendMessage({ type: 'feedModeChanged', feedMode: nextFeedMode });
-    if (!response || response.ok === false) throw new Error(response?.error || 'feed mode update failed');
-    const { failCount = 0 } = await chrome.storage.local.get('failCount');
-    clearScrollPosition();
-    await loadHistory();
-    writePopupCache({ feedMode: nextFeedMode });
-    showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
-  } catch (e) {
-    feedModeEl.value = previousFeedMode;
-    writePopupCache({ feedMode: previousFeedMode });
-    showButtonResult(pollBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
+    await feedModeSwitchController.switchFeedMode(nextFeedMode, previousFeedMode, feedbackStartedAt);
+  } finally {
+    sourceSwitchInFlight--;
   }
 });
 themeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
