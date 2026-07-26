@@ -1,4 +1,7 @@
-const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
+const API_BASE = 'https://aihot.virxact.com/api/v1/items';
+const API_WINDOW = '7d';
+const API_LIMIT = 100;
+const MAX_CURSOR_LENGTH = 1024;
 const FINGERPRINT_URL = 'https://aihot.virxact.com/api/public/fingerprint';
 const ALARM_NAME = 'aihot-poll';
 const DEFAULT_INTERVAL = 5;
@@ -17,6 +20,14 @@ const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 let notificationCounter = 0;
+let stateMutationQueue = Promise.resolve();
+
+function runStateMutation(task) {
+  const operation = stateMutationQueue.then(task, task);
+  stateMutationQueue = operation.catch(() => {});
+  return operation;
+}
+
 async function getConfig() {
   const data = await chrome.storage.local.get(['enabled', 'interval', 'lastCheck', 'feedMode']);
   return {
@@ -28,7 +39,7 @@ async function getConfig() {
 }
 
 function getApiUrl(mode) {
-  return `${API_BASE}&mode=${mode}`;
+  return `${API_BASE}?mode=${encodeURIComponent(normalizeFeedMode(mode))}&window=${API_WINDOW}&limit=${API_LIMIT}`;
 }
 
 function getMaxPages(mode) {
@@ -176,36 +187,89 @@ async function fetchItemsPage(url) {
   return res.json();
 }
 
-async function fetchItems({ mode, sinceTime = '', cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '' }) {
+function isHttpsUrl(value) {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch (_e) {
+    return false;
+  }
+}
+
+function normalizeAttribution(attribution) {
+  if (!attribution || typeof attribution !== 'object') return null;
+  const name = typeof attribution.name === 'string' ? attribution.name : '';
+  const url = typeof attribution.url === 'string' ? attribution.url : '';
+  return name || url ? { name, url } : null;
+}
+
+function normalizeV1Item(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  if (typeof item.id !== 'string' || !item.id || typeof item.title !== 'string' || !item.title) return null;
+  if (!item.source || typeof item.source !== 'object' || typeof item.source.name !== 'string' || !item.source.name) return null;
+  if (!item.links || typeof item.links !== 'object') return null;
+
+  const original = typeof item.links.original === 'string' ? item.links.original : '';
+  const permalink = typeof item.links.aihot === 'string' ? item.links.aihot : '';
+  const url = isHttpsUrl(original) ? original : (isHttpsUrl(permalink) ? permalink : '');
+  if (!url) return null;
+
+  return {
+    ...item,
+    source: item.source.name,
+    url,
+    permalink,
+    titleEn: typeof item.originalTitle === 'string' ? item.originalTitle : '',
+    attribution: normalizeAttribution(item.attribution)
+  };
+}
+
+function getV1Page(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json) || !Array.isArray(json.items)) {
+    throw new Error('Invalid API items response');
+  }
+  if (!json.page || typeof json.page !== 'object' || Array.isArray(json.page) || typeof json.page.hasMore !== 'boolean') {
+    throw new Error('Invalid API page response');
+  }
+
+  const nextCursor = json.page.nextCursor;
+  if (nextCursor !== null && nextCursor !== undefined && typeof nextCursor !== 'string') {
+    throw new Error('Invalid API cursor');
+  }
+  if (typeof nextCursor === 'string' && nextCursor.length > MAX_CURSOR_LENGTH) {
+    throw new Error('API cursor is too long');
+  }
+  if (json.page.hasMore && !nextCursor) throw new Error('Missing API cursor');
+
+  return { items: json.items, hasMore: json.page.hasMore, nextCursor: nextCursor || '' };
+}
+
+async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '' }) {
   const normalizedMode = normalizeFeedMode(mode);
   let allItems = [];
   let cursor = null;
   let truncated = false;
   let nextCursor = '';
+  const seenCursors = new Set();
 
   for (let page = 0; page < maxPages; page++) {
     let url = baseUrl || getApiUrl(normalizedMode);
-    if (sinceTime) url += `&since=${encodeURIComponent(sinceTime)}`;
     if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
-    const json = await fetchItemsPage(url);
-    if (!json.items || json.items.length === 0) {
-      truncated = Boolean(json.hasNext && json.nextCursor);
-      nextCursor = json.nextCursor || '';
-      break;
-    }
+    const response = getV1Page(await fetchItemsPage(url));
+    const items = response.items.map(normalizeV1Item).filter(Boolean);
+    allItems = allItems.concat(items);
 
-    allItems = allItems.concat(json.items);
-
-    if (!json.hasNext || !json.nextCursor) break;
-    const oldest = json.items[json.items.length - 1];
-    if (new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) break;
+    if (!response.hasMore) break;
+    const oldest = items[items.length - 1];
+    if (oldest && new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) break;
     if (page === maxPages - 1) {
       truncated = true;
-      nextCursor = json.nextCursor;
+      nextCursor = response.nextCursor;
       break;
     }
-    cursor = json.nextCursor;
+    if (seenCursors.has(response.nextCursor)) throw new Error('Repeated API cursor');
+    seenCursors.add(response.nextCursor);
+    cursor = response.nextCursor;
     await sleep(PAGE_DELAY_MS);
   }
 
@@ -486,13 +550,20 @@ function buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifySta
   return { newEntries, watchItems, normalItems, nextWatchNotifyState };
 }
 
-async function mergeAndPersistHistory(newEntries, history, historyDays) {
+function pruneWatchNotifyState(history, watchNotifyState) {
+  const retainedAliases = new Set((history || []).flatMap(item => getItemAliases(item)));
+  return Object.fromEntries(Object.entries(watchNotifyState || {})
+    .filter(([key]) => retainedAliases.has(key)));
+}
+
+async function mergeAndPersistHistory(newEntries, history, historyDays, watchNotifyState = {}) {
   const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
   const updated = [...newEntries, ...history]
     .filter(i => isWithinHistoryWindow(i, cutoff))
     .sort((a, b) => getItemTime(b) - getItemTime(a));
-  await chrome.storage.local.set({ history: updated });
-  return updated;
+  const nextWatchNotifyState = pruneWatchNotifyState(updated, watchNotifyState);
+  await chrome.storage.local.set({ history: updated, watchNotifyState: nextWatchNotifyState });
+  return { history: updated, watchNotifyState: nextWatchNotifyState };
 }
 
 function getNormalizedItemTime(item, discoveredAt) {
@@ -511,7 +582,8 @@ async function clearNotificationUrlOnClosed(notificationId) {
 
 if (chrome.notifications.onClosed && chrome.notifications.onClosed.addListener) {
   chrome.notifications.onClosed.addListener((notificationId) => {
-    clearNotificationUrlOnClosed(notificationId).catch(e => console.warn('[AI HOT] failed to forget closed notification:', e));
+    return runStateMutation(() => clearNotificationUrlOnClosed(notificationId))
+      .catch(e => console.warn('[AI HOT] failed to forget closed notification:', e));
   });
 }
 
@@ -543,7 +615,7 @@ function toHistoryEntry(item, discoveredAt, watchMatches = []) {
   const entry = {
     title: item.title,
     id: item.id || '',
-    titleEn: item.title_en || '',
+    titleEn: item.titleEn || item.title_en || item.originalTitle || '',
     url: getItemOpenUrl(item),
     permalink: item.permalink || item.url || '',
     source: item.source || '',
@@ -577,7 +649,7 @@ async function migrateReadAllBefore() {
   });
 }
 
-async function pollForUpdates() {
+async function pollForUpdatesInternal() {
   const config = await getConfig();
   if (!config.enabled) return;
 
@@ -626,6 +698,10 @@ async function pollForUpdates() {
   }
 }
 
+function pollForUpdates() {
+  return runStateMutation(pollForUpdatesInternal);
+}
+
 async function incrementFailCount() {
   const { failCount = 0 } = await chrome.storage.local.get('failCount');
   const newCount = failCount + 1;
@@ -650,10 +726,12 @@ async function persistFetchedItems(items, options = {}) {
   } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState']);
 
   const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, discoveredAt);
-  const updated = await mergeAndPersistHistory(newEntries, history, historyDays);
+  const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState);
+  const updated = persisted.history;
+  const persistedWatchNotifyState = persisted.watchNotifyState;
 
   const notifiedWatchItems = shouldNotify
-    ? await sendWatchNotifications(watchItems, nextWatchNotifyState, discoveredAt, watchNotificationLimit)
+    ? await sendWatchNotifications(watchItems, persistedWatchNotifyState, discoveredAt, watchNotificationLimit)
     : [];
 
   if (shouldNotify && normalItems.length > 0) {
@@ -681,7 +759,7 @@ async function persistFetchedItems(items, options = {}) {
 
   await chrome.storage.local.set({
     lastItems: [...watchItems, ...normalItems].slice(0, 5),
-    watchNotifyState: nextWatchNotifyState
+    watchNotifyState: persistedWatchNotifyState
   });
 
   await updateBadge();
@@ -693,7 +771,7 @@ async function showNotification(items) {
   return result.watchNotificationsSent;
 }
 
-async function checkWatchReminders(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
+async function checkWatchRemindersInternal(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
   if (limit <= 0) return 0;
   const { history = [], watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'watchRules', 'watchNotifyState']);
   const watchItems = history.filter(item => getActiveWatchMatchIds(item, watchRules).length > 0 && findWatchState(watchNotifyState, item).state);
@@ -707,7 +785,11 @@ async function checkWatchReminders(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
   return notified.length;
 }
 
-async function manualPoll() {
+function checkWatchReminders(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
+  return runStateMutation(() => checkWatchRemindersInternal(limit));
+}
+
+async function manualPollInternal() {
   await assertNotInBackoff();
   const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode, lastCheck = '', lastItemsPollAt = '' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode', 'lastCheck', 'lastItemsPollAt']);
   const mode = normalizeFeedMode(feedMode);
@@ -735,8 +817,9 @@ async function manualPoll() {
     const discoveredAt = new Date().toISOString();
     const { watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['watchRules', 'watchNotifyState']);
     const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, history, watchRules, watchNotifyState, discoveredAt);
-    const merged = await mergeAndPersistHistory(newEntries, history, historyDays);
-    await chrome.storage.local.set({ lastItems: [...watchItems, ...normalItems].slice(0, 5), watchNotifyState: nextWatchNotifyState });
+    const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState);
+    const merged = persisted.history;
+    await chrome.storage.local.set({ lastItems: [...watchItems, ...normalItems].slice(0, 5), watchNotifyState: persisted.watchNotifyState });
     if (allItems.truncated) {
       await chrome.storage.local.set({ lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
     } else {
@@ -751,6 +834,10 @@ async function manualPoll() {
     await recordApiFailure(e.response || e.status || 0);
     throw e;
   }
+}
+
+function manualPoll() {
+  return runStateMutation(manualPollInternal);
 }
 
 async function updateBadge() {
@@ -769,7 +856,7 @@ async function updateBadge() {
   chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
 }
 
-async function resetAndPoll(feedMode) {
+async function resetAndPollInternal(feedMode) {
   await assertNotInBackoff();
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
@@ -788,7 +875,7 @@ async function resetAndPoll(feedMode) {
     const resetData = {
       history: nextHistory,
       lastItems: [...watchItems, ...normalItems].slice(0, 5),
-      watchNotifyState: nextWatchNotifyState,
+      watchNotifyState: pruneWatchNotifyState(nextHistory, nextWatchNotifyState),
       feedMode: normalizeFeedMode(feedMode)
     };
     if (!allItems.truncated) {
@@ -807,7 +894,11 @@ async function resetAndPoll(feedMode) {
   }
 }
 
-chrome.notifications.onClicked.addListener(async (notificationId) => {
+function resetAndPoll(feedMode) {
+  return runStateMutation(() => resetAndPollInternal(feedMode));
+}
+
+chrome.notifications.onClicked.addListener((notificationId) => runStateMutation(async () => {
   if (notificationId.startsWith('aihot-')) {
     const { lastItems = [], notificationUrlMap = {}, notificationStateKeyMap = {} } = await chrome.storage.local.get(['lastItems', 'notificationUrlMap', 'notificationStateKeyMap']);
     const url = notificationUrlMap[notificationId] || lastItems[0]?.url;
@@ -819,11 +910,14 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
       await chrome.tabs.create({ url });
     }
   }
-});
+}));
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
-    return pollForUpdates().then((result = {}) => checkWatchReminders(getCycleWatchNotificationBudget(result.watchNotificationsSent || 0)));
+    return runStateMutation(async () => {
+      const result = await pollForUpdatesInternal();
+      return checkWatchRemindersInternal(getCycleWatchNotificationBudget(result?.watchNotificationsSent || 0));
+    });
   }
 });
 
@@ -835,25 +929,18 @@ async function setupAlarm() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(async (details) => {
+async function handleInstalled(details) {
   console.log(`[AI HOT] extension ${details.reason}`);
   await migrateReadAllBefore();
   if (details.reason === 'install') {
     try {
-      const { feedMode, historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+      const { feedMode, historyDays = DEFAULT_HISTORY_DAYS, history = [], watchNotifyState = {} } = await chrome.storage.local.get(['feedMode', 'historyDays', 'history', 'watchNotifyState']);
       const mode = normalizeFeedMode(feedMode);
       const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
       const allItems = await fetchItems({ mode, cutoff, maxPages: Math.min(getMaxPages(mode), SELECTED_MAX_PAGES) });
-
-      if (allItems.length > 0) {
-        const { history = [] } = await chrome.storage.local.get('history');
-        const newEntries = filterNewApiItems(allItems, history)
-          .map(i => toHistoryEntry(i, getNormalizedItemTime(i)));
-        const merged = [...newEntries, ...history]
-          .filter(i => isWithinHistoryWindow(i, cutoff))
-          .sort((a, b) => getItemTime(b) - getItemTime(a));
-        await chrome.storage.local.set({ history: merged });
-      }
+      const newEntries = filterNewApiItems(allItems, history)
+        .map(i => toHistoryEntry(i, getNormalizedItemTime(i)));
+      await mergeAndPersistHistory(newEntries, history, historyDays, watchNotifyState);
     } catch (e) {
       console.warn('[AI HOT] failed to fetch initial items:', e);
     }
@@ -861,17 +948,21 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await chrome.storage.local.set({ lastCheck: new Date().toISOString() });
   await updateBadge();
   await setupAlarm();
-});
+}
 
-chrome.runtime.onStartup.addListener(async () => {
+chrome.runtime.onInstalled.addListener((details) => runStateMutation(() => handleInstalled(details)));
+
+chrome.runtime.onStartup.addListener(() => runStateMutation(async () => {
   await migrateReadAllBefore();
   await setupAlarm();
-});
+}));
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'configChanged') {
-    setupAlarm();
-    sendResponse({ ok: true });
+    runStateMutation(setupAlarm)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
   }
   if (msg.type === 'pollNow') {
     manualPoll()
@@ -886,7 +977,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'markWatchViewed') {
-    markWatchViewed(msg.urls || msg.url)
+    runStateMutation(() => markWatchViewed(msg.urls || msg.url))
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
@@ -896,6 +987,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // 数据变化时自动更新 badge
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.history || changes.readIds || changes.readAllBefore || changes.readAllBeforeByMode || changes.feedMode) {
-    updateBadge();
+    runStateMutation(updateBadge)
+      .catch(e => console.warn('[AI HOT] failed to update badge:', e));
   }
 });

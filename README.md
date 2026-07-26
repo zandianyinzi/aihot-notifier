@@ -74,7 +74,7 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
 - Manifest V3，Service Worker 后台运行
 - 使用 `chrome.alarms` 定时轮询，系统重启后自动恢复
 - 数据存储在浏览器本地存储中，主要使用 `chrome.storage.local`
-- API 轮询采用 fingerprint-first：先请求 `GET https://aihot.virxact.com/api/public/fingerprint`，有变化或兜底到期后再请求 `GET https://aihot.virxact.com/api/public/items?mode=<selected|all>&since=<ISO-8601>&take=100&cursor=<nextCursor>`；手动刷新同样先查 fingerprint，拉 items 时基于上次成功 items poll 回退 6 小时且最多 3 页。
+- API 轮询采用 fingerprint-first：先请求临时保留、已纳入弃用追踪的 legacy `GET https://aihot.virxact.com/api/public/fingerprint`，有变化或兜底到期后再请求 `GET https://aihot.virxact.com/api/v1/items?mode=<selected|all>&window=7d&limit=100&cursor=<nextCursor>`。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；响应以 `page.hasMore` / `page.nextCursor` 分页。条目来源为 `source.name`，链接为 `links.original`（优先打开）与 `links.aihot`（permalink / 回退）。手动刷新同样先查 fingerprint，最多拉 3 页。
 - 已读/特关状态优先使用稳定 key（`id` / `permalink` / `url`），并兼容旧 URL 数据
 
 ## 文件结构

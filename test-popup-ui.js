@@ -81,6 +81,7 @@ function assertThemeTokenContrast(themeName, tokenName, backgroundNames, minimum
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
 const popupLogJs = fs.readFileSync('popup-log.js', 'utf8');
 const popupJs = fs.readFileSync('popup.js', 'utf8');
+const popupReliabilityJs = fs.readFileSync('popup-reliability.js', 'utf8');
 const popupBootJs = fs.readFileSync('popup-boot.js', 'utf8');
 const claudeMd = fs.readFileSync('CLAUDE.md', 'utf8');
 const agentsMd = fs.readFileSync('AGENTS.md', 'utf8');
@@ -161,7 +162,7 @@ assert(hasDeclaration(brandLogoDotRule, 'filter', /drop-shadow\(0 0 3px var\(--b
 
 
 console.log('\n[主题列表/石青主题]');
-const themeSelectHtml = popupHtml.match(/<select class="select-mini" id="theme">([\s\S]*?)<\/select>/)?.[1] || '';
+const themeSelectHtml = popupHtml.match(/<select class="select-mini" id="theme"[^>]*>([\s\S]*?)<\/select>/)?.[1] || '';
 const themeCssByName = Object.fromEntries(themeRules.map(([, name, css]) => [name, css]));
 assert(!/<option value="clear-light">晴野<\/option>/.test(themeSelectHtml), '外观主题下拉不再包含晴野');
 assert(/<option value="slate-night">石青<\/option>/.test(themeSelectHtml), '外观主题下拉包含石青，且不使用 GitHub 命名');
@@ -559,6 +560,36 @@ assert(/role="link"/.test(popupJs), '列表条目声明 link 角色');
 assert(/tabindex="0"/.test(popupJs), '列表条目可通过键盘聚焦');
 assert(/historyList\.addEventListener\('keydown'/.test(popupJs), '列表支持键盘打开条目');
 assert(/e\.key\s*===\s*'Enter'/.test(popupJs) && /e\.key\s*===\s*' '/.test(popupJs), '列表条目支持 Enter 和 Space');
+
+console.log('\n[可靠性与操作反馈]');
+assert(/const\s+enqueuePopupMutation\s*=\s*popupReliability\.createMutationQueue\(\)/.test(popupJs), 'popup 对特关规则和内容源切换提供共享 mutation queue');
+assert(/enqueuePopupMutation\(async\s*\(\)\s*=>\s*{[\s\S]*?watchRules/s.test(popupJs), '特关规则的读取、合并和保存处于同一 mutation queue 中');
+assert(/createFeedModeSwitchController\(/.test(popupJs), '内容源切换交由具备序列保护的 controller 执行');
+assert(/setDisabled:\s*disabled\s*=>\s*\{\s*feedModeEl\.disabled\s*=\s*disabled;\s*}/.test(popupJs), '内容源请求期间禁用选择器，避免重复提交');
+assert(/if\s*\(!sourceSwitchInFlight\)\s*config\.feedMode\s*=\s*feedMode/.test(popupJs), '普通设置保存不会在内容源切换期间写入 feedMode');
+assert(/await\s+chrome\.storage\.local\.set\(\{\s*feedMode\s*}\)/.test(popupJs), '内容源失败时回滚 chrome.storage.local 中的 feedMode');
+assert(/openHttpsUrl\(item\.dataset\.url,\s*chrome\.tabs\.create\.bind\(chrome\.tabs\)/.test(popupJs), '条目打开通过可执行 HTTPS helper');
+assert(/getSafeHttpsUrl\(value\)[\s\S]*?parsed\.protocol\s*===\s*'https:'/s.test(popupReliabilityJs), '条目打开拒绝非 HTTPS URL');
+assert(/await\s+createTab\(\{\s*url\s*}\);[\s\S]*?await\s+afterOpen\(url\);/s.test(popupReliabilityJs), '仅在成功创建标签页后才提交已读状态');
+assert(/id="popupStatus"[^>]*role="status"[^>]*aria-live="polite"/.test(popupHtml), '失败状态使用 aria-live status 区域提示');
+assert(/function\s+showPopupStatus\(message\)/.test(popupJs), 'popup 可向 status 区域发布失败提示');
+assert(/id="enabled"[^>]*aria-label="推送通知"/.test(popupHtml), '通知开关有程序化标签');
+assert(/id="watchSource"[^>]*aria-label="来源"/.test(popupHtml), '来源输入有程序化标签');
+assert(/id="watchAuthor"[^>]*aria-label="作者"/.test(popupHtml), '作者输入有程序化标签');
+assert(/id="watchKeywords"[^>]*aria-label="关键词，逗号分隔"/.test(popupHtml), '关键词输入有程序化标签');
+assert(/id="interval"[^>]*aria-label="检查频率"/.test(popupHtml), '检查频率有程序化标签');
+assert(/id="feedMode"[^>]*aria-label="内容源"/.test(popupHtml), '内容源有程序化标签');
+assert(/id="historyDays"[^>]*aria-label="显示天数"/.test(popupHtml), '显示天数有程序化标签');
+assert(/id="openPositionMode"[^>]*aria-label="定位"/.test(popupHtml), '定位有程序化标签');
+assert(/id="theme"[^>]*aria-label="主题"/.test(popupHtml), '主题有程序化标签');
+assert(/id="fontFamily"[^>]*aria-label="字体"/.test(popupHtml), '字体有程序化标签');
+assert(/id="fontSize"[^>]*aria-label="字号"/.test(popupHtml), '字号有程序化标签');
+assert(/<script\s+src="popup-reliability\.js"><\/script>/i.test(popupHtml), 'popup 加载可执行的可靠性 helper');
+assert(/createFeedModeSwitchController/.test(popupReliabilityJs), '内容源切换协议位于可执行 helper 中');
+assert(/openHttpsUrl/.test(popupReliabilityJs), '安全打开与已读顺序位于可执行 helper 中');
+const emptyStateRule = popupHtml.match(/\.empty-state\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(emptyStateRule, 'cursor', 'default'), '空态使用默认光标');
+assert(hasDeclaration(emptyStateRule, 'user-select', 'none'), '空态禁止文本选择');
 
 console.log('\n[设置默认折叠]');
 assert(!/ensureDefaultSettingsGroupOpen/.test(popupJs), '打开设置面板不再自动展开默认分组');
