@@ -576,12 +576,19 @@ assert(/historyList\.addEventListener\('keydown'/.test(popupJs), '列表支持�
 assert(/e\.key\s*===\s*'Enter'/.test(popupJs) && /e\.key\s*===\s*' '/.test(popupJs), '列表条目支持 Enter 和 Space');
 
 console.log('\n[可靠性与操作反馈]');
+const markAllReadHandler = popupJs.match(/markAllReadBtn\.addEventListener\('click',\s*async\s*\(\)\s*=>\s*{([\s\S]*?)\n}\);/)?.[1] || '';
+const markWatchUrlsViewedHelper = popupJs.match(/async function markWatchUrlsViewed\(urls\)\s*{([\s\S]*?)\n}/)?.[1] || '';
 assert(/const\s+enqueuePopupMutation\s*=\s*popupReliability\.createMutationQueue\(\)/.test(popupJs), 'popup 对特关规则和内容源切换提供共享 mutation queue');
 assert(/enqueuePopupMutation\(async\s*\(\)\s*=>\s*{[\s\S]*?watchRules/s.test(popupJs), '特关规则的读取、合并和保存处于同一 mutation queue 中');
 assert(/createFeedModeSwitchController\(/.test(popupJs), '内容源切换交由具备序列保护的 controller 执行');
 assert(/setDisabled:\s*disabled\s*=>\s*\{\s*feedModeEl\.disabled\s*=\s*disabled;\s*}/.test(popupJs), '内容源请求期间禁用选择器，避免重复提交');
 assert(/if\s*\(!sourceSwitchInFlight\)\s*config\.feedMode\s*=\s*feedMode/.test(popupJs), '普通设置保存不会在内容源切换期间写入 feedMode');
 assert(/await\s+chrome\.storage\.local\.set\(\{\s*feedMode\s*}\)/.test(popupJs), '内容源失败时回滚 chrome.storage.local 中的 feedMode');
+assert(/chrome\.runtime\.sendMessage\(\{\s*type:\s*'markAllRead',\s*readAllBefore:\s*now\s*}\)/.test(markAllReadHandler), '全部已读通过 background 串行推进全局水位');
+assert(!/chrome\.storage\.local\.set\(\{[\s\S]*?readAllBefore/.test(markAllReadHandler), 'popup 不独立覆写全部已读水位');
+assert(!/watchAliases|markWatchItemsViewed\(/.test(markAllReadHandler), '全部已读由 background 原子提交全局水位与全部特关已查看状态');
+assert(/try\s*{[\s\S]*?catch\s*\([^)]+\)\s*{[\s\S]*?await\s+loadHistory\(\)[\s\S]*?showPopupStatus\(/.test(markAllReadHandler), '全部已读失败时先恢复持久化列表再显示错误状态');
+assert(/const\s+response\s*=\s*await\s+chrome\.runtime\.sendMessage\([\s\S]*?if\s*\(!response\?\.ok\)\s*throw/.test(markWatchUrlsViewedHelper), '特关已查看消息显式检查 background 失败响应');
 assert(/openHttpsUrl\(item\.dataset\.url,\s*chrome\.tabs\.create\.bind\(chrome\.tabs\)/.test(popupJs), '条目打开通过可执行 HTTPS helper');
 assert(/getSafeHttpsUrl\(value\)[\s\S]*?parsed\.protocol\s*===\s*'https:'/s.test(popupReliabilityJs), '条目打开拒绝非 HTTPS URL');
 assert(/await\s+createTab\(\{\s*url\s*}\);[\s\S]*?await\s+afterOpen\(url\);/s.test(popupReliabilityJs), '仅在成功创建标签页后才提交已读状态');

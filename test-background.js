@@ -18,6 +18,7 @@ let openedTabs = [];
 let notificationCreateIds = [];
 let alarmCreateCalls = [];
 let alarmClearCalls = [];
+let badgeTexts = [];
 let failSetWhen = null;
 let alarmCreateImpl = null;
 let alarmClearImpl = null;
@@ -60,6 +61,7 @@ function resetState(overrides = {}) {
   notificationCreateIds = [];
   alarmCreateCalls = [];
   alarmClearCalls = [];
+  badgeTexts = [];
   failSetWhen = null;
   alarmCreateImpl = null;
   alarmClearImpl = null;
@@ -137,7 +139,7 @@ globalThis.chrome = {
     onClosed: { addListener: (handler) => { onClosedHandler = handler; } }
   },
   action: {
-    setBadgeText: () => {},
+    setBadgeText: ({ text }) => { badgeTexts.push(text); },
     setBadgeBackgroundColor: () => {}
   },
   tabs: { create: (options) => { openedTabs.push(options.url); } },
@@ -165,6 +167,13 @@ require('./background.js');
 
 function sendMessage(message) {
   return new Promise(resolve => onMessageHandler(message, {}, resolve));
+}
+
+function sendMessageWithTimeout(message, timeoutMs = 50) {
+  return Promise.race([
+    sendMessage(message),
+    new Promise(resolve => setTimeout(() => resolve({ ok: false, timeout: true }), timeoutMs))
+  ]);
 }
 
 async function runTests() {
@@ -296,7 +305,14 @@ async function runTests() {
   assert(resetItemUrl && isV1ItemsUrl(resetItemUrl, 'all') && !new URL(resetItemUrl).searchParams.has('since'), 'resetAndPoll 使用无 since 的 all v1 URL');
 
   console.log('\n[全部内容源首屏优先与后台续拉]');
-  resetState();
+  const previousProgressiveHistory = Array.from({ length: 2005 }, (_, index) => ({
+    id: `previous-progressive-${index}`,
+    url: `https://example.com/previous-progressive-${index}`,
+    permalink: `https://aihot.virxact.com/items/previous-progressive-${index}`,
+    time: new Date(Date.now() - index * 1000).toISOString(),
+    discoveredAt: new Date(Date.now() - index * 1000).toISOString()
+  }));
+  resetState({ history: previousProgressiveHistory });
   let releaseAllSecondPage;
   let allSecondPageRequested = false;
   fetchImpl = (url) => {
@@ -330,6 +346,7 @@ async function runTests() {
   const firstPageResponded = await waitFor(() => Boolean(progressiveResponse));
   assert(firstPageResponded && progressiveResponse.ok === true, 'all 首屏成功后在后台续拉前立即响应消息');
   assert(storageData.feedMode === 'all' && storageData.history.length === 1 && storageData.history[0]?.id === 'all-page-1', 'all 首屏成功后立即提交 feedMode 与首屏 history');
+  assert(Object.keys(storageData.allFeedContinuation?.discoveredAtByAlias || {}).length === 2000, '续拉发现时间索引使用强身份且受最大分页条目数约束');
   const secondPageStarted = await waitFor(() => allSecondPageRequested);
   assert(secondPageStarted && requestedUrls.some(url => isV1ItemsUrl(url, 'all', 'all-page-2')), '后台续拉沿用首屏返回的 cursor 参数');
 
@@ -368,7 +385,9 @@ async function runTests() {
   assert(retryCompleted && throttledCursorRequests === 2, '后台续拉只在 429 Retry-After 后重试同一 cursor 页面');
 
   console.log('\n[全部内容源续拉失败收敛]');
-  resetState();
+  resetState({
+    history: [{ id: 'schedule-known', url: 'https://example.com/schedule-known', time: new Date().toISOString(), discoveredAt: new Date().toISOString() }]
+  });
   let continuationTerminalFailureLogged = false;
   let unhandledContinuationFailure = null;
   const originalContinuationError = console.error;
@@ -379,7 +398,7 @@ async function runTests() {
   };
   process.on('unhandledRejection', onUnhandledContinuationFailure);
   alarmCreateImpl = name => {
-    if (name === 'aihot-all-continuation') throw new Error('mock continuation alarm create failed');
+    if (name === 'aihot-all-continuation') return Promise.reject(new Error('mock continuation alarm create failed'));
   };
   fetchImpl = (url) => {
     requestedUrls.push(url);
@@ -393,10 +412,19 @@ async function runTests() {
   await waitFor(() => continuationTerminalFailureLogged || Boolean(unhandledContinuationFailure));
   process.removeListener('unhandledRejection', onUnhandledContinuationFailure);
   console.error = originalContinuationError;
-  assert(scheduleFailureResponse.ok === true && continuationTerminalFailureLogged && !unhandledContinuationFailure && storageData.allFeedContinuation?.active === false && storageData.allFeedContinuation?.retryAt === '', '续拉调度 alarm 失败被记录、收敛且不产生未处理 rejection');
+  assert(scheduleFailureResponse.ok === true && continuationTerminalFailureLogged && !unhandledContinuationFailure && storageData.allFeedContinuation?.active === false && storageData.allFeedContinuation?.retryAt === '' && Object.keys(storageData.allFeedContinuation?.discoveredAtByAlias || {}).length === 0, '续拉调度 alarm Promise 拒绝被记录、收敛且清理发现时间索引');
 
   console.log('\n[全部内容源长 Retry-After 不受 UI TTL 影响]');
-  resetState();
+  const longRetryKnownDiscoveredAt = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+  resetState({
+    history: [{
+      id: 'long-retry-page-2',
+      url: 'https://example.com/long-retry-page-2',
+      permalink: 'https://aihot.virxact.com/items/long-retry-page-2',
+      time: longRetryKnownDiscoveredAt,
+      discoveredAt: longRetryKnownDiscoveredAt
+    }]
+  });
   let longRetryRequests = 0;
   const originalTimeout = globalThis.setTimeout;
   globalThis.setTimeout = callback => originalTimeout(callback, 0);
@@ -425,6 +453,7 @@ async function runTests() {
   await onAlarmHandler({ name: 'aihot-all-continuation' });
   const longRetryCompleted = await waitFor(() => storageData.history.some(item => item.id === 'long-retry-page-2'));
   assert(longRetryCompleted && longRetryRequests === 2, 'continuation alarm 在 worker 后续事件中从持久化 cursor 恢复同页重试');
+  assert(storageData.history.find(item => item.id === 'long-retry-page-2')?.discoveredAt === longRetryKnownDiscoveredAt, 'worker 恢复 continuation 后沿用持久化强身份索引保留发现时间');
 
   console.log('\n[内容源切换与延迟续拉原子性]');
   resetState();
@@ -667,11 +696,368 @@ async function runTests() {
   console.log('\n[全部续拉生命周期与可选失败隔离]');
   resetState({
     feedMode: 'all',
-    allFeedContinuation: { active: true, startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() }
+    allFeedContinuation: {
+      active: true,
+      startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      discoveredAtByAlias: { stale: new Date().toISOString() }
+    }
   });
   assert(typeof onStartupHandler === 'function', '注册 startup 恢复处理器');
   await onStartupHandler();
-  assert(storageData.allFeedContinuation?.active === false, 'worker 启动时清除不可能继续执行的旧 all 续拉状态');
+  assert(storageData.allFeedContinuation?.active === false && Object.keys(storageData.allFeedContinuation?.discoveredAtByAlias || {}).length === 0, 'worker 启动时清除不可能继续执行的旧 all 续拉状态与发现时间索引');
+
+  resetState({
+    feedMode: 'all',
+    allFeedContinuation: {
+      active: true,
+      id: 'recover-alarm-failure',
+      cursor: 'recover-cursor',
+      discoveredAtByAlias: { recoverKnown: new Date().toISOString() }
+    }
+  });
+  let unhandledRecoveryAlarmFailure = null;
+  const onUnhandledRecoveryAlarmFailure = error => { unhandledRecoveryAlarmFailure = error; };
+  process.on('unhandledRejection', onUnhandledRecoveryAlarmFailure);
+  alarmCreateImpl = name => name === 'aihot-all-continuation'
+    ? Promise.reject(new Error('mock recovery alarm create failed'))
+    : undefined;
+  await onStartupHandler();
+  await waitFor(() => Boolean(unhandledRecoveryAlarmFailure) || storageData.allFeedContinuation?.active === false);
+  process.removeListener('unhandledRejection', onUnhandledRecoveryAlarmFailure);
+  assert(!unhandledRecoveryAlarmFailure && storageData.allFeedContinuation?.active === false && Object.keys(storageData.allFeedContinuation?.discoveredAtByAlias || {}).length === 0, 'worker 恢复 alarm Promise 拒绝时收敛续拉并清理发现时间索引');
+
+  resetState({
+    feedMode: 'all',
+    allFeedContinuation: {
+      active: true,
+      id: 'resume-alarm-failure',
+      cursor: 'resume-cursor',
+      retryAt: new Date(Date.now() + 60 * 1000).toISOString(),
+      discoveredAtByAlias: { resumeKnown: new Date().toISOString() }
+    }
+  });
+  let unhandledResumeAlarmFailure = null;
+  const onUnhandledResumeAlarmFailure = error => { unhandledResumeAlarmFailure = error; };
+  process.on('unhandledRejection', onUnhandledResumeAlarmFailure);
+  alarmCreateImpl = name => name === 'aihot-all-continuation'
+    ? Promise.reject(new Error('mock resume alarm create failed'))
+    : undefined;
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  await waitFor(() => Boolean(unhandledResumeAlarmFailure) || storageData.allFeedContinuation?.active === false);
+  process.removeListener('unhandledRejection', onUnhandledResumeAlarmFailure);
+  assert(!unhandledResumeAlarmFailure && storageData.allFeedContinuation?.active === false && Object.keys(storageData.allFeedContinuation?.discoveredAtByAlias || {}).length === 0, 'alarm 恢复未来续拉 Promise 拒绝时收敛状态并清理发现时间索引');
+
+  console.log('\n[全部已读水位全局迁移]');
+  const latestReadAt = new Date().toISOString();
+  const selectedReadAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const legacyGlobalReadAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const readItemTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    history: [{ id: 'globally-read', url: 'https://example.com/globally-read', time: readItemTime }],
+    readAllBefore: legacyGlobalReadAt,
+    readAllBeforeByMode: { selected: selectedReadAt, all: latestReadAt }
+  });
+  await onStartupHandler();
+  assert(storageData.readAllBefore === latestReadAt && Object.keys(storageData.readAllBeforeByMode || {}).length === 0, '启动时取旧全局与分源水位的最新值合并为全局水位');
+  onStorageChangedHandler({ readAllBeforeByMode: {} });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(badgeTexts.at(-1) === '', '切换到 all 后仍按全局全部已读水位计算 badge');
+
+  const rollbackResponse = await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: legacyGlobalReadAt });
+  assert(rollbackResponse.ok === true && storageData.readAllBefore === latestReadAt, '系统时间回拨时全部已读水位不倒退');
+
+  const atomicReadAt = new Date(Date.now() + 30 * 1000).toISOString();
+  resetState({
+    watchNotifyState: {
+      'atomic-watch': { firstMatchedAt: selectedReadAt, notifyCount: 1, viewedAt: '' },
+      'future-watch': { firstMatchedAt: new Date(new Date(atomicReadAt).getTime() + 60 * 1000).toISOString(), notifyCount: 0, viewedAt: '' }
+    }
+  });
+  const atomicReadResponse = await sendMessageWithTimeout({
+    type: 'markAllRead',
+    readAllBefore: atomicReadAt
+  });
+  assert(atomicReadResponse.ok === true && storageData.readAllBefore === atomicReadAt && Boolean(storageData.watchNotifyState['atomic-watch']?.viewedAt), '全部已读在同一后台提交中同步推进水位与特关已查看状态');
+  assert(storageData.watchNotifyState['future-watch']?.viewedAt === '', '全部已读不抑制水位生成后才匹配的新特关状态');
+
+  const concurrentReadAt = new Date(Date.now() + 60 * 1000).toISOString();
+  resetState({ readAllBeforeByMode: { selected: selectedReadAt } });
+  const migratePromise = onStartupHandler();
+  const markAllPromise = sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: concurrentReadAt });
+  const [, concurrentResponse] = await Promise.all([migratePromise, markAllPromise]);
+  assert(concurrentResponse.ok === true && storageData.readAllBefore === concurrentReadAt && Object.keys(storageData.readAllBeforeByMode || {}).length === 0, '旧水位迁移与全部已读并发时保留最新全局水位');
+
+  console.log('\n[全部已读后切源保持已读]');
+  const originalDiscoveredAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const originalPublishedAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const globalReadAt = new Date(Date.now() - 1000).toISOString();
+  resetState({
+    feedMode: 'selected',
+    history: [{
+      id: 'shared-after-switch',
+      title: '切源共享条目',
+      url: 'https://example.com/shared-after-switch',
+      permalink: 'https://aihot.virxact.com/items/shared-after-switch',
+      time: originalPublishedAt,
+      discoveredAt: originalDiscoveredAt,
+      selected: true
+    }]
+  });
+  const markBeforeSwitch = await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: globalReadAt });
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-selected', 'fp-all-after-read');
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([
+        v1Item({
+          id: 'shared-after-switch',
+          title: '切源共享条目',
+          publishedAt: originalPublishedAt,
+          selected: true,
+          links: {
+            original: 'https://example.com/shared-after-switch',
+            aihot: 'https://aihot.virxact.com/items/shared-after-switch'
+          }
+        }),
+        v1Item({
+          id: 'new-after-switch',
+          title: '切源后新发现条目',
+          publishedAt: originalPublishedAt,
+          links: {
+            original: 'https://example.com/new-after-switch',
+            aihot: 'https://aihot.virxact.com/items/new-after-switch'
+          }
+        })
+      ]))
+    });
+  };
+  const switchedAfterRead = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const sharedAfterSwitch = storageData.history.find(item => item.id === 'shared-after-switch');
+  const newAfterSwitch = storageData.history.find(item => item.id === 'new-after-switch');
+  onStorageChangedHandler({ history: {} });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(markBeforeSwitch.ok === true && switchedAfterRead.ok === true && sharedAfterSwitch?.discoveredAt === originalDiscoveredAt, '切源重建同一条目时保留原发现时间');
+  assert(new Date(newAfterSwitch?.discoveredAt || 0) > new Date(globalReadAt) && badgeTexts.at(-1) === '1', '切源后首次发现的条目仍计为未读');
+
+  const deepSelectedDiscoveredAt = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+  const deepSelectedItem = {
+    id: 'deep-selected-item',
+    title: '全量历史深层精选',
+    url: 'https://example.com/deep-selected-item',
+    permalink: 'https://aihot.virxact.com/items/deep-selected-item',
+    time: originalPublishedAt,
+    discoveredAt: deepSelectedDiscoveredAt,
+    selected: true
+  };
+  const denseAllHistory = [
+    ...Array.from({ length: 2000 }, (_, index) => ({
+      id: `dense-all-${index}`,
+      url: `https://example.com/dense-all-${index}`,
+      time: new Date(Date.now() - index * 1000).toISOString(),
+      discoveredAt: new Date(Date.now() - index * 1000).toISOString()
+    })),
+    deepSelectedItem
+  ];
+  resetState({ feedMode: 'all', history: denseAllHistory });
+  await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: globalReadAt });
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-selected-deep', 'fp-all');
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({
+        id: 'deep-selected-item',
+        title: '全量历史深层精选',
+        selected: true,
+        publishedAt: originalPublishedAt,
+        links: {
+          original: 'https://example.com/deep-selected-item',
+          aihot: 'https://aihot.virxact.com/items/deep-selected-item'
+        }
+      })]))
+    });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  assert(storageData.history[0]?.discoveredAt === deepSelectedDiscoveredAt, 'all 切回 selected 时深层精选条目仍继承原发现时间');
+
+  const exactIdDiscoveredAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const collidingUrlDiscoveredAt = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const collidingUrl = 'https://example.com/shared-source-url';
+  resetState({
+    feedMode: 'selected',
+    history: [
+      { id: 'exact-id-item', url: collidingUrl, time: originalPublishedAt, discoveredAt: exactIdDiscoveredAt },
+      { id: 'other-id-item', url: collidingUrl, time: originalPublishedAt, discoveredAt: collidingUrlDiscoveredAt }
+    ]
+  });
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-selected', 'fp-all-alias-priority');
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({
+        id: 'exact-id-item',
+        title: '精确 ID 条目',
+        publishedAt: originalPublishedAt,
+        links: {
+          original: collidingUrl,
+          aihot: 'https://aihot.virxact.com/items/exact-id-item'
+        }
+      })]))
+    });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  assert(storageData.history[0]?.discoveredAt === exactIdDiscoveredAt, '发现时间优先按精确 ID 继承，不被碰撞 URL 的更早时间覆盖');
+
+  const viewedBeforeSwitchAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const matchedBeforeSwitchAt = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'selected',
+    history: [{
+      id: 'viewed-on-continuation',
+      title: '已查看续拉特关',
+      source: '关注来源',
+      url: 'https://example.com/viewed-on-continuation',
+      permalink: 'https://aihot.virxact.com/items/viewed-on-continuation',
+      time: originalPublishedAt,
+      discoveredAt: originalDiscoveredAt,
+      watchMatched: true,
+      watchRuleIds: ['wr_existing']
+    }, {
+      id: 'hidden-unviewed-on-continuation',
+      title: '隐藏未查看续拉特关',
+      source: '关注来源',
+      url: 'https://example.com/hidden-unviewed-on-continuation',
+      permalink: 'https://aihot.virxact.com/items/hidden-unviewed-on-continuation',
+      time: originalPublishedAt,
+      discoveredAt: originalDiscoveredAt,
+      watchMatched: true,
+      watchRuleIds: ['wr_existing']
+    }],
+    watchRules: [{ id: 'wr_existing', source: '关注来源', author: '', keywords: [], enabled: true }],
+    watchNotifyState: {
+      'viewed-on-continuation': {
+        ruleIds: ['wr_existing'],
+        firstMatchedAt: matchedBeforeSwitchAt,
+        lastNotifiedAt: matchedBeforeSwitchAt,
+        notifyCount: 2,
+        nextNotifyAt: '',
+        viewedAt: viewedBeforeSwitchAt
+      },
+      'hidden-unviewed-on-continuation': {
+        ruleIds: ['wr_existing'],
+        firstMatchedAt: matchedBeforeSwitchAt,
+        lastNotifiedAt: matchedBeforeSwitchAt,
+        notifyCount: 1,
+        nextNotifyAt: '',
+        viewedAt: ''
+      }
+    }
+  });
+  let viewedFingerprintRequests = 0;
+  let viewedFirstPageRequests = 0;
+  let viewedContinuationRequested = false;
+  let releaseViewedContinuation;
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) {
+      viewedFingerprintRequests++;
+      return legacyFingerprintResponse('fp-selected', `fp-all-viewed-continuation-${viewedFingerprintRequests}`);
+    }
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'viewed-continuation') {
+      viewedContinuationRequested = true;
+      return new Promise(resolve => {
+        releaseViewedContinuation = () => resolve({
+          ok: true,
+          json: () => Promise.resolve(v1Page([v1Item({
+            id: 'viewed-on-continuation',
+            title: '已查看续拉特关',
+            source: { name: '关注来源' },
+            publishedAt: originalPublishedAt,
+            links: {
+              original: 'https://example.com/viewed-on-continuation',
+              aihot: 'https://aihot.virxact.com/items/viewed-on-continuation'
+            }
+          }), v1Item({
+            id: 'hidden-unviewed-on-continuation',
+            title: '隐藏未查看续拉特关',
+            source: { name: '关注来源' },
+            publishedAt: originalPublishedAt,
+            links: {
+              original: 'https://example.com/hidden-unviewed-on-continuation',
+              aihot: 'https://aihot.virxact.com/items/hidden-unviewed-on-continuation'
+            }
+          })]))
+        });
+      });
+    }
+    viewedFirstPageRequests++;
+    if (viewedFirstPageRequests > 1) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(v1Page([v1Item({ id: 'manual-during-continuation', source: { name: '其它来源' } })]))
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: 'unrelated-first-page', source: { name: '其它来源' } })], { hasMore: true, nextCursor: 'viewed-continuation' }))
+    });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  await waitFor(() => viewedContinuationRequested);
+  const manualDuringContinuation = await sendMessage({ type: 'pollNow' });
+  const retainedDuringManualPoll = storageData.watchNotifyState['viewed-on-continuation'];
+  assert(manualDuringContinuation.ok === true && retainedDuringManualPoll?.viewedAt === viewedBeforeSwitchAt, 'active all 续拉期间手动刷新不提前清理后续页特关状态');
+  const markAllDuringContinuation = await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: new Date().toISOString() });
+  assert(markAllDuringContinuation.ok === true && Boolean(storageData.watchNotifyState['hidden-unviewed-on-continuation']?.viewedAt), 'active all 续拉期间全部已读覆盖尚未回到 history 的特关状态');
+  releaseViewedContinuation();
+  await waitFor(() => storageData.history.some(item => item.id === 'viewed-on-continuation'));
+  const viewedContinuationState = storageData.watchNotifyState['viewed-on-continuation'];
+  assert(viewedContinuationState?.viewedAt === viewedBeforeSwitchAt && viewedContinuationState?.firstMatchedAt === matchedBeforeSwitchAt && viewedContinuationState?.notifyCount === 2, 'all 首屏后续拉保留已查看特关的原提醒状态');
+  assert(Boolean(storageData.watchNotifyState['hidden-unviewed-on-continuation']?.viewedAt), '后续页回归 history 后仍保持全部已读设置的特关已查看状态');
+
+  const continuedOriginalDiscoveredAt = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'selected',
+    history: [{
+      id: 'shared-on-continuation',
+      title: '续拉共享条目',
+      url: 'https://example.com/shared-on-continuation',
+      permalink: 'https://aihot.virxact.com/items/shared-on-continuation',
+      time: originalPublishedAt,
+      discoveredAt: continuedOriginalDiscoveredAt,
+      selected: true
+    }],
+    watchRules: [{ id: 'wr_added_later', source: 'v1 来源', author: '', keywords: [], enabled: true }]
+  });
+  await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: globalReadAt });
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-selected', 'fp-all-continuation-read');
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'read-continuation') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(v1Page([v1Item({
+          id: 'shared-on-continuation',
+          title: '续拉共享条目',
+          publishedAt: originalPublishedAt,
+          selected: true,
+          links: {
+            original: 'https://example.com/shared-on-continuation',
+            aihot: 'https://aihot.virxact.com/items/shared-on-continuation'
+          }
+        })]))
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: 'new-first-page-after-read' })], { hasMore: true, nextCursor: 'read-continuation' }))
+    });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const continuedKnownPersisted = await waitFor(() => storageData.history.some(item => item.id === 'shared-on-continuation'));
+  const sharedOnContinuation = storageData.history.find(item => item.id === 'shared-on-continuation');
+  assert(continuedKnownPersisted && sharedOnContinuation?.discoveredAt === continuedOriginalDiscoveredAt, 'all 后台续拉再次遇到同一条目时也保留原发现时间');
+  assert(new Date(sharedOnContinuation?.watchMatchedAt || 0) > new Date(globalReadAt) && new Date(storageData.watchNotifyState['shared-on-continuation']?.firstMatchedAt || 0) > new Date(globalReadAt), '后来新增的特关规则使用本次匹配时间，不回填旧发现时间');
 
   let releaseRecoveredCursor;
   fetchImpl = (url) => {

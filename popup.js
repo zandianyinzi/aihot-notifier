@@ -357,7 +357,8 @@ async function markWatchUrlsViewed(urls) {
   const list = Array.isArray(urls) ? urls.filter(Boolean) : [urls].filter(Boolean);
   if (list.length === 0) return;
   try {
-    await chrome.runtime.sendMessage({ type: 'markWatchViewed', urls: list });
+    const response = await chrome.runtime.sendMessage({ type: 'markWatchViewed', urls: list });
+    if (!response?.ok) throw new Error(response?.error || 'Failed to mark watch items viewed');
   } catch (_e) {
     const { watchNotifyState = {} } = await chrome.storage.local.get('watchNotifyState');
     const now = new Date().toISOString();
@@ -509,10 +510,10 @@ function applyInitialPosition(data) {
   scrollToFirstUnread();
 }
 
-function getReadAllBeforeForMode(data) {
-  const mode = normalizeFeedMode(data.feedMode);
-  const byMode = data.readAllBeforeByMode || {};
-  return byMode[mode] || data.readAllBefore || '';
+function getReadAllBefore(data) {
+  return [data.readAllBefore, ...Object.values(data.readAllBeforeByMode || {})]
+    .filter(value => value && Number.isFinite(new Date(value).getTime()))
+    .reduce((latest, value) => !latest || new Date(value) > new Date(latest) ? value : latest, '');
 }
 
 function getItemTime(item) {
@@ -554,22 +555,9 @@ function reconcileCachedReadIds(data, cachedData) {
   };
 }
 
-async function migrateReadAllBefore(data) {
-  if (!data.readAllBefore) return;
-
-  const mode = normalizeFeedMode(data.feedMode);
-  await chrome.storage.local.set({
-    readAllBeforeByMode: {
-      ...(data.readAllBeforeByMode || {}),
-      [mode]: data.readAllBefore
-    },
-    readAllBefore: ''
-  });
-  data.readAllBeforeByMode = {
-    ...(data.readAllBeforeByMode || {}),
-    [mode]: data.readAllBefore
-  };
-  data.readAllBefore = '';
+function normalizeReadAllBeforeData(data) {
+  data.readAllBefore = getReadAllBefore(data);
+  data.readAllBeforeByMode = {};
 }
 
 function applyTheme(theme) {
@@ -645,7 +633,7 @@ function renderHistory(data, options = {}) {
   const shouldApplyInitialPosition = options.applyInitialPosition === true;
   const rawHistory = data.history || [];
   const readIds = data.readIds || [];
-  const readAllBefore = getReadAllBeforeForMode(data);
+  const readAllBefore = getReadAllBefore(data);
   const historyDays = data.historyDays || DEFAULT_HISTORY_DAYS;
 
   const readIdSet = new Set(readIds);
@@ -760,7 +748,7 @@ async function updateBadge() {
   const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS } = data;
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const readIdSet = new Set(readIds);
-  const readAllBefore = getReadAllBeforeForMode(data);
+  const readAllBefore = getReadAllBefore(data);
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
   const filtered = history.filter(i => isWithinHistoryWindow(i, cutoff));
   updateBadgeFromData(filtered, readIdSet, readAllBeforeTime);
@@ -866,29 +854,27 @@ historyList.addEventListener('keydown', async (e) => {
 });
 
 markAllReadBtn.addEventListener('click', async () => {
-  historyList.querySelectorAll('.item.unread').forEach(el => {
-    el.classList.remove('unread');
-    el.classList.add('read');
-  });
-  markAllReadBtn.classList.remove('visible');
-  chrome.action.setBadgeText({ text: '' });
+  markAllReadBtn.disabled = true;
+  try {
+    historyList.querySelectorAll('.item.unread').forEach(el => {
+      el.classList.remove('unread');
+      el.classList.add('read');
+    });
+    markAllReadBtn.classList.remove('visible');
+    chrome.action.setBadgeText({ text: '' });
 
-  const { feedMode = 'selected', readAllBeforeByMode = {}, history = [], historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'readAllBeforeByMode', 'history', 'historyDays']);
-  const mode = normalizeFeedMode(feedMode);
-  const now = new Date().toISOString();
-  const nowMs = new Date(now).getTime();
-  const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
-  const watchItemsToView = (history || []).filter(item => item.watchMatched && isWithinHistoryWindow(item, cutoff) && getUnreadReferenceTime(item) <= nowMs);
-  await markWatchItemsViewed(watchItemsToView);
-  await chrome.storage.local.set({
-    readAllBeforeByMode: {
-      ...readAllBeforeByMode,
-      [mode]: now
-    }
-  });
-  showButtonConfirm(markAllReadBtn);
-  clearScrollPosition();
-  await loadHistory();
+    const now = new Date().toISOString();
+    const response = await chrome.runtime.sendMessage({ type: 'markAllRead', readAllBefore: now });
+    if (!response?.ok) throw new Error(response?.error || 'Failed to mark all read');
+    showButtonConfirm(markAllReadBtn);
+    clearScrollPosition();
+    await loadHistory();
+  } catch (_e) {
+    await loadHistory().catch(() => {});
+    showPopupStatus('全部已读失败，请重试。');
+  } finally {
+    markAllReadBtn.disabled = false;
+  }
 });
 
 const settingGroups = Array.from(settingsPanel.querySelectorAll('.setting-group'));
@@ -1079,7 +1065,7 @@ pollBtn.addEventListener('click', async () => {
   logPerf('storage-ready');
   const reconciled = reconcileCachedReadIds(storageData, cachedData);
   const data = reconciled.data;
-  await migrateReadAllBefore(data);
+  normalizeReadAllBeforeData(data);
   applyConfig(data);
   if (data.theme && data.theme !== normalizeTheme(data.theme)) {
     chrome.storage.local.set({ theme: 'dark' });

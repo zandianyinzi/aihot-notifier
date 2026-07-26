@@ -472,21 +472,24 @@ console.log('\n[resetAndPoll-readIds保留]');
   assert(unread[0].url === 'https://a.com/3', '只有新URL是未读');
 })();
 
-console.log('\n[内容源-全部已读分别控制]');
+console.log('\n[内容源-全部已读全局共享]');
 (function() {
   const readAllBeforeByMode = {
     selected: '2026-06-05T10:00:00Z',
     all: ''
   };
   const item = { url: 'https://a.com/1', time: '2026-06-05T09:00:00Z' };
-  const getReadAllBeforeForMode = (mode) => readAllBeforeByMode[mode] || '';
-  const isRead = (mode) => {
-    const readAllBefore = getReadAllBeforeForMode(mode);
+  const getReadAllBefore = () => Object.values(readAllBeforeByMode)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || '';
+  const isReadInMode = (_mode) => {
+    const readAllBefore = getReadAllBefore();
     return readAllBefore && new Date(item.time) <= new Date(readAllBefore);
   };
 
-  assert(isRead('selected'), 'selected 的全部已读只影响 selected');
-  assert(!isRead('all'), 'all 不受 selected 的全部已读影响');
+  assert(isReadInMode('selected'), 'selected 执行全部已读后条目保持已读');
+  assert(isReadInMode('all'), '切换到 all 后同一条目不恢复未读');
 })();
 
 console.log('\n[内容源-单条已读全局共享]');

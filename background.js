@@ -17,6 +17,7 @@ const ALL_MAX_PAGES = 20;
 const MANUAL_MAX_PAGES = 3;
 const ALL_CONTINUATION_MAX_429_RETRIES = 2;
 const ALL_CONTINUATION_STATUS_TTL_MS = 15 * 60 * 1000;
+const MAX_DISCOVERED_AT_INDEX_ENTRIES = ALL_MAX_PAGES * API_LIMIT;
 const RETRY_AFTER_FALLBACK_MS = 45 * 1000;
 const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
@@ -103,6 +104,48 @@ function getItemAliases(itemOrKey) {
   return [getItemStateKey(itemOrKey), itemOrKey.id, itemOrKey.permalink, itemOrKey.url]
     .filter(Boolean)
     .filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
+function getDiscoveredAtAliases(item) {
+  if (!item) return [];
+  return [
+    item.id ? `id:${item.id}` : '',
+    item.permalink ? `permalink:${item.permalink}` : '',
+    item.url ? `url:${item.url}` : ''
+  ].filter(Boolean);
+}
+
+function mergeDiscoveredAtByAlias(...sources) {
+  const entries = new Map();
+  sources.forEach(source => {
+    Object.entries(source || {}).forEach(([alias, discoveredAt]) => {
+      if (!alias || !discoveredAt || !Number.isFinite(new Date(discoveredAt).getTime())) return;
+      const existing = entries.get(alias);
+      if (!existing || new Date(discoveredAt) < new Date(existing)) entries.set(alias, discoveredAt);
+    });
+  });
+  return Object.fromEntries(entries);
+}
+
+function buildDiscoveredAtByAlias(history, limit = Infinity) {
+  const entries = new Map();
+  const indexedHistory = Number.isFinite(limit) ? (history || []).slice(0, limit) : (history || []);
+  indexedHistory.forEach(item => {
+    const discoveredAt = item.discoveredAt || item.time || '';
+    if (!discoveredAt || !Number.isFinite(new Date(discoveredAt).getTime())) return;
+    const alias = getDiscoveredAtAliases(item)[0];
+    if (!alias) return;
+    const existing = entries.get(alias);
+    if (!existing || new Date(discoveredAt) < new Date(existing)) entries.set(alias, discoveredAt);
+  });
+  return Object.fromEntries(entries);
+}
+
+function getKnownDiscoveredAt(item, discoveredAtByAlias, fallback) {
+  const known = getDiscoveredAtAliases(item)
+    .map(alias => discoveredAtByAlias?.[alias])
+    .find(value => value && Number.isFinite(new Date(value).getTime()));
+  return known || fallback;
 }
 
 function getExistingItemKeys(history) {
@@ -526,23 +569,25 @@ async function commitSuccessfulItemsPoll(data = {}) {
   });
 }
 
-function buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, discoveredAt) {
+function buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, discoveredAt, matchedAt = '') {
   const newEntries = [];
   const watchItems = [];
   const normalItems = [];
   const nextWatchNotifyState = { ...watchNotifyState };
+  const watchMatchedAt = matchedAt || (typeof discoveredAt === 'string' ? discoveredAt : new Date().toISOString());
 
   filterNewApiItems(items, history)
     .forEach(item => {
+      const itemDiscoveredAt = typeof discoveredAt === 'function' ? discoveredAt(item) : discoveredAt;
       const watchMatches = matchWatchRules(item, watchRules);
-      const entry = toHistoryEntry(item, discoveredAt, watchMatches);
+      const entry = toHistoryEntry(item, itemDiscoveredAt, watchMatches, watchMatchedAt);
       newEntries.push(entry);
       if (watchMatches.length > 0) {
         const key = getItemStateKey(entry);
         const existingState = getItemAliases(entry)
           .map(alias => nextWatchNotifyState[alias])
           .find(Boolean);
-        nextWatchNotifyState[key] = buildWatchStateForItem(existingState, entry, watchMatches.map(rule => rule.id), discoveredAt);
+        nextWatchNotifyState[key] = buildWatchStateForItem(existingState, entry, watchMatches.map(rule => rule.id), watchMatchedAt);
         watchItems.push(entry);
       } else {
         normalItems.push(entry);
@@ -558,12 +603,19 @@ function pruneWatchNotifyState(history, watchNotifyState) {
     .filter(([key]) => retainedAliases.has(key)));
 }
 
-async function mergeAndPersistHistory(newEntries, history, historyDays, watchNotifyState = {}) {
+async function getPrunedStoredWatchNotifyState() {
+  const { history = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'watchNotifyState']);
+  return pruneWatchNotifyState(history, watchNotifyState);
+}
+
+async function mergeAndPersistHistory(newEntries, history, historyDays, watchNotifyState = {}, options = {}) {
   const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
   const updated = [...newEntries, ...history]
     .filter(i => isWithinHistoryWindow(i, cutoff))
     .sort((a, b) => getItemTime(b) - getItemTime(a));
-  const nextWatchNotifyState = pruneWatchNotifyState(updated, watchNotifyState);
+  const nextWatchNotifyState = options.retainUnmatchedWatchState
+    ? { ...watchNotifyState }
+    : pruneWatchNotifyState(updated, watchNotifyState);
   await chrome.storage.local.set({ history: updated, watchNotifyState: nextWatchNotifyState });
   return { history: updated, watchNotifyState: nextWatchNotifyState };
 }
@@ -594,10 +646,40 @@ function normalizeFeedMode(mode) {
   return mode === 'all' ? 'all' : 'selected';
 }
 
-function getReadAllBeforeForMode(data) {
-  const mode = normalizeFeedMode(data.feedMode);
-  const byMode = data.readAllBeforeByMode || {};
-  return byMode[mode] || data.readAllBefore || '';
+function getReadAllBefore(data) {
+  return [data.readAllBefore, ...Object.values(data.readAllBeforeByMode || {})]
+    .filter(value => value && Number.isFinite(new Date(value).getTime()))
+    .reduce((latest, value) => !latest || new Date(value) > new Date(latest) ? value : latest, '');
+}
+
+async function advanceReadAllBefore(candidate = '', markWatchViewed = false) {
+  const data = await chrome.storage.local.get(['readAllBefore', 'readAllBeforeByMode', 'watchNotifyState']);
+  const readAllBefore = getReadAllBefore({
+    ...data,
+    readAllBeforeByMode: {
+      ...(data.readAllBeforeByMode || {}),
+      candidate
+    }
+  });
+  const updates = {};
+  if (readAllBefore !== (data.readAllBefore || '') || Object.keys(data.readAllBeforeByMode || {}).length > 0) {
+    updates.readAllBefore = readAllBefore;
+    updates.readAllBeforeByMode = {};
+  }
+
+  if (markWatchViewed) {
+    const watchNotifyState = { ...(data.watchNotifyState || {}) };
+    const candidateTime = new Date(candidate).getTime();
+    Object.keys(watchNotifyState).forEach(alias => {
+      const firstMatchedTime = new Date(watchNotifyState[alias].firstMatchedAt || 0).getTime();
+      if (firstMatchedTime > candidateTime) return;
+      watchNotifyState[alias] = { ...watchNotifyState[alias], viewedAt: watchNotifyState[alias].viewedAt || candidate };
+    });
+    updates.watchNotifyState = watchNotifyState;
+  }
+
+  if (Object.keys(updates).length > 0) await chrome.storage.local.set(updates);
+  return readAllBefore;
 }
 
 function getItemTime(item) {
@@ -612,7 +694,7 @@ function isWithinHistoryWindow(item, cutoff) {
   return getUnreadReferenceTime(item) > cutoff;
 }
 
-function toHistoryEntry(item, discoveredAt, watchMatches = []) {
+function toHistoryEntry(item, discoveredAt, watchMatches = [], watchMatchedAt = discoveredAt) {
   const normalizedTime = getNormalizedItemTime(item, discoveredAt);
   const entry = {
     title: item.title,
@@ -632,23 +714,13 @@ function toHistoryEntry(item, discoveredAt, watchMatches = []) {
   if (watchMatches.length > 0) {
     entry.watchMatched = true;
     entry.watchRuleIds = watchMatches.map(rule => rule.id);
-    entry.watchMatchedAt = discoveredAt;
+    entry.watchMatchedAt = watchMatchedAt;
   }
   return entry;
 }
 
 async function migrateReadAllBefore() {
-  const data = await chrome.storage.local.get(['readAllBefore', 'readAllBeforeByMode', 'feedMode']);
-  if (!data.readAllBefore) return;
-
-  const mode = normalizeFeedMode(data.feedMode);
-  await chrome.storage.local.set({
-    readAllBeforeByMode: {
-      ...(data.readAllBeforeByMode || {}),
-      [mode]: data.readAllBefore
-    },
-    readAllBefore: ''
-  });
+  await advanceReadAllBefore();
 }
 
 async function pollForUpdatesInternal() {
@@ -724,15 +796,23 @@ async function persistFetchedItems(items, options = {}) {
     history = [],
     historyDays = DEFAULT_HISTORY_DAYS,
     watchRules = [],
-    watchNotifyState = {}
-  } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState']);
+    watchNotifyState = {},
+    allFeedContinuation = {},
+    feedMode
+  } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState', 'allFeedContinuation', 'feedMode']);
 
   if (typeof options.isCurrent === 'function' && !await options.isCurrent()) {
     return { skipped: true, updated: history, newEntries: [], watchNotificationsSent: 0 };
   }
 
-  const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, discoveredAt);
-  const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState);
+  const discoveredAtByAlias = mergeDiscoveredAtByAlias(options.discoveredAtByAlias, buildDiscoveredAtByAlias(history));
+  const resolveDiscoveredAt = item => getKnownDiscoveredAt(item, discoveredAtByAlias, discoveredAt);
+  const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, resolveDiscoveredAt, discoveredAt);
+  const retainUnmatchedWatchState = options.retainUnmatchedWatchState === true ||
+    (normalizeFeedMode(feedMode) === 'all' && allFeedContinuation.active === true);
+  const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState, {
+    retainUnmatchedWatchState
+  });
   const updated = persisted.history;
   const persistedWatchNotifyState = persisted.watchNotifyState;
 
@@ -768,7 +848,7 @@ async function persistFetchedItems(items, options = {}) {
   await chrome.storage.local.set(updates);
 
   await updateBadge();
-  return { updated, newEntries, watchNotificationsSent: notifiedWatchItems.length };
+  return { updated, newEntries, watchNotifyState: persistedWatchNotifyState, watchNotificationsSent: notifiedWatchItems.length };
 }
 
 async function showNotification(items) {
@@ -820,9 +900,11 @@ async function manualPollInternal() {
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES });
     const discoveredAt = new Date().toISOString();
-    const { watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['watchRules', 'watchNotifyState']);
+    const { watchRules = [], watchNotifyState = {}, allFeedContinuation = {} } = await chrome.storage.local.get(['watchRules', 'watchNotifyState', 'allFeedContinuation']);
     const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, history, watchRules, watchNotifyState, discoveredAt);
-    const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState);
+    const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState, {
+      retainUnmatchedWatchState: mode === 'all' && allFeedContinuation.active === true
+    });
     const merged = persisted.history;
     await chrome.storage.local.set({ lastItems: [...watchItems, ...normalItems].slice(0, 5), watchNotifyState: persisted.watchNotifyState });
     if (allItems.truncated) {
@@ -849,7 +931,7 @@ async function updateBadge() {
   const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
   const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS } = data;
   const readIdSet = new Set(readIds);
-  const readAllBefore = getReadAllBeforeForMode(data);
+  const readAllBefore = getReadAllBefore(data);
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const unread = history.filter(i => {
     if (!isWithinHistoryWindow(i, cutoff)) return false;
@@ -872,13 +954,14 @@ function getContinuationId() {
   return `${Date.now()}-${Math.random()}`;
 }
 
-function getActiveAllContinuationStatus(cursor, continuationId) {
+function getActiveAllContinuationStatus(cursor, continuationId, discoveredAtByAlias = {}) {
   return {
     active: true,
     id: continuationId,
     cursor,
     retryAttempts: 0,
     retryAt: '',
+    discoveredAtByAlias,
     expiresAt: new Date(Date.now() + ALL_CONTINUATION_STATUS_TTL_MS).toISOString()
   };
 }
@@ -887,12 +970,20 @@ async function recoverAllFeedContinuationStatus() {
   const { allFeedContinuation = {}, feedMode } = await chrome.storage.local.get(['allFeedContinuation', 'feedMode']);
   if (allFeedContinuation.active !== true) return;
   if (normalizeFeedMode(feedMode) !== 'all' || !allFeedContinuation.id || !allFeedContinuation.cursor) {
-    await chrome.storage.local.set({ allFeedContinuation: { ...allFeedContinuation, active: false } });
+    const watchNotifyState = await getPrunedStoredWatchNotifyState();
+    await chrome.storage.local.set({ allFeedContinuation: { ...allFeedContinuation, active: false, discoveredAtByAlias: {} }, watchNotifyState });
     await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
     return;
   }
   const retryAt = new Date(allFeedContinuation.retryAt || 0).getTime();
-  chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt > Date.now() ? retryAt : Date.now() });
+  try {
+    await chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt > Date.now() ? retryAt : Date.now() });
+  } catch (e) {
+    console.warn('[AI HOT] failed to recover all feed continuation alarm:', e);
+    const watchNotifyState = await getPrunedStoredWatchNotifyState();
+    await chrome.storage.local.set({ allFeedContinuation: { ...allFeedContinuation, active: false, retryAt: '', discoveredAtByAlias: {} }, watchNotifyState });
+    await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+  }
 }
 
 function startFingerprintProbe(mode) {
@@ -942,14 +1033,15 @@ async function scheduleAllContinuationRetry(generation, continuationId, expected
     const result = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
       await chrome.storage.local.set({ allFeedContinuation: { ...continuation, retryAttempts: scheduled.retryAttempts, retryAt: scheduled.retryAt } });
       retryPersisted = true;
-      chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt });
+      await chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt });
       return { scheduled: true };
     });
     return !result.skipped;
   } catch (e) {
     const rollbackExpected = retryPersisted ? scheduled : expected;
     await commitAllContinuationMutation(generation, continuationId, rollbackExpected, async continuation => {
-      await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '' } });
+      const watchNotifyState = await getPrunedStoredWatchNotifyState();
+      await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '', discoveredAtByAlias: {} }, watchNotifyState });
       await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
     });
     throw e;
@@ -976,6 +1068,8 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
         const result = await persistFetchedItems(items, {
           notify: false,
           updateLastItems: false,
+          discoveredAtByAlias: continuation.discoveredAtByAlias,
+          retainUnmatchedWatchState: true,
           isCurrent: () => getActiveAllContinuation(generation, continuationId, expected)
         });
         if (!result.skipped && response.hasMore) {
@@ -989,7 +1083,8 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
 
       if (!response.hasMore) {
         const completed = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
-          await commitSuccessfulItemsPoll({ allFeedContinuation: { ...continuation, active: false, retryAt: '' } });
+          const watchNotifyState = await getPrunedStoredWatchNotifyState();
+          await commitSuccessfulItemsPoll({ allFeedContinuation: { ...continuation, active: false, retryAt: '', discoveredAtByAlias: {} }, watchNotifyState });
           await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
           await updateBadge();
           return { completed: true };
@@ -1005,7 +1100,8 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
     const expected = { cursor: nextCursor, retryAttempts, retryAt };
     if (await getActiveAllContinuation(generation, continuationId, expected)) {
       await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
-        await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '' }, lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
+        const watchNotifyState = await getPrunedStoredWatchNotifyState();
+        await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '', discoveredAtByAlias: {} }, watchNotifyState, lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
         await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
         await updateBadge();
       });
@@ -1022,7 +1118,8 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
     console.error('[AI HOT] all feed continuation error:', e);
     await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
       await incrementFailCount();
-      await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '' } });
+      const watchNotifyState = await getPrunedStoredWatchNotifyState();
+      await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '', discoveredAtByAlias: {} }, watchNotifyState });
       await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
     });
   }
@@ -1036,13 +1133,21 @@ function continueAllFeed(continuation) {
 async function resumeAllFeedContinuation() {
   const { allFeedContinuation = {}, feedMode } = await chrome.storage.local.get(['allFeedContinuation', 'feedMode']);
   if (normalizeFeedMode(feedMode) !== 'all' || allFeedContinuation.active !== true || !allFeedContinuation.id || !allFeedContinuation.cursor) {
-    await chrome.storage.local.set({ allFeedContinuation: { ...allFeedContinuation, active: false } });
+    const watchNotifyState = await getPrunedStoredWatchNotifyState();
+    await chrome.storage.local.set({ allFeedContinuation: { ...allFeedContinuation, active: false, discoveredAtByAlias: {} }, watchNotifyState });
     await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
     return;
   }
   const retryAt = new Date(allFeedContinuation.retryAt || 0).getTime();
   if (retryAt > Date.now()) {
-    chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt });
+    try {
+      await chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt });
+    } catch (e) {
+      console.warn('[AI HOT] failed to resume all feed continuation alarm:', e);
+      const watchNotifyState = await getPrunedStoredWatchNotifyState();
+      await chrome.storage.local.set({ allFeedContinuation: { ...allFeedContinuation, active: false, retryAt: '', discoveredAtByAlias: {} }, watchNotifyState });
+      await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+    }
     return;
   }
   continueAllFeed({
@@ -1058,34 +1163,41 @@ async function resetAndPollInternal(feedMode) {
   await assertNotInBackoff();
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
-    const { historyDays = DEFAULT_HISTORY_DAYS, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['historyDays', 'watchRules', 'watchNotifyState']);
+    const { history: previousHistory = [], historyDays = DEFAULT_HISTORY_DAYS, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState']);
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
 
     const mode = normalizeFeedMode(feedMode);
     const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: mode === 'all' ? 1 : getMaxPages(mode) });
     const discoveredAt = new Date().toISOString();
-    const { newEntries: history, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, [], watchRules, watchNotifyState, discoveredAt);
+    const discoveredAtByAlias = buildDiscoveredAtByAlias(previousHistory);
+    const resolveDiscoveredAt = item => getKnownDiscoveredAt(item, discoveredAtByAlias, discoveredAt);
+    const { newEntries: history, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, [], watchRules, watchNotifyState, resolveDiscoveredAt, discoveredAt);
     const nextHistory = history
       .filter(i => isWithinHistoryWindow(i, cutoff))
       .sort((a, b) => getItemTime(b) - getItemTime(a));
 
     const fingerprintProbe = startFingerprintProbe(mode);
-    const resetData = {
-      history: nextHistory,
-      lastItems: [...watchItems, ...normalItems].slice(0, 5),
-      watchNotifyState: pruneWatchNotifyState(nextHistory, nextWatchNotifyState),
-      feedMode: mode
-    };
     const nextGeneration = feedModeGeneration + 1;
     const continuationId = getContinuationId();
     const continuation = mode === 'all' && allItems.truncated && allItems.nextCursor
       ? { generation: nextGeneration, continuationId, cursor: allItems.nextCursor, fingerprintProbe }
       : null;
+    const continuationDiscoveredAtByAlias = continuation
+      ? buildDiscoveredAtByAlias(previousHistory, MAX_DISCOVERED_AT_INDEX_ENTRIES)
+      : {};
+    const resetData = {
+      history: nextHistory,
+      lastItems: [...watchItems, ...normalItems].slice(0, 5),
+      watchNotifyState: continuation
+        ? nextWatchNotifyState
+        : pruneWatchNotifyState(nextHistory, nextWatchNotifyState),
+      feedMode: mode
+    };
     if (continuation) {
       await chrome.storage.local.set({
         ...resetData,
-        allFeedContinuation: getActiveAllContinuationStatus(allItems.nextCursor, continuationId),
+        allFeedContinuation: getActiveAllContinuationStatus(allItems.nextCursor, continuationId, continuationDiscoveredAtByAlias),
         lastCheck: new Date().toISOString(),
         failCount: 0,
         nextAllowedPollAt: ''
@@ -1205,6 +1317,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'markWatchViewed') {
     runStateMutation(() => markWatchViewed(msg.urls || msg.url))
       .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === 'markAllRead') {
+    runStateMutation(async () => {
+      if (!msg.readAllBefore || !Number.isFinite(new Date(msg.readAllBefore).getTime())) throw new Error('Invalid readAllBefore');
+      return advanceReadAllBefore(msg.readAllBefore, true);
+    })
+      .then(readAllBefore => sendResponse({ ok: true, readAllBefore }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
