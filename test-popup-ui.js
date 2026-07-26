@@ -159,7 +159,7 @@ const brandLogoDotRule = popupHtml.match(/\.brand-logo-dot\s*{([\s\S]*?)}/i)?.[1
 assert(hasDeclaration(brandLogoMarkRule, 'stroke', /var\(--brand-hot\)/), 'Logo 线条颜色使用品牌热源 token');
 assert(hasDeclaration(brandLogoDotRule, 'fill', /var\(--brand-hot-dot\)/), 'Logo 红点颜色使用品牌热源红点 token');
 assert(hasDeclaration(brandLogoDotRule, 'filter', /drop-shadow\(0 0 3px var\(--brand-hot-glow\)\)/), 'Logo 红点光晕使用品牌热源光晕 token');
-assert(/@keyframes\s+logo-dot-breathe\s*{[\s\S]*?50%\s*{\s*opacity:\s*0\.64;\s*transform:\s*scale\(0\.76\);\s*}/.test(popupHtml), 'Logo 红点收缩后仍保有足够视觉存在感');
+assert(/@keyframes\s+logo-dot-breathe\s*{[\s\S]*?50%\s*{\s*opacity:\s*0\.78;\s*transform:\s*scale\(0\.88\);\s*filter:\s*drop-shadow\(0 0 1\.5px var\(--brand-hot-glow\)\);\s*}/.test(popupHtml), 'Logo 红点以稳定核心和收束光晕呈现资讯信标呼吸');
 
 
 console.log('\n[主题列表/石青主题]');
