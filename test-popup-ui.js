@@ -159,6 +159,7 @@ const brandLogoDotRule = popupHtml.match(/\.brand-logo-dot\s*{([\s\S]*?)}/i)?.[1
 assert(hasDeclaration(brandLogoMarkRule, 'stroke', /var\(--brand-hot\)/), 'Logo 线条颜色使用品牌热源 token');
 assert(hasDeclaration(brandLogoDotRule, 'fill', /var\(--brand-hot-dot\)/), 'Logo 红点颜色使用品牌热源红点 token');
 assert(hasDeclaration(brandLogoDotRule, 'filter', /drop-shadow\(0 0 3px var\(--brand-hot-glow\)\)/), 'Logo 红点光晕使用品牌热源光晕 token');
+assert(/@keyframes\s+logo-dot-breathe\s*{[\s\S]*?50%\s*{\s*opacity:\s*0\.58;\s*transform:\s*scale\(0\.52\);\s*}/.test(popupHtml), 'Logo 红点缩至约 8.3px，保持大于 I 线宽的可见尺寸');
 
 
 console.log('\n[主题列表/石青主题]');
