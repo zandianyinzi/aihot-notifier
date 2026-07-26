@@ -573,6 +573,7 @@ assert(/getSafeHttpsUrl\(value\)[\s\S]*?parsed\.protocol\s*===\s*'https:'/s.test
 assert(/await\s+createTab\(\{\s*url\s*}\);[\s\S]*?await\s+afterOpen\(url\);/s.test(popupReliabilityJs), '仅在成功创建标签页后才提交已读状态');
 assert(/id="popupStatus"[^>]*role="status"[^>]*aria-live="polite"/.test(popupHtml), '失败状态使用 aria-live status 区域提示');
 assert(/function\s+showPopupStatus\(message\)/.test(popupJs), 'popup 可向 status 区域发布失败提示');
+assert(/allFeedContinuation/.test(popupJs) && /getAllFeedContinuationStatusMessage/.test(popupReliabilityJs) && /正在补充更多内容/.test(popupReliabilityJs), 'all 首屏返回后可在不改变布局的状态区提示后台续拉');
 assert(/id="enabled"[^>]*aria-label="推送通知"/.test(popupHtml), '通知开关有程序化标签');
 assert(/id="watchSource"[^>]*aria-label="来源"/.test(popupHtml), '来源输入有程序化标签');
 assert(/id="watchAuthor"[^>]*aria-label="作者"/.test(popupHtml), '作者输入有程序化标签');

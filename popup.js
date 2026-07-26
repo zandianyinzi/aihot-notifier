@@ -40,7 +40,7 @@ const watchKeywordsEl = document.getElementById('watchKeywords');
 const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
-const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController } = popupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController } = popupReliability;
 
 const CATEGORY_MAP = {
   'ai-models': { cls: 'cat-model', label: '模型' },
@@ -79,6 +79,10 @@ const enqueuePopupMutation = popupReliability.createMutationQueue();
 function showPopupStatus(message) {
   if (popupStatusEl) popupStatusEl.textContent = message;
 }
+
+const allFeedContinuationStatusController = createAllFeedContinuationStatusController({
+  showStatus: showPopupStatus
+});
 
 function clearButtonFeedback(button) {
   button.classList.remove(...BUTTON_TRANSIENT_CLASSES);
@@ -793,13 +797,19 @@ async function saveConfig(options = {}) {
 }
 
 async function loadHistory() {
-  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode', 'openPositionMode', 'watchRules']);
+  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode', 'openPositionMode', 'watchRules', 'allFeedContinuation']);
   const cachedData = await readWarmPopupCache();
   const reconciled = reconcileCachedReadIds(data, cachedData);
   renderHistory(reconciled.data);
+  allFeedContinuationStatusController.update(data.allFeedContinuation);
   writePopupCache(reconciled.data);
   if (reconciled.changed) chrome.storage.local.set({ readIds: reconciled.data.readIds });
 }
+
+chrome.storage.onChanged.addListener(createPopupStorageChangeHandler({
+  refreshHistory: loadHistory,
+  updateContinuationStatus: allFeedContinuationStatusController.update
+}));
 
 async function handleItemClick(e) {
   const item = e.target.closest('.item');

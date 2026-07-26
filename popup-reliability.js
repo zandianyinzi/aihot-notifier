@@ -47,8 +47,6 @@
           const failCount = await deps.getFailCount();
           if (requestId !== sequence) return;
           deps.clearScrollPosition();
-          await deps.loadHistory();
-          if (requestId !== sequence) return;
           deps.persist(nextMode);
           deps.onSuccess(failCount, context);
         });
@@ -65,9 +63,63 @@
     return { switchFeedMode };
   }
 
+  function createPopupStorageChangeHandler(deps) {
+    const updateContinuationStatus = deps.updateContinuationStatus || (continuation => {
+      deps.showStatus(getAllFeedContinuationStatusMessage(continuation));
+    });
+    return function handleStorageChange(changes, areaName) {
+      if (areaName !== 'local') return;
+      if (changes.history) {
+        deps.refreshHistory();
+        return;
+      }
+      if (changes.allFeedContinuation) {
+        updateContinuationStatus(changes.allFeedContinuation.newValue);
+      }
+    };
+  }
+
+  function getAllFeedContinuationStatusMessage(continuation) {
+    const expiresAt = new Date(continuation?.expiresAt || 0).getTime();
+    return continuation?.active === true && expiresAt > Date.now() ? '正在补充更多内容…' : '';
+  }
+
+  function createAllFeedContinuationStatusController(deps) {
+    const now = deps.now || Date.now;
+    const setTimer = deps.setTimer || setTimeout;
+    const clearTimer = deps.clearTimer || clearTimeout;
+    let timerId = null;
+    let version = 0;
+
+    function update(continuation) {
+      version++;
+      const currentVersion = version;
+      if (timerId !== null) {
+        clearTimer(timerId);
+        timerId = null;
+      }
+
+      const expiresAt = new Date(continuation?.expiresAt || 0).getTime();
+      const message = continuation?.active === true && expiresAt > now() ? '正在补充更多内容…' : '';
+      deps.showStatus(message);
+      if (!message) return;
+
+      timerId = setTimer(() => {
+        if (currentVersion !== version) return;
+        timerId = null;
+        deps.showStatus('');
+      }, expiresAt - now());
+    }
+
+    return { update };
+  }
+
   return {
     createMutationQueue,
     createFeedModeSwitchController,
+    createPopupStorageChangeHandler,
+    getAllFeedContinuationStatusMessage,
+    createAllFeedContinuationStatusController,
     getSafeHttpsUrl,
     openHttpsUrl
   };

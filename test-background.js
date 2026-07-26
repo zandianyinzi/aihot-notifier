@@ -10,12 +10,16 @@ let onAlarmHandler = null;
 let onClickedHandler = null;
 let onClosedHandler = null;
 let onStorageChangedHandler = null;
+let onStartupHandler = null;
 let storageData = {};
 let fetchImpl = null;
 let requestedUrls = [];
 let openedTabs = [];
 let notificationCreateIds = [];
+let alarmCreateCalls = [];
+let alarmClearCalls = [];
 let failSetWhen = null;
+let alarmCreateImpl = null;
 let alarmClearImpl = null;
 globalThis.__AIHOT_TEST_PAGE_DELAY_MS = 0;
 
@@ -27,6 +31,14 @@ function assert(condition, message) {
     failed++;
     console.log(`  ✗ ${message}`);
   }
+}
+
+async function waitFor(check, attempts = 30) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (check()) return true;
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  return false;
 }
 
 function resetState(overrides = {}) {
@@ -46,7 +58,10 @@ function resetState(overrides = {}) {
   requestedUrls = [];
   openedTabs = [];
   notificationCreateIds = [];
+  alarmCreateCalls = [];
+  alarmClearCalls = [];
   failSetWhen = null;
+  alarmCreateImpl = null;
   alarmClearImpl = null;
 }
 
@@ -127,13 +142,19 @@ globalThis.chrome = {
   },
   tabs: { create: (options) => { openedTabs.push(options.url); } },
   alarms: {
-    create: () => {},
-    clear: () => alarmClearImpl ? alarmClearImpl() : Promise.resolve(),
+    create: (name, info) => {
+      alarmCreateCalls.push({ name, info });
+      if (alarmCreateImpl) return alarmCreateImpl(name, info);
+    },
+    clear: (name) => {
+      alarmClearCalls.push(name);
+      return alarmClearImpl ? alarmClearImpl() : Promise.resolve();
+    },
     onAlarm: { addListener: (handler) => { onAlarmHandler = handler; } }
   },
   runtime: {
     onInstalled: { addListener: () => {} },
-    onStartup: { addListener: () => {} },
+    onStartup: { addListener: (handler) => { onStartupHandler = handler; } },
     onMessage: { addListener: (handler) => { onMessageHandler = handler; } }
   }
 };
@@ -273,6 +294,439 @@ async function runTests() {
   const resetItemUrl = requestedUrls.find(url => new URL(url).pathname === '/api/v1/items');
   assert(resetResponse.ok === true && storageData.feedMode === 'all' && storageData.history[0]?.id === 'v1-reset', 'feedModeChanged 通过真实 background 消息路径重建 v1 history');
   assert(resetItemUrl && isV1ItemsUrl(resetItemUrl, 'all') && !new URL(resetItemUrl).searchParams.has('since'), 'resetAndPoll 使用无 since 的 all v1 URL');
+
+  console.log('\n[全部内容源首屏优先与后台续拉]');
+  resetState();
+  let releaseAllSecondPage;
+  let allSecondPageRequested = false;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-all-progressive');
+    const parsed = new URL(url);
+    const mode = parsed.searchParams.get('mode');
+    const cursor = parsed.searchParams.get('cursor');
+    if (mode === 'selected') {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'selected-after-all', title: '最新精选' })])) });
+    }
+    if (cursor === 'all-page-2') {
+      allSecondPageRequested = true;
+      return new Promise(resolve => {
+        releaseAllSecondPage = () => resolve({
+          ok: true,
+          json: () => Promise.resolve(v1Page([v1Item({ id: 'all-page-2', title: '全部第二页' })]))
+        });
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([
+        v1Item({ id: 'all-page-1', title: '全部第一页' })
+      ], { hasMore: true, nextCursor: 'all-page-2' }))
+    });
+  };
+
+  let progressiveResponse;
+  const progressiveReset = sendMessage({ type: 'feedModeChanged', feedMode: 'all' }).then(response => { progressiveResponse = response; return response; });
+  const firstPageResponded = await waitFor(() => Boolean(progressiveResponse));
+  assert(firstPageResponded && progressiveResponse.ok === true, 'all 首屏成功后在后台续拉前立即响应消息');
+  assert(storageData.feedMode === 'all' && storageData.history.length === 1 && storageData.history[0]?.id === 'all-page-1', 'all 首屏成功后立即提交 feedMode 与首屏 history');
+  const secondPageStarted = await waitFor(() => allSecondPageRequested);
+  assert(secondPageStarted && requestedUrls.some(url => isV1ItemsUrl(url, 'all', 'all-page-2')), '后台续拉沿用首屏返回的 cursor 参数');
+
+  const selectedReset = sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  releaseAllSecondPage();
+  await Promise.all([progressiveReset, selectedReset]);
+  assert(storageData.feedMode === 'selected' && storageData.history.length === 1 && storageData.history[0]?.id === 'selected-after-all', '新 generation 或内容源变化后丢弃旧 all 续拉结果');
+  assert(notificationCreateIds.length === 0, 'all 后台续拉不会发送通知');
+
+  console.log('\n[全部内容源限流续拉]');
+  resetState();
+  let throttledCursorRequests = 0;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-all-rate-limit');
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'retry-page-2') {
+      throttledCursorRequests++;
+      if (throttledCursorRequests === 1) return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '0' : '' } });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+        id: 'retry-page-2',
+        links: { original: 'https://example.com/retry-page-2', aihot: 'https://aihot.virxact.com/items/retry-page-2' }
+      })])) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+      id: 'retry-page-1',
+      links: { original: 'https://example.com/retry-page-1', aihot: 'https://aihot.virxact.com/items/retry-page-1' }
+    })], { hasMore: true, nextCursor: 'retry-page-2' })) });
+  };
+  const rateLimitedResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  assert(rateLimitedResponse.ok === true && storageData.history[0]?.id === 'retry-page-1', '429 续拉不会阻塞 all 首屏响应');
+  await waitFor(() => storageData.allFeedContinuation?.retryAt);
+  storageData.allFeedContinuation.retryAt = new Date(Date.now() - 1).toISOString();
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const retryCompleted = await waitFor(() => storageData.history.some(item => item.id === 'retry-page-2'));
+  assert(retryCompleted && throttledCursorRequests === 2, '后台续拉只在 429 Retry-After 后重试同一 cursor 页面');
+
+  console.log('\n[全部内容源续拉失败收敛]');
+  resetState();
+  let continuationTerminalFailureLogged = false;
+  let unhandledContinuationFailure = null;
+  const originalContinuationError = console.error;
+  const onUnhandledContinuationFailure = error => { unhandledContinuationFailure = error; };
+  console.error = (...args) => {
+    if (String(args[0]).includes('all feed continuation failed')) continuationTerminalFailureLogged = true;
+    originalContinuationError(...args);
+  };
+  process.on('unhandledRejection', onUnhandledContinuationFailure);
+  alarmCreateImpl = name => {
+    if (name === 'aihot-all-continuation') throw new Error('mock continuation alarm create failed');
+  };
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-all-schedule-failure');
+    if (new URL(url).searchParams.get('cursor') === 'schedule-failure-cursor') {
+      return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '60' : '' } });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'schedule-failure-first' })], { hasMore: true, nextCursor: 'schedule-failure-cursor' })) });
+  };
+  const scheduleFailureResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  await waitFor(() => continuationTerminalFailureLogged || Boolean(unhandledContinuationFailure));
+  process.removeListener('unhandledRejection', onUnhandledContinuationFailure);
+  console.error = originalContinuationError;
+  assert(scheduleFailureResponse.ok === true && continuationTerminalFailureLogged && !unhandledContinuationFailure && storageData.allFeedContinuation?.active === false && storageData.allFeedContinuation?.retryAt === '', '续拉调度 alarm 失败被记录、收敛且不产生未处理 rejection');
+
+  console.log('\n[全部内容源长 Retry-After 不受 UI TTL 影响]');
+  resetState();
+  let longRetryRequests = 0;
+  const originalTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = callback => originalTimeout(callback, 0);
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-all-long-retry');
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'long-retry') {
+      longRetryRequests++;
+      if (longRetryRequests === 1) return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '901' : '' } });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+        id: 'long-retry-page-2',
+        links: { original: 'https://example.com/long-retry-page-2', aihot: 'https://aihot.virxact.com/items/long-retry-page-2' }
+      })])) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+      id: 'long-retry-page-1',
+      links: { original: 'https://example.com/long-retry-page-1', aihot: 'https://aihot.virxact.com/items/long-retry-page-1' }
+    })], { hasMore: true, nextCursor: 'long-retry' })) });
+  };
+  const longRetryResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const longRetryScheduled = await waitFor(() => storageData.allFeedContinuation?.retryAt && alarmCreateCalls.some(call => call.name === 'aihot-all-continuation'));
+  globalThis.setTimeout = originalTimeout;
+  assert(longRetryResponse.ok === true && longRetryScheduled && longRetryRequests === 1 && storageData.allFeedContinuation?.cursor === 'long-retry', '长 Retry-After 持久化同一 cursor 与 due time，而不依赖内存 sleep');
+  storageData.allFeedContinuation.retryAt = new Date(Date.now() - 1).toISOString();
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const longRetryCompleted = await waitFor(() => storageData.history.some(item => item.id === 'long-retry-page-2'));
+  assert(longRetryCompleted && longRetryRequests === 2, 'continuation alarm 在 worker 后续事件中从持久化 cursor 恢复同页重试');
+
+  console.log('\n[内容源切换与延迟续拉原子性]');
+  resetState();
+  let failedSwitchCursorRequests = 0;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-switch-atomic');
+    const parsed = new URL(url);
+    if (parsed.searchParams.get('mode') === 'selected') return Promise.resolve({ ok: false, status: 500 });
+    if (parsed.searchParams.get('cursor') === 'preserve-cursor') {
+      failedSwitchCursorRequests++;
+      if (failedSwitchCursorRequests === 1) return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '60' : '' } });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+        id: 'preserved-after-failed-switch',
+        links: { original: 'https://example.com/preserved-after-failed-switch', aihot: 'https://aihot.virxact.com/items/preserved-after-failed-switch' }
+      })])) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'preserve-first' })], { hasMore: true, nextCursor: 'preserve-cursor' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  await waitFor(() => storageData.allFeedContinuation?.cursor === 'preserve-cursor' && storageData.allFeedContinuation?.retryAt);
+  const preservedContinuationId = storageData.allFeedContinuation.id;
+  alarmClearCalls = [];
+  const failedSelectedSwitch = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  assert(failedSelectedSwitch.ok === false && storageData.feedMode === 'all' && storageData.allFeedContinuation?.active === true && storageData.allFeedContinuation?.id === preservedContinuationId && !alarmClearCalls.includes('aihot-all-continuation'), 'selected 首屏失败时保留 all mode、同一 continuation 与既有 alarm');
+  storageData.allFeedContinuation.retryAt = new Date(Date.now() - 1).toISOString();
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const preservedContinuationResumed = await waitFor(() => storageData.history.some(item => item.id === 'preserved-after-failed-switch'));
+  assert(preservedContinuationResumed && failedSwitchCursorRequests === 2, '失败切源后原 all cursor 可由 alarm 继续恢复');
+
+  resetState();
+  let successfulSwitchCursorRequests = 0;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-switch-success');
+    const parsed = new URL(url);
+    if (parsed.searchParams.get('mode') === 'selected') return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'selected-after-successful-switch' })])) });
+    if (parsed.searchParams.get('cursor') === 'clear-cursor') {
+      successfulSwitchCursorRequests++;
+      return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '60' : '' } });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'clear-first' })], { hasMore: true, nextCursor: 'clear-cursor' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  await waitFor(() => storageData.allFeedContinuation?.cursor === 'clear-cursor' && storageData.allFeedContinuation?.retryAt);
+  alarmClearCalls = [];
+  const successfulSelectedSwitch = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  assert(successfulSelectedSwitch.ok === true && storageData.feedMode === 'selected' && storageData.allFeedContinuation?.active === false && alarmClearCalls.includes('aihot-all-continuation'), 'selected 首屏成功提交后才清理旧 all continuation alarm');
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  assert(successfulSwitchCursorRequests === 1, '成功切源后旧 alarm 不会重新拉取旧 cursor');
+
+  resetState();
+  let releaseLiveCursor;
+  let liveCursorStarted = false;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-switch-live-cursor');
+    const parsed = new URL(url);
+    if (parsed.searchParams.get('mode') === 'selected') return Promise.resolve({ ok: false, status: 500 });
+    if (parsed.searchParams.get('cursor') === 'live-cursor') {
+      liveCursorStarted = true;
+      return new Promise(resolve => {
+        releaseLiveCursor = () => resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+          id: 'live-cursor-after-failed-switch',
+          links: { original: 'https://example.com/live-cursor-after-failed-switch', aihot: 'https://aihot.virxact.com/items/live-cursor-after-failed-switch' }
+        })])) });
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'live-cursor-first' })], { hasMore: true, nextCursor: 'live-cursor' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  assert(await waitFor(() => liveCursorStarted), 'all continuation 已开始普通 cursor 请求');
+  const failedSwitchWithLiveCursor = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  releaseLiveCursor();
+  const liveCursorPersisted = await waitFor(() => storageData.history.some(item => item.id === 'live-cursor-after-failed-switch'));
+  assert(failedSwitchWithLiveCursor.ok === false && storageData.feedMode === 'all' && liveCursorPersisted, 'failed selected 切换不使进行中的 all cursor 请求失效');
+
+  resetState();
+  let raceCursorRequests = 0;
+  let releaseStaleRaceCursor;
+  let advancedCursorStarted = false;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-continuation-race');
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'race-cursor') {
+      raceCursorRequests++;
+      if (raceCursorRequests === 1) {
+        return new Promise(resolve => {
+          releaseStaleRaceCursor = () => resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+            id: 'stale-race-page',
+            links: { original: 'https://example.com/stale-race-page', aihot: 'https://aihot.virxact.com/items/stale-race-page' }
+          })], { hasMore: true, nextCursor: 'stale-cursor' })) });
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+        id: 'advanced-race-page',
+        links: { original: 'https://example.com/advanced-race-page', aihot: 'https://aihot.virxact.com/items/advanced-race-page' }
+      })], { hasMore: true, nextCursor: 'advanced-cursor' })) });
+    }
+    if (cursor === 'advanced-cursor') {
+      advancedCursorStarted = true;
+      return new Promise(() => {});
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'race-first' })], { hasMore: true, nextCursor: 'race-cursor' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  assert(await waitFor(() => raceCursorRequests === 1), '首个 race cursor 请求已悬挂');
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const cursorAdvanced = await waitFor(() => storageData.allFeedContinuation?.cursor === 'advanced-cursor' && advancedCursorStarted);
+  releaseStaleRaceCursor();
+  await waitFor(() => storageData.history.some(item => item.id === 'stale-race-page') || storageData.allFeedContinuation?.cursor === 'stale-cursor');
+  assert(cursorAdvanced && storageData.allFeedContinuation?.cursor === 'advanced-cursor' && !storageData.history.some(item => item.id === 'stale-race-page'), '重复 alarm 的旧 cursor 响应不能回退 continuation 或重复入库');
+
+  console.log('\n[全部内容源续拉终止与非阻塞]');
+  resetState();
+  let zeroRetryRequests = 0;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-all-zero-retry');
+    if (new URL(url).searchParams.get('cursor') === 'zero-retry') {
+      zeroRetryRequests++;
+      if (zeroRetryRequests > 5) throw new Error('retry loop did not terminate');
+      return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '0' : '' } });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'zero-retry-first' })], { hasMore: true, nextCursor: 'zero-retry' })) });
+  };
+  const zeroRetryResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  await waitFor(() => storageData.allFeedContinuation?.retryAt);
+  storageData.allFeedContinuation.retryAt = new Date(Date.now() - 1).toISOString();
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  await waitFor(() => Number(storageData.allFeedContinuation?.retryAttempts) === 2);
+  storageData.allFeedContinuation.retryAt = new Date(Date.now() - 1).toISOString();
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const zeroRetryStopped = await waitFor(() => storageData.allFeedContinuation?.active === false);
+  assert(zeroRetryResponse.ok === true && zeroRetryStopped && zeroRetryRequests === 3, '连续 Retry-After: 0 使用有限重试预算并停止续拉');
+
+  resetState();
+  let missingHeaderRequests = 0;
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback) => originalSetTimeout(callback, 0);
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-all-missing-header');
+    if (new URL(url).searchParams.get('cursor') === 'missing-header') {
+      missingHeaderRequests++;
+      if (missingHeaderRequests > 5) throw new Error('missing Retry-After loop did not terminate');
+      return Promise.resolve({ ok: false, status: 429, headers: { get: () => '' } });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'missing-header-first' })], { hasMore: true, nextCursor: 'missing-header' })) });
+  };
+  const missingHeaderResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const missingHeaderStopped = await waitFor(() => storageData.allFeedContinuation?.active === false);
+  globalThis.setTimeout = originalSetTimeout;
+  assert(missingHeaderResponse.ok === true && missingHeaderStopped && missingHeaderRequests === 1, '缺少 Retry-After 的 429 立即终止续拉，不进入回退忙等');
+
+  resetState();
+  let releaseFingerprint;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return new Promise(resolve => { releaseFingerprint = () => resolve({ ok: true, status: 200, headers: { get: () => 'W/"fingerprint"' }, json: () => Promise.resolve({ selected: 'fp-selected', all: 'fp-all-deferred' }) }); });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'fingerprint-deferred-first' })])) });
+  };
+  let deferredFingerprintResponse;
+  const deferredFingerprintReset = sendMessage({ type: 'feedModeChanged', feedMode: 'all' }).then(response => { deferredFingerprintResponse = response; return response; });
+  const firstPageBeforeFingerprint = await waitFor(() => Boolean(deferredFingerprintResponse));
+  assert(firstPageBeforeFingerprint && storageData.feedMode === 'all' && storageData.history[0]?.id === 'fingerprint-deferred-first', 'all 首屏提交与消息响应不等待 fingerprint probe');
+  releaseFingerprint();
+  await deferredFingerprintReset;
+
+  resetState();
+  let releaseFinalPageFingerprint;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return new Promise(resolve => { releaseFinalPageFingerprint = () => resolve({ ok: true, status: 200, headers: { get: () => 'W/"final-page"' }, json: () => Promise.resolve({ selected: 'fp-selected', all: 'fp-final-page' }) }); });
+    if (new URL(url).searchParams.get('cursor') === 'final-page-2') {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+        id: 'final-page-2',
+        links: { original: 'https://example.com/final-page-2', aihot: 'https://aihot.virxact.com/items/final-page-2' }
+      })])) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+      id: 'final-page-1',
+      links: { original: 'https://example.com/final-page-1', aihot: 'https://aihot.virxact.com/items/final-page-1' }
+    })], { hasMore: true, nextCursor: 'final-page-2' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const finalPageCommitted = await waitFor(() => storageData.history.some(item => item.id === 'final-page-2'));
+  assert(finalPageCommitted && storageData.allFeedContinuation?.active === false && Boolean(storageData.lastItemsPollAt), '最终续拉页提交后立即完成状态，不等待 fingerprint probe');
+  releaseFinalPageFingerprint();
+
+  resetState();
+  let releaseFailingFingerprint;
+  let deferredFingerprintWarning = false;
+  let unhandledDeferredFingerprintError = null;
+  const originalWarn = console.warn;
+  const onUnhandledRejection = error => { unhandledDeferredFingerprintError = error; };
+  console.warn = (...args) => {
+    if (String(args[0]).includes('deferred fingerprint')) deferredFingerprintWarning = true;
+    originalWarn(...args);
+  };
+  process.on('unhandledRejection', onUnhandledRejection);
+  failSetWhen = values => Object.prototype.hasOwnProperty.call(values, 'apiFingerprints');
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return new Promise(resolve => { releaseFailingFingerprint = () => resolve({ ok: true, status: 200, headers: { get: () => 'W/"failing"' }, json: () => Promise.resolve({ selected: 'fp-failing-selected', all: 'fp-failing-all' }) }); });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'failing-fingerprint-item' })])) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  releaseFailingFingerprint();
+  await waitFor(() => deferredFingerprintWarning || Boolean(unhandledDeferredFingerprintError));
+  process.removeListener('unhandledRejection', onUnhandledRejection);
+  console.warn = originalWarn;
+  assert(deferredFingerprintWarning && !unhandledDeferredFingerprintError, 'deferred fingerprint 存储失败被显式捕获并记录，不产生未处理 rejection');
+
+  resetState();
+  let releaseStalledCursor;
+  let stalledCursorRequested = false;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-all-stalled');
+    const parsed = new URL(url);
+    if (parsed.searchParams.get('mode') === 'selected') {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'selected-during-stalled-all' })])) });
+    }
+    if (parsed.searchParams.get('cursor') === 'stalled-cursor') {
+      stalledCursorRequested = true;
+      return new Promise(resolve => { releaseStalledCursor = () => resolve({ ok: true, json: () => Promise.resolve(v1Page([])) }); });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'stalled-all-first' })], { hasMore: true, nextCursor: 'stalled-cursor' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  await waitFor(() => stalledCursorRequested);
+  let selectedDuringStall;
+  const selectedDuringStallRequest = sendMessage({ type: 'feedModeChanged', feedMode: 'selected' }).then(response => { selectedDuringStall = response; return response; });
+  const selectedFinishedDuringStall = await waitFor(() => Boolean(selectedDuringStall));
+  assert(selectedFinishedDuringStall && selectedDuringStall.ok === true && storageData.feedMode === 'selected', '旧 all cursor 网络未完成时，新的 selected 切换仍可完成');
+  releaseStalledCursor();
+  await selectedDuringStallRequest;
+
+  console.log('\n[全部续拉生命周期与可选失败隔离]');
+  resetState({
+    feedMode: 'all',
+    allFeedContinuation: { active: true, startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() }
+  });
+  assert(typeof onStartupHandler === 'function', '注册 startup 恢复处理器');
+  await onStartupHandler();
+  assert(storageData.allFeedContinuation?.active === false, 'worker 启动时清除不可能继续执行的旧 all 续拉状态');
+
+  let releaseRecoveredCursor;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-recovery');
+    const parsed = new URL(url);
+    if (parsed.searchParams.get('mode') === 'selected') return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'recovery-selected' })])) });
+    if (parsed.searchParams.get('cursor') === 'recovery-cursor') return new Promise(resolve => { releaseRecoveredCursor = () => resolve({ ok: true, json: () => Promise.resolve(v1Page([])) }); });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'recovery-all-first' })], { hasMore: true, nextCursor: 'recovery-cursor' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const freshContinuationStarted = await waitFor(() => storageData.allFeedContinuation?.active === true && Boolean(releaseRecoveredCursor));
+  assert(freshContinuationStarted, '启动恢复后新发起的 all 续拉仍可正常标记为 active');
+  const recoverySelected = sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  releaseRecoveredCursor();
+  await recoverySelected;
+
+  resetState();
+  let optional429Requests = 0;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-optional-429');
+    const parsed = new URL(url);
+    if (parsed.searchParams.get('mode') === 'selected') return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'selected-after-optional-429' })])) });
+    if (parsed.searchParams.get('cursor') === 'optional-429') {
+      optional429Requests++;
+      return Promise.resolve({ ok: false, status: 429, headers: { get: () => '' } });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'optional-429-first' })], { hasMore: true, nextCursor: 'optional-429' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  await waitFor(() => storageData.allFeedContinuation?.active === false);
+  const selectedAfterOptional429 = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  assert(optional429Requests === 1 && selectedAfterOptional429.ok === true && storageData.feedMode === 'selected', '可选 all 续拉失败不设置全局 backoff，显式 selected 切换仍立即成功');
+
+  resetState();
+  let releaseOldAllFingerprint;
+  let fingerprintRequestCount = 0;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) {
+      fingerprintRequestCount++;
+      if (fingerprintRequestCount === 1) {
+        return new Promise(resolve => { releaseOldAllFingerprint = () => resolve({ ok: true, status: 200, headers: { get: () => 'W/"old-all"' }, json: () => Promise.resolve({ selected: 'old-selected', all: 'old-all' }) }); });
+      }
+      return legacyFingerprintResponse('new-selected', 'new-all');
+    }
+    if (new URL(url).searchParams.get('mode') === 'selected') return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'new-selected-item' })])) });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'old-all-item' })])) });
+  };
+  const oldAllResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const newSelectedResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  releaseOldAllFingerprint();
+  await waitFor(() => storageData.apiFingerprints?.selected === 'new-selected');
+  assert(oldAllResponse.ok === true && newSelectedResponse.ok === true && storageData.apiFingerprints?.selected === 'new-selected' && storageData.apiFingerprints?.all === 'new-all', '旧 one-page all 的延迟 fingerprint 不覆盖后续内容源切换的 fingerprint');
 
   console.log('\n[自动轮询-fingerprint 未变化时跳过 items]');
   resetState({
