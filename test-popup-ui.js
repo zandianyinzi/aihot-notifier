@@ -82,6 +82,8 @@ const popupHtml = fs.readFileSync('popup.html', 'utf8');
 const popupLogJs = fs.readFileSync('popup-log.js', 'utf8');
 const popupJs = fs.readFileSync('popup.js', 'utf8');
 const popupBootJs = fs.readFileSync('popup-boot.js', 'utf8');
+const claudeMd = fs.readFileSync('CLAUDE.md', 'utf8');
+const agentsMd = fs.readFileSync('AGENTS.md', 'utf8');
 const packSh = fs.readFileSync('pack.sh', 'utf8');
 const readme = fs.readFileSync('README.md', 'utf8');
 const screenshotMjs = fs.readFileSync('screenshot.mjs', 'utf8');
@@ -125,6 +127,8 @@ assert(!/border\s*:\s*1px\s+solid\s+var\(--window-edge\)/i.test(bodyRule), '主�
 assert(!/--window-edge\s*:/.test(rootRule), '全局不保留 window-edge token，避免边框体系分叉');
 assert(!/--window-edge-highlight\s*:/.test(rootRule), '全局不保留 window-edge-highlight token');
 assert(hasDeclaration(rootRule, '--hairline', '1.25px'), '全局 hairline token 使用 1.25px');
+assert(!/--hover-rail\s*:/.test(rootRule), '全局不保留 hover rail 实线 token');
+assert(!/--hover-rail-glow\s*:/.test(rootRule), '全局不保留 hover rail 轻染 token');
 
 assert(themeRules.length >= 3, '存在主题 CSS 变量规则');
 for (const [_, themeName, themeCss] of themeRules) {
@@ -144,8 +148,16 @@ for (const [themeName, varNames] of Object.entries(themeVarNamesByTheme)) {
   const extra = varNames.filter(name => !canonicalThemeVars.includes(name));
   assert(missing.length === 0 && extra.length === 0, `${themeName} 主题 token 结构与墨夜一致`);
   assert(varNames.includes('--rail') && varNames.includes('--rail-strong'), `${themeName} 主题定义 rail 与 rail-strong 语义 token`);
+  assert(varNames.includes('--brand-hot') && varNames.includes('--brand-hot-dot'), `${themeName} 主题定义品牌热源色 token`);
+  assert(varNames.includes('--brand-hot-glow'), `${themeName} 主题定义品牌热源光晕 token`);
   assert(!varNames.includes('--rule-rail'), `${themeName} 主题不使用旧 rule-rail token`);
 }
+
+const brandLogoMarkRule = popupHtml.match(/\.brand-logo-mark\s*{([\s\S]*?)}/i)?.[1] || '';
+const brandLogoDotRule = popupHtml.match(/\.brand-logo-dot\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(brandLogoMarkRule, 'stroke', /var\(--brand-hot\)/), 'Logo 线条颜色使用品牌热源 token');
+assert(hasDeclaration(brandLogoDotRule, 'fill', /var\(--brand-hot-dot\)/), 'Logo 红点颜色使用品牌热源红点 token');
+assert(hasDeclaration(brandLogoDotRule, 'filter', /drop-shadow\(0 0 3px var\(--brand-hot-glow\)\)/), 'Logo 红点光晕使用品牌热源光晕 token');
 
 
 console.log('\n[主题列表/石青主题]');
@@ -273,12 +285,35 @@ console.log('\n[右上角按钮布局]');
 const actionsRule = popupHtml.match(/\.actions\s*{([\s\S]*?)}/i)?.[1] || '';
 const btnIconRule = popupHtml.match(/\.btn-icon\s*{([\s\S]*?)}/i)?.[1] || '';
 const btnIconHoverRule = popupHtml.match(/\.btn-icon:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+const btnIconFocusVisibleRule = popupHtml.match(/\.btn-icon:focus-visible\s*{([\s\S]*?)}/i)?.[1] || '';
+const btnMiniFocusVisibleRule = popupHtml.match(/\.btn-mini:focus-visible\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(actionsRule, 'justify-content', 'flex-end'), '右上角按钮靠右排列');
 assert(hasDeclaration(actionsRule, 'flex', /0\s+0\s+auto/), '右上角按钮组不被压缩');
 assert(hasDeclaration(actionsRule, 'gap', '6px'), '右上角按钮保持间距');
 assert(hasDeclaration(btnIconRule, 'flex', /0\s+0\s+var\(--control-size\)/), '单个按钮固定占位，避免叠加');
 assert(hasDeclaration(btnIconHoverRule, 'background', /var\(--accent-soft\)/), '右上角按钮悬停使用统一主题色轻染背景');
 assert(hasDeclaration(btnIconHoverRule, 'color', /var\(--accent\)/), '右上角按钮悬停使用主题色图标');
+assert(hasDeclaration(btnIconFocusVisibleRule, 'outline', /1px\s+solid\s+var\(--accent\)/), '右上角按钮键盘焦点使用主题色描边');
+assert(hasDeclaration(btnIconFocusVisibleRule, 'outline-offset', '2px'), '右上角按钮键盘焦点描边外移避免遮挡图标');
+assert(hasDeclaration(btnMiniFocusVisibleRule, 'outline', /1px\s+solid\s+var\(--accent\)/), '文字按钮键盘焦点使用主题色描边');
+assert(hasDeclaration(btnMiniFocusVisibleRule, 'outline-offset', '2px'), '文字按钮键盘焦点描边外移');
+
+console.log('\n[键盘焦点可访问性]');
+const switchInputRule = popupHtml.match(/\.switch input\s*{([\s\S]*?)}/i)?.[1] || '';
+const switchFocusVisibleRule = popupHtml.match(/\.switch input:focus-visible \+ \.switch-track\s*{([\s\S]*?)}/i)?.[1] || '';
+const itemFocusVisibleRule = popupHtml.match(/\.item:focus-visible\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(!hasDeclaration(switchInputRule, 'display', 'none'), '开关 input 不使用 display:none，保留键盘可聚焦能力');
+assert(hasDeclaration(switchInputRule, 'opacity', '0'), '开关 input 视觉隐藏但保留可访问性');
+assert(hasDeclaration(switchFocusVisibleRule, 'outline', /1px\s+solid\s+var\(--accent\)/), '开关键盘焦点在轨道上显示主题色描边');
+assert(hasDeclaration(switchFocusVisibleRule, 'outline-offset', '2px'), '开关键盘焦点描边外移');
+assert(hasDeclaration(itemFocusVisibleRule, 'outline', /1px\s+solid\s+var\(--accent\)/), '列表条目键盘焦点使用主题色描边');
+assert(hasDeclaration(itemFocusVisibleRule, 'outline-offset', '-2px'), '列表条目键盘焦点描边内收，避免改变布局');
+
+console.log('\n[降低动态效果]');
+assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.brand-logo-dot\s*{[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止 Logo 呼吸动画');
+assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.skeleton-line[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止骨架屏闪烁');
+assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.btn-icon\.is-loading svg[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止刷新按钮旋转');
+assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.btn-icon\.is-result-ok[\s\S]*\.btn-icon\.is-result-danger[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止按钮结果动画');
 
 console.log('\n[主列表滚动]');
 const mainListRule = popupHtml.match(/\.list\s*{([\s\S]*?)}/i)?.[1] || '';
@@ -338,7 +373,7 @@ assert(hasDeclaration(watchRulesListTailRule, '-webkit-mask-image', /linear-grad
 assert(hasDeclaration(watchRulesListTailRule, 'mask-image', /linear-gradient\(to bottom,\s*#000\s+calc\(100%\s*-\s*32px\),\s*rgba\(0,\s*0,\s*0,\s*0\.35\)\s+calc\(100%\s*-\s*12px\),\s*transparent\)/), '特关规则列表底部渐隐兼容标准 mask');
 assert(/\.watch-badge\s*{/.test(popupHtml), '主列表存在特别关注标签样式');
 assert(/pinnedWatch/.test(popupJs), '未读特别关注在主列表置顶');
-assert(/pinnedUrls/.test(popupJs), '置顶特别关注不重复渲染原始条目');
+assert(/pinnedKeys/.test(popupJs), '置顶特别关注按稳定key不重复渲染原始条目');
 assert(/watch-badge\">特关<\/span>/.test(popupJs), '特关条目使用紧凑标签');
 const watchBadgeRule = popupHtml.match(/\.watch-badge\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(watchBadgeRule, 'color', /var\(--accent\)/), '特关标签沿用原有强调色');
@@ -348,22 +383,28 @@ assert(hasDeclaration(watchBadgeRule, 'font-weight', '500'), '特关标签使用
 assert(hasDeclaration(watchBadgeRule, 'padding', '1px 6px'), '特关标签使用与分类一致的内边距');
 assert(!/box-shadow\s*:/.test(watchBadgeRule), '特关标签不使用额外立体效果，保持与分类协调');
 const itemHoverRule = popupHtml.match(/\.item:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(itemHoverRule, 'box-shadow', /inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/), '条目 hover 使用右侧 rail 与增强轻底板表示鼠标位置');
-assert(!/background\s*:/.test(itemHoverRule), '条目 hover 不再改变背景');
+assert(hasDeclaration(itemHoverRule, 'background', /color-mix\(in srgb, var\(--bg-item-hover\) 88%, #000\)/), '条目 hover 使用轻微压暗反馈');
+assert(!readDeclaration(itemHoverRule, 'box-shadow'), '条目 hover 不再使用右侧细线反馈');
+const itemReadHoverRule = popupHtml.match(/\.item\.read:hover\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(itemReadHoverRule, 'background', /color-mix\(in srgb, var\(--bg-item-hover\) 64%, #000\)/), '已读条目 hover 使用可见但低于未读的亮度反馈');
+assert(!readDeclaration(itemReadHoverRule, 'box-shadow'), '已读条目 hover 不使用额外颜色条反馈');
 
 const itemUnreadHoverRule = popupHtml.match(/\.item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(itemUnreadHoverRule, 'background', /var\(--bg-unread\)/), '未读条目 hover 保持未读背景');
-assert(hasDeclaration(itemUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\)/), '未读条目 hover 使用 strong rail 与增强轻底板');
+assert(hasDeclaration(itemUnreadHoverRule, 'background', /color-mix\(in srgb, var\(--bg-unread\) 84%, #000\)/), '未读条目 hover 在保留未读底色基础上轻微压暗');
+assert(!readDeclaration(itemUnreadHoverRule, 'box-shadow'), '未读条目 hover 不再使用右侧细线反馈');
 
 const watchUnreadHoverRule = popupHtml.match(/\.item\.watch-item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(watchUnreadHoverRule, 'box-shadow', /inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\),\s*inset calc\(-1 \* var\(--hairline\)\) 0 0 var\(--rail, var\(--accent\)\),\s*inset -3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/), '特关未读 hover 使用更亮 rail 与增强轻底板');
+assert(!watchUnreadHoverRule, '特关未读 hover 不再使用额外右侧细线规则');
 
 const readHoverTextSelectorPattern = /^\.item\.read:hover\s+\.item-(?:title|summary|meta)$/i;
 assert(!selectorSetsDeclaration(popupHtml, readHoverTextSelectorPattern, 'color'), '已读条目 hover 不再对标题摘要与元信息设置颜色');
 assert(!selectorSetsDeclaration(popupHtml, readHoverTextSelectorPattern, 'color', /var\(--text-read-hover\)/), '已读条目 hover 不再使用 --text-read-hover 提亮标题摘要与元信息');
-assert(/\.item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail-strong, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail-strong, var\(--accent\)\) 8%, transparent\)/i.test(popupHtml), '未读条目使用 strong rail 与增强轻底板');
+const itemUnreadRule = popupHtml.match(/\.item\.unread\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(itemUnreadRule, 'background', /var\(--bg-unread\)/), '未读条目保留未读背景');
+assert(!readDeclaration(itemUnreadRule, 'box-shadow'), '未读条目不再保留左侧颜色条');
 assert(!/\.item\.watch-item\s*{[\s\S]*box-shadow\s*:/.test(popupHtml), '已读特关条目不保留左侧颜色条');
-assert(/\.item\.watch-item\.unread\s*{[\s\S]*box-shadow:\s*inset var\(--hairline\) 0 0 var\(--rail, var\(--accent\)\),\s*inset 3px 0 0 color-mix\(in srgb, var\(--rail, var\(--accent\)\) 8%, transparent\)/i.test(popupHtml), '未读特关条目使用更亮 rail 与增强轻底板');
+const watchUnreadRule = popupHtml.match(/\.item\.watch-item\.unread\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchUnreadRule, 'box-shadow', 'none'), '未读特关条目不再保留左侧颜色条');
 assert(/::-webkit-scrollbar-thumb\s*{[^}]*background:\s*var\(--scrollbar, var\(--border\)\)/i.test(popupHtml), '滚动条使用独立 scrollbar token 并回退 border');
 assert(/\.cat-tag\.cat-model\s*{[\s\S]*color-mix\(in srgb, var\(--cat-model\) 9%, transparent\)/i.test(popupHtml), '分类标签背景更克制');
 assert(/\.date-label\s*{[\s\S]*background:\s*var\(--bg-sub\)/i.test(popupHtml), '日期浮标使用面板背景降低按钮感');
@@ -523,6 +564,11 @@ console.log('\n[设置默认折叠]');
 assert(!/ensureDefaultSettingsGroupOpen/.test(popupJs), '打开设置面板不再自动展开默认分组');
 assert(/function collapseSettingsGroups\(\)\s*{[\s\S]*settingGroups\.forEach\(group => \{[\s\S]*group\.open\s*=\s*false/.test(popupJs), '设置面板重新打开时收起全部分组');
 assert(/settingsPanel\.classList\.contains\('open'\)[\s\S]*collapseSettingsGroups\(\)/.test(popupJs), '打开设置面板时执行分组收起');
+assert(/设置面板按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，打开设置时默认不展开任何分组/.test(claudeMd), 'CLAUDE 描述设置面板默认不展开');
+assert(/主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧 hover 颜色条/.test(claudeMd), 'CLAUDE 描述主列表 hover 不使用颜色条');
+assert(/Windows\/PowerShell 无 bash 时使用 Compress-Archive/.test(claudeMd), 'CLAUDE 记录 PowerShell 打包替代命令');
+assert(/设置面板按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，默认不展开任何分组/.test(agentsMd), 'AGENTS 描述设置面板默认不展开');
+assert(!/默认只展开 `常规`/.test(agentsMd), 'AGENTS 不再描述默认展开常规');
 
 console.log(`\n${'='.repeat(40)}`);
 console.log(`结果: ${passed} passed, ${failed} failed`);

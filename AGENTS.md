@@ -10,14 +10,15 @@
 - `icons/`：扩展图标，包含 16、32、48、128px 等尺寸。
 - `store/`：Chrome Web Store 文案、隐私政策和截图素材。
 - `test*.js`：独立 Node 测试脚本，目前没有单独的 `tests/` 目录。
-- 设置面板按 `常规 / 外观 / 特关 / 调试` 分组，默认只展开 `常规`；特关规则首行保持 `来源 / 作者 / 停用 / 删除` 同行，来源完整显示，作者在操作按钮前省略，关键词只在存在时另起一行；除输入框外，弹窗内其它区域不应出现文本插入光标。
+- 设置面板按 `常规 / 外观 / 特关 / 调试` 分组，默认不展开任何分组；主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧颜色条；特关规则首行保持 `来源 / 作者 / 停用 / 删除` 同行，来源完整显示，作者在操作按钮前省略，关键词只在存在时另起一行；除输入框外，弹窗内其它区域不应出现文本插入光标。
 
 ## 构建、测试与开发命令
 
 - `node test.js`：运行纯逻辑测试，覆盖去重、排序、时间窗口和 API URL。
 - `node test-notification.js`：使用 mock 的 Chrome API 验证通知和 badge 逻辑。
+- `node test-background.js`：直接加载真实 `background.js`，验证消息通道、fingerprint、分页和失败语义。
 - `node test-e2e.js`：请求 `https://aihot.virxact.com`，验证线上 API 数据假设。
-- `bash pack.sh`：生成用于分发的 `aihot-notifier.zip`。
+- `bash pack.sh`：生成用于分发的 `aihot-notifier.zip`；Windows 无 bash 时使用 PowerShell `Compress-Archive`，保持包内只含清单、JS、HTML、`fonts/`、`icons/`。
 - `node screenshot.mjs`：重新生成商店截图；首次使用前执行 `npm install --no-save puppeteer`。
 
 仓库没有 `package.json`。除非明确切换到 Node 包管理流程，否则不要新增依赖清单。
@@ -30,12 +31,14 @@
 
 ## 测试指南
 
-修改逻辑前后至少运行 `node test.js` 和 `node test-notification.js`。涉及 API 模式、分页、日期窗口或线上 feed 假设时，运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。
+修改逻辑前后至少运行 `node test.js`、`node test-notification.js` 和相关 UI/API 测试。涉及 background 消息、fingerprint、分页或失败语义时运行 `node test-background.js`；涉及线上 feed 假设时运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。
 
 ## 发布流程
 
-每次改动后，按顺序执行：
-1. 升级 `manifest.json` 中的版本号
+常规代码或文档改动不要自动升级 `manifest.json` 版本号。只有明确准备发布 / 上架新包时，才升级版本号并打包。
+
+发布时按顺序执行：
+1. 按发布语义升级 `manifest.json` 中的版本号
 2. 打包（`bash pack.sh` 或 PowerShell `Compress-Archive`）
 3. commit + push
 

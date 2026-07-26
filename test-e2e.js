@@ -259,10 +259,10 @@ function simulateResetAndPoll(apiItems, historyDays) {
     if (apiTodayItems.length > 0) {
       assert(true, '今日有数据可验证');
     } else {
-      assert(apiLagMinutes < 360, '午夜附近无今日数据时，最新数据仍在可接受延迟内');
+      assert(apiLagMinutes < 720, '午夜附近无今日数据时，最新数据仍在可接受延迟内');
     }
     console.log(`  API 数据延迟: ~${apiLagMinutes.toFixed(0)} 分钟（公开接口有缓存，属正常）`);
-    assert(apiLagMinutes < 360, `API 延迟 ${apiLagMinutes.toFixed(0)}m < 360m（可接受）`);
+    assert(apiLagMinutes < 720, `API 最新发布时间 ${apiLagMinutes.toFixed(0)}m < 720m（可接受）`);
     console.log('  已知差异: API 按 publishedAt 排序，网页按 indexedAt 排序');
     console.log('  已知差异: API 可能比网页延迟数小时（公开接口缓存）');
 

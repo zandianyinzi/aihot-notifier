@@ -52,13 +52,14 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
 - `node test-e2e.js`：请求 `https://aihot.virxact.com`，验证线上 API 数据假设。
 - `python3 scripts/generate-logo.py`：重新生成扩展图标 PNG；需要 `Pillow`。
 - `node screenshot.mjs`：重新生成 Chrome Web Store 截图和宣传图；首次使用前执行 `npm install --no-save puppeteer`。
-- `bash pack.sh`：生成可上传 Chrome Web Store 的 `aihot-notifier.zip`。
+- `bash pack.sh`：生成可上传 Chrome Web Store 的 `aihot-notifier.zip`；Windows 无 bash 时可用 PowerShell `Compress-Archive` 打包同一文件集合。
 
 ## 界面约束
 
 弹窗使用轻量的主题与控件状态模板，避免不同按钮各自定义一套反馈：
 
 - 主题强调反馈使用 `--accent` / `--accent-soft`，失败反馈使用 `--state-fail`。
+- 主列表 hover 只使用整行轻压暗反馈；未读和特关未读不使用左侧/右侧颜色条，状态由未读底色、标题权重、置顶和标签表达。
 - 图标按钮使用语义状态类：`is-loading`、`is-result-accent`、`is-result-danger`、`is-result-ok`、`is-confirmed`。
 - 动效时长集中在 CSS token 中：点击反馈 `--motion-tap`、加载旋转 `--motion-loading`、本地确认 `--motion-confirm`、异步结果 `--motion-result`。
 
@@ -73,7 +74,8 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
 - Manifest V3，Service Worker 后台运行
 - 使用 `chrome.alarms` 定时轮询，系统重启后自动恢复
 - 数据存储在浏览器本地存储中，主要使用 `chrome.storage.local`
-- API：`GET https://aihot.virxact.com/api/public/items?mode=selected&since=<ISO-8601>`
+- API 轮询采用 fingerprint-first：先请求 `GET https://aihot.virxact.com/api/public/fingerprint`，有变化或兜底到期后再请求 `GET https://aihot.virxact.com/api/public/items?mode=<selected|all>&since=<ISO-8601>&take=100&cursor=<nextCursor>`；手动刷新同样先查 fingerprint，拉 items 时基于上次成功 items poll 回退 6 小时且最多 3 页。
+- 已读/特关状态优先使用稳定 key（`id` / `permalink` / `url`），并兼容旧 URL 数据
 
 ## 文件结构
 

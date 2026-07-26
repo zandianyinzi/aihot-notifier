@@ -1,4 +1,5 @@
 const API_BASE = 'https://aihot.virxact.com/api/public/items?take=100';
+const FINGERPRINT_URL = 'https://aihot.virxact.com/api/public/fingerprint';
 const ALARM_NAME = 'aihot-poll';
 const DEFAULT_INTERVAL = 5;
 const MIN_INTERVAL = 2;
@@ -7,7 +8,15 @@ const MAX_HISTORY_DAYS = 5;
 const AUTO_POLL_DELAY_BUFFER_MS = 6 * 60 * 60 * 1000;
 const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
+const SELECTED_MAX_PAGES = 3;
+const ALL_MAX_PAGES = 20;
+const MANUAL_MAX_PAGES = 3;
+const PAGE_DELAY_MS = Number.isFinite(globalThis.__AIHOT_TEST_PAGE_DELAY_MS) ? globalThis.__AIHOT_TEST_PAGE_DELAY_MS : 1100;
+const RETRY_AFTER_FALLBACK_MS = 45 * 1000;
+const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
+const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
+let notificationCounter = 0;
 async function getConfig() {
   const data = await chrome.storage.local.get(['enabled', 'interval', 'lastCheck', 'feedMode']);
   return {
@@ -20,6 +29,189 @@ async function getConfig() {
 
 function getApiUrl(mode) {
   return `${API_BASE}&mode=${mode}`;
+}
+
+function getMaxPages(mode) {
+  return normalizeFeedMode(mode) === 'all' ? ALL_MAX_PAGES : SELECTED_MAX_PAGES;
+}
+
+function sleep(ms) {
+  if (!ms || ms <= 0) return Promise.resolve();
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getResponseHeader(response, name) {
+  if (!response || !response.headers) return '';
+  if (typeof response.headers.get === 'function') return response.headers.get(name) || '';
+  return response.headers[name] || response.headers[name.toLowerCase()] || '';
+}
+
+function getRetryAfterMs(response, status) {
+  const retryAfter = getResponseHeader(response, 'Retry-After');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const dateMs = new Date(retryAfter).getTime();
+    if (dateMs > Date.now()) return dateMs - Date.now();
+  }
+  if (status === 429) return RETRY_AFTER_FALLBACK_MS;
+  if (status === 567 || (status >= 500 && status < 600)) return TEMPORARY_FAILURE_BACKOFF_MS;
+  return 0;
+}
+
+async function recordApiFailure(responseOrStatus) {
+  const status = typeof responseOrStatus === 'number' ? responseOrStatus : responseOrStatus?.status;
+  await incrementFailCount();
+  const backoffMs = getRetryAfterMs(responseOrStatus, status);
+  if (backoffMs > 0) {
+    await chrome.storage.local.set({ nextAllowedPollAt: new Date(Date.now() + backoffMs).toISOString() });
+  }
+}
+
+function getItemKey(item) {
+  if (!item) return '';
+  if (item.id || item.permalink || item.url) return item.id || item.permalink || item.url;
+  const time = item.publishedAt || item.time || item.indexedAt || '';
+  return [item.source || '', item.title || '', time, item.summary || ''].join('|');
+}
+
+function getItemOpenUrl(item) {
+  return item && (item.url || item.permalink || '');
+}
+
+function getItemStateKey(item) {
+  return item && (item.id || item.permalink || item.url || '');
+}
+
+function getItemAliases(itemOrKey) {
+  if (!itemOrKey) return [];
+  if (typeof itemOrKey === 'string') return [itemOrKey].filter(Boolean);
+  return [getItemStateKey(itemOrKey), itemOrKey.id, itemOrKey.permalink, itemOrKey.url]
+    .filter(Boolean)
+    .filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
+function getExistingItemKeys(history) {
+  return new Set((history || []).flatMap(item => [getItemKey(item), item.id, item.url, item.permalink].filter(Boolean)));
+}
+
+function isSafetyItemsPollDue(lastItemsPollAt) {
+  const last = new Date(lastItemsPollAt || 0).getTime();
+  return !last || Date.now() - last >= ITEMS_SAFETY_POLL_MS;
+}
+
+function getAutoPollSinceTime(config, _safetyPollDue, lastItemsPollAt) {
+  const bufferMs = Math.max(config.interval * 2 * 60 * 1000, AUTO_POLL_DELAY_BUFFER_MS);
+  const referenceTime = lastItemsPollAt || config.lastCheck;
+  return new Date(new Date(referenceTime).getTime() - bufferMs).toISOString();
+}
+
+function addItemKeys(keySet, item) {
+  [item && getItemKey(item), item && item.url, item && item.permalink]
+    .filter(Boolean)
+    .forEach(key => keySet.add(key));
+}
+
+function isNewApiItem(item, existingKeys) {
+  return !existingKeys.has(getItemKey(item)) && !existingKeys.has(item.url) && !existingKeys.has(item.permalink);
+}
+
+function filterNewApiItems(items, history) {
+  const seenKeys = getExistingItemKeys(history);
+  return (items || []).filter(item => {
+    if (!isNewApiItem(item, seenKeys)) return false;
+    addItemKeys(seenKeys, item);
+    return true;
+  });
+}
+
+async function probeFingerprint(mode) {
+  const normalizedMode = normalizeFeedMode(mode);
+  const { apiFingerprints = {}, apiFingerprintEtags = {} } = await chrome.storage.local.get(['apiFingerprints', 'apiFingerprintEtags']);
+  const headers = {};
+  if (apiFingerprints[normalizedMode] && apiFingerprintEtags.current) headers['If-None-Match'] = apiFingerprintEtags.current;
+
+  const res = await fetch(FINGERPRINT_URL, Object.keys(headers).length > 0 ? { headers } : undefined);
+  if (res.status === 304) {
+    return { ok: true, changed: !apiFingerprints[normalizedMode], fingerprints: apiFingerprints, etag: apiFingerprintEtags.current || '' };
+  }
+  if (!res.ok) {
+    return { ok: false, status: res.status, response: res };
+  }
+
+  const json = await res.json();
+  const nextFingerprint = json && json[normalizedMode];
+  if (!nextFingerprint) {
+    return { ok: true, changed: true, unavailable: true, fingerprints: apiFingerprints, etag: '' };
+  }
+
+  const etag = getResponseHeader(res, 'ETag');
+  const changed = apiFingerprints[normalizedMode] !== nextFingerprint;
+  return {
+    ok: true,
+    changed,
+    fingerprints: {
+      ...apiFingerprints,
+      ...(json.selected ? { selected: json.selected } : {}),
+      ...(json.all ? { all: json.all } : {})
+    },
+    etag
+  };
+}
+
+async function saveFingerprintProbe(probe) {
+  if (!probe || probe.unavailable) return;
+  const data = {};
+  if (probe.fingerprints) data.apiFingerprints = probe.fingerprints;
+  if (probe.etag) {
+    const { apiFingerprintEtags = {} } = await chrome.storage.local.get('apiFingerprintEtags');
+    data.apiFingerprintEtags = { ...apiFingerprintEtags, current: probe.etag };
+  }
+  if (Object.keys(data).length > 0) await chrome.storage.local.set(data);
+}
+
+async function fetchItemsPage(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw Object.assign(new Error(`API returned ${res.status}`), { response: res, status: res.status });
+  return res.json();
+}
+
+async function fetchItems({ mode, sinceTime = '', cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '' }) {
+  const normalizedMode = normalizeFeedMode(mode);
+  let allItems = [];
+  let cursor = null;
+  let truncated = false;
+  let nextCursor = '';
+
+  for (let page = 0; page < maxPages; page++) {
+    let url = baseUrl || getApiUrl(normalizedMode);
+    if (sinceTime) url += `&since=${encodeURIComponent(sinceTime)}`;
+    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+
+    const json = await fetchItemsPage(url);
+    if (!json.items || json.items.length === 0) {
+      truncated = Boolean(json.hasNext && json.nextCursor);
+      nextCursor = json.nextCursor || '';
+      break;
+    }
+
+    allItems = allItems.concat(json.items);
+
+    if (!json.hasNext || !json.nextCursor) break;
+    const oldest = json.items[json.items.length - 1];
+    if (new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) break;
+    if (page === maxPages - 1) {
+      truncated = true;
+      nextCursor = json.nextCursor;
+      break;
+    }
+    cursor = json.nextCursor;
+    await sleep(PAGE_DELAY_MS);
+  }
+
+  allItems.truncated = truncated;
+  allItems.nextCursor = nextCursor;
+  return allItems;
 }
 
 function splitWatchKeywords(value) {
@@ -158,37 +350,75 @@ async function rememberNotificationUrl(id, url) {
   });
 }
 
+async function rememberNotificationStateKey(id, key) {
+  if (!key) return;
+  const { notificationStateKeyMap = {} } = await chrome.storage.local.get('notificationStateKeyMap');
+  await chrome.storage.local.set({
+    notificationStateKeyMap: {
+      ...notificationStateKeyMap,
+      [id]: key
+    }
+  });
+}
+
 async function forgetNotificationUrl(id) {
-  const { notificationUrlMap = {} } = await chrome.storage.local.get('notificationUrlMap');
-  if (!notificationUrlMap[id]) return;
+  const { notificationUrlMap = {}, notificationStateKeyMap = {} } = await chrome.storage.local.get(['notificationUrlMap', 'notificationStateKeyMap']);
+  if (!notificationUrlMap[id] && !notificationStateKeyMap[id]) return;
   const nextMap = { ...notificationUrlMap };
+  const nextStateKeyMap = { ...notificationStateKeyMap };
   delete nextMap[id];
-  await chrome.storage.local.set({ notificationUrlMap: nextMap });
+  delete nextStateKeyMap[id];
+  await chrome.storage.local.set({ notificationUrlMap: nextMap, notificationStateKeyMap: nextStateKeyMap });
 }
 
-async function createNotification(id, options, url) {
+function getNotificationId(prefix) {
+  notificationCounter = (notificationCounter + 1) % Number.MAX_SAFE_INTEGER;
+  const randomPart = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${notificationCounter}`;
+  return `${prefix}-${randomPart}`;
+}
+
+async function createNotification(id, options, url, stateKey = '') {
   await rememberNotificationUrl(id, url);
-  chrome.notifications.create(id, options);
+  await rememberNotificationStateKey(id, stateKey);
+  try {
+    await chrome.notifications.create(id, options);
+  } catch (e) {
+    await forgetNotificationUrl(id).catch(() => {});
+    throw e;
+  }
 }
 
-async function sendWatchNotifications(items, watchNotifyState, now) {
+function findWatchState(watchNotifyState, item) {
+  const aliases = getItemAliases(item);
+  const key = aliases.find(alias => watchNotifyState[alias]);
+  return {
+    key: key || getItemStateKey(item),
+    state: key ? watchNotifyState[key] : null
+  };
+}
+
+async function sendWatchNotifications(items, watchNotifyState, now, limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
+  if (limit <= 0) return [];
   const nowMs = new Date(now).getTime();
   const dueItems = items
-    .filter(item => shouldNotifyWatchState(watchNotifyState[item.url], nowMs))
+    .filter(item => shouldNotifyWatchState(findWatchState(watchNotifyState, item).state, nowMs))
     .sort((a, b) => getItemTime(b) - getItemTime(a))
-    .slice(0, MAX_WATCH_NOTIFICATIONS_PER_CYCLE);
+    .slice(0, limit);
 
   for (let index = 0; index < dueItems.length; index++) {
     const item = dueItems[index];
-    const state = watchNotifyState[item.url];
-    await createNotification(`aihot-watch-${Date.now()}-${index}`, {
+    const { key, state } = findWatchState(watchNotifyState, item);
+    const url = getItemOpenUrl(item);
+    await createNotification(getNotificationId('aihot-watch'), {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: getWatchNotificationTitle(item, state),
       message: item.title,
       contextMessage: item.source || ''
-    }, item.url);
-    watchNotifyState[item.url] = advanceWatchNotifyState(state, now);
+    }, url, key);
+    watchNotifyState[key] = advanceWatchNotifyState(state, now);
   }
 
   return dueItems;
@@ -200,12 +430,89 @@ async function markWatchViewed(urls) {
   if (filtered.length === 0) return;
   const { watchNotifyState = {} } = await chrome.storage.local.get('watchNotifyState');
   const now = new Date().toISOString();
-  filtered.forEach(url => {
-    if (watchNotifyState[url]) {
-      watchNotifyState[url] = { ...watchNotifyState[url], viewedAt: watchNotifyState[url].viewedAt || now };
-    }
+  filtered.forEach(value => {
+    const aliases = getItemAliases(value);
+    aliases.forEach(alias => {
+      if (watchNotifyState[alias]) {
+        watchNotifyState[alias] = { ...watchNotifyState[alias], viewedAt: watchNotifyState[alias].viewedAt || now };
+      }
+    });
   });
   await chrome.storage.local.set({ watchNotifyState });
+}
+
+async function assertNotInBackoff() {
+  const { nextAllowedPollAt = '' } = await chrome.storage.local.get('nextAllowedPollAt');
+  if (nextAllowedPollAt && new Date(nextAllowedPollAt).getTime() > Date.now()) {
+    throw Object.assign(new Error(`polling paused until ${nextAllowedPollAt}`), { backoff: true, nextAllowedPollAt });
+  }
+}
+
+async function commitSuccessfulItemsPoll(data = {}) {
+  const { now: providedNow, ...rest } = data;
+  const now = providedNow || new Date().toISOString();
+  await chrome.storage.local.set({
+    ...rest,
+    lastCheck: now,
+    lastItemsPollAt: now,
+    failCount: 0,
+    nextAllowedPollAt: ''
+  });
+}
+
+function buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, discoveredAt) {
+  const newEntries = [];
+  const watchItems = [];
+  const normalItems = [];
+  const nextWatchNotifyState = { ...watchNotifyState };
+
+  filterNewApiItems(items, history)
+    .forEach(item => {
+      const watchMatches = matchWatchRules(item, watchRules);
+      const entry = toHistoryEntry(item, discoveredAt, watchMatches);
+      newEntries.push(entry);
+      if (watchMatches.length > 0) {
+        const key = getItemStateKey(entry);
+        const existingState = getItemAliases(entry)
+          .map(alias => nextWatchNotifyState[alias])
+          .find(Boolean);
+        nextWatchNotifyState[key] = buildWatchStateForItem(existingState, entry, watchMatches.map(rule => rule.id), discoveredAt);
+        watchItems.push(entry);
+      } else {
+        normalItems.push(entry);
+      }
+    });
+
+  return { newEntries, watchItems, normalItems, nextWatchNotifyState };
+}
+
+async function mergeAndPersistHistory(newEntries, history, historyDays) {
+  const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+  const updated = [...newEntries, ...history]
+    .filter(i => isWithinHistoryWindow(i, cutoff))
+    .sort((a, b) => getItemTime(b) - getItemTime(a));
+  await chrome.storage.local.set({ history: updated });
+  return updated;
+}
+
+function getNormalizedItemTime(item, discoveredAt) {
+  return item.publishedAt || item.indexedAt || item.discoveredAt || discoveredAt || new Date().toISOString();
+}
+
+function getCycleWatchNotificationBudget(used = 0) {
+  return Math.max(MAX_WATCH_NOTIFICATIONS_PER_CYCLE - used, 0);
+}
+
+async function clearNotificationUrlOnClosed(notificationId) {
+  if (notificationId && notificationId.startsWith('aihot-')) {
+    await forgetNotificationUrl(notificationId);
+  }
+}
+
+if (chrome.notifications.onClosed && chrome.notifications.onClosed.addListener) {
+  chrome.notifications.onClosed.addListener((notificationId) => {
+    clearNotificationUrlOnClosed(notificationId).catch(e => console.warn('[AI HOT] failed to forget closed notification:', e));
+  });
 }
 
 
@@ -220,7 +527,7 @@ function getReadAllBeforeForMode(data) {
 }
 
 function getItemTime(item) {
-  return new Date(item.time).getTime();
+  return new Date(item.time || item.discoveredAt || 0).getTime();
 }
 
 function getUnreadReferenceTime(item) {
@@ -232,13 +539,20 @@ function isWithinHistoryWindow(item, cutoff) {
 }
 
 function toHistoryEntry(item, discoveredAt, watchMatches = []) {
+  const normalizedTime = getNormalizedItemTime(item, discoveredAt);
   const entry = {
     title: item.title,
-    url: item.url,
+    id: item.id || '',
+    titleEn: item.title_en || '',
+    url: getItemOpenUrl(item),
+    permalink: item.permalink || item.url || '',
     source: item.source || '',
     category: item.category || '',
     summary: item.summary || '',
-    time: item.publishedAt,
+    score: item.score ?? null,
+    selected: item.selected === true,
+    attribution: item.attribution || null,
+    time: normalizedTime,
     discoveredAt
   };
   if (watchMatches.length > 0) {
@@ -267,35 +581,48 @@ async function pollForUpdates() {
   const config = await getConfig();
   if (!config.enabled) return;
 
-  // API 公开接口存在数小时级缓存/入库延迟，自动轮询保守回退避免空历史漏载。
-  const bufferMs = Math.max(config.interval * 2 * 60 * 1000, AUTO_POLL_DELAY_BUFFER_MS);
-  const sinceTime = new Date(new Date(config.lastCheck).getTime() - bufferMs).toISOString();
+  const { nextAllowedPollAt = '', lastItemsPollAt = '' } = await chrome.storage.local.get(['nextAllowedPollAt', 'lastItemsPollAt']);
+  if (nextAllowedPollAt && new Date(nextAllowedPollAt).getTime() > Date.now()) {
+    console.log(`[AI HOT] polling paused until ${nextAllowedPollAt}`);
+    return;
+  }
+
   const now = new Date().toISOString();
-  console.log(`[AI HOT] polling since=${sinceTime}`);
 
   try {
-    const res = await fetch(`${getApiUrl(config.feedMode)}&since=${encodeURIComponent(sinceTime)}`);
-    if (!res.ok) {
-      console.warn(`[AI HOT] API returned ${res.status}`);
-      await incrementFailCount();
+    const fingerprintProbe = await probeFingerprint(config.feedMode);
+    if (!fingerprintProbe.ok) {
+      console.warn(`[AI HOT] fingerprint returned ${fingerprintProbe.status}`);
+      await recordApiFailure(fingerprintProbe.response || fingerprintProbe.status);
+      return;
+    }
+    const safetyPollDue = isSafetyItemsPollDue(lastItemsPollAt);
+    const sinceTime = getAutoPollSinceTime(config, safetyPollDue, lastItemsPollAt);
+    console.log(`[AI HOT] polling since=${sinceTime}`);
+    if (!fingerprintProbe.changed && !safetyPollDue) {
+      await saveFingerprintProbe(fingerprintProbe);
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      await updateBadge();
+      console.log('[AI HOT] fingerprint unchanged, skip items');
       return;
     }
 
-    const json = await res.json();
-    const { history = [] } = await chrome.storage.local.get('history');
-    const existingUrls = new Set(history.map(i => i.url));
-    const newItems = (json.items || []).filter(i => !existingUrls.has(i.url));
-    console.log(`[AI HOT] got ${json.items?.length || 0} items, ${newItems.length} new`);
-    await chrome.storage.local.set({ lastCheck: now, failCount: 0 });
+    const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+    const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff });
+    const newWatchNotifications = await persistFetchedItems(allItems, { notify: true });
+    console.log(`[AI HOT] got ${allItems.length} items`);
 
-    if (newItems.length > 0) {
-      await showNotification(newItems);
+    if (!allItems.truncated) {
+      await saveFingerprintProbe(fingerprintProbe);
+      await commitSuccessfulItemsPoll({ now });
     } else {
-      await updateBadge();
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
     }
+    return { watchNotificationsSent: newWatchNotifications, truncated: Boolean(allItems.truncated) };
   } catch (e) {
     console.error(`[AI HOT] fetch error:`, e);
-    await incrementFailCount();
+    await recordApiFailure(e.response || e.status || 0);
+    return { error: e };
   }
 }
 
@@ -309,7 +636,11 @@ async function incrementFailCount() {
   }
 }
 
-async function showNotification(items) {
+async function persistFetchedItems(items, options = {}) {
+  const shouldNotify = options.notify === true;
+  const watchNotificationLimit = Number.isFinite(options.watchNotificationLimit)
+    ? options.watchNotificationLimit
+    : MAX_WATCH_NOTIFICATIONS_PER_CYCLE;
   const discoveredAt = new Date().toISOString();
   const {
     history = [],
@@ -318,32 +649,16 @@ async function showNotification(items) {
     watchNotifyState = {}
   } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState']);
 
-  const existingUrls = new Set(history.map(i => i.url));
-  const newEntries = [];
-  const watchItems = [];
-  const normalItems = [];
-  const nextWatchNotifyState = { ...watchNotifyState };
+  const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, discoveredAt);
+  const updated = await mergeAndPersistHistory(newEntries, history, historyDays);
 
-  items
-    .filter(i => !existingUrls.has(i.url))
-    .forEach(item => {
-      const watchMatches = matchWatchRules(item, watchRules);
-      const entry = toHistoryEntry(item, discoveredAt, watchMatches);
-      newEntries.push(entry);
-      if (watchMatches.length > 0) {
-        const ruleIds = watchMatches.map(rule => rule.id);
-        nextWatchNotifyState[item.url] = buildWatchStateForItem(nextWatchNotifyState[item.url], item, ruleIds, discoveredAt);
-        watchItems.push(entry);
-      } else {
-        normalItems.push(item);
-      }
-    });
+  const notifiedWatchItems = shouldNotify
+    ? await sendWatchNotifications(watchItems, nextWatchNotifyState, discoveredAt, watchNotificationLimit)
+    : [];
 
-  await sendWatchNotifications(watchItems, nextWatchNotifyState, discoveredAt);
-
-  if (normalItems.length > 0) {
+  if (shouldNotify && normalItems.length > 0) {
     const count = normalItems.length;
-    const notifId = 'aihot-' + Date.now();
+    const notifId = getNotificationId('aihot');
 
     if (count === 1) {
       await createNotification(notifId, {
@@ -352,7 +667,7 @@ async function showNotification(items) {
         title: 'AI HOT 新内容',
         message: normalItems[0].title,
         contextMessage: normalItems[0].source || ''
-      }, normalItems[0].url);
+      }, getItemOpenUrl(normalItems[0]));
     } else {
       await createNotification(notifId, {
         type: 'basic',
@@ -360,84 +675,80 @@ async function showNotification(items) {
         title: `AI HOT 有 ${count} 条新内容`,
         message: normalItems[0].title,
         contextMessage: normalItems[0].source || ''
-      }, normalItems[0].url);
+      }, getItemOpenUrl(normalItems[0]));
     }
   }
 
   await chrome.storage.local.set({
-    lastItems: [...watchItems, ...normalItems.map(i => toHistoryEntry(i, discoveredAt))].slice(0, 5),
+    lastItems: [...watchItems, ...normalItems].slice(0, 5),
     watchNotifyState: nextWatchNotifyState
   });
 
-  const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-  const updated = [...newEntries, ...history]
-    .filter(i => isWithinHistoryWindow(i, cutoff))
-    .sort((a, b) => getItemTime(b) - getItemTime(a));
-  await chrome.storage.local.set({ history: updated });
   await updateBadge();
+  return { updated, newEntries, watchNotificationsSent: notifiedWatchItems.length };
 }
 
-async function checkWatchReminders() {
+async function showNotification(items) {
+  const result = await persistFetchedItems(items, { notify: true });
+  return result.watchNotificationsSent;
+}
+
+async function checkWatchReminders(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
+  if (limit <= 0) return 0;
   const { history = [], watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'watchRules', 'watchNotifyState']);
-  const watchItems = history.filter(item => getActiveWatchMatchIds(item, watchRules).length > 0 && watchNotifyState[item.url]);
+  const watchItems = history.filter(item => getActiveWatchMatchIds(item, watchRules).length > 0 && findWatchState(watchNotifyState, item).state);
   if (watchItems.length === 0) return;
   const now = new Date().toISOString();
   const nextWatchNotifyState = { ...watchNotifyState };
-  const notified = await sendWatchNotifications(watchItems, nextWatchNotifyState, now);
+  const notified = await sendWatchNotifications(watchItems, nextWatchNotifyState, now, limit);
   if (notified.length > 0) {
     await chrome.storage.local.set({ watchNotifyState: nextWatchNotifyState, lastItems: notified.slice(0, 5) });
   }
+  return notified.length;
 }
 
 async function manualPoll() {
-  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode']);
+  await assertNotInBackoff();
+  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode, lastCheck = '', lastItemsPollAt = '' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode', 'lastCheck', 'lastItemsPollAt']);
   const mode = normalizeFeedMode(feedMode);
-  const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
-  console.log(`[AI HOT] manual poll since=${sinceTime}`);
+  const now = new Date().toISOString();
 
   try {
-    let allItems = [];
-    let cursor = null;
-    const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-    const maxPages = 3;
-
-    for (let page = 0; page < maxPages; page++) {
-      let url = `${getApiUrl(mode)}&since=${encodeURIComponent(sinceTime)}`;
-      if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(`API returned ${res.status}`);
-      }
-      const json = await res.json();
-      if (!json.items || json.items.length === 0) break;
-
-      allItems = allItems.concat(json.items);
-
-      if (!json.hasNext || !json.nextCursor) break;
-      const oldest = json.items[json.items.length - 1];
-      if (new Date(oldest.publishedAt).getTime() < cutoff) break;
-      cursor = json.nextCursor;
+    const fingerprintProbe = await probeFingerprint(mode);
+    if (!fingerprintProbe.ok) {
+      console.warn(`[AI HOT] manual fingerprint returned ${fingerprintProbe.status}`);
+      throw Object.assign(new Error(`API returned ${fingerprintProbe.status}`), { response: fingerprintProbe.response, status: fingerprintProbe.status });
     }
 
-    if (allItems.length === 0) return;
+    if (!fingerprintProbe.changed) {
+      await saveFingerprintProbe(fingerprintProbe);
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      await updateBadge();
+      console.log('[AI HOT] manual fingerprint unchanged, skip items');
+      return;
+    }
 
-    const existingUrls = new Set(history.map(i => i.url));
+    const sinceTime = getAutoPollSinceTime({ interval: DEFAULT_INTERVAL, lastCheck: lastCheck || now }, false, lastItemsPollAt);
+    console.log(`[AI HOT] manual poll since=${sinceTime}`);
+    const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+    const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES });
     const discoveredAt = new Date().toISOString();
-    const newEntries = allItems
-      .filter(i => !existingUrls.has(i.url))
-      .map(i => toHistoryEntry(i, discoveredAt));
-
-    const merged = [...newEntries, ...history]
-      .filter(i => isWithinHistoryWindow(i, cutoff))
-      .sort((a, b) => getItemTime(b) - getItemTime(a));
-
-    await chrome.storage.local.set({ history: merged, lastCheck: new Date().toISOString(), failCount: 0 });
+    const { watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['watchRules', 'watchNotifyState']);
+    const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, history, watchRules, watchNotifyState, discoveredAt);
+    const merged = await mergeAndPersistHistory(newEntries, history, historyDays);
+    await chrome.storage.local.set({ lastItems: [...watchItems, ...normalItems].slice(0, 5), watchNotifyState: nextWatchNotifyState });
+    if (allItems.truncated) {
+      await chrome.storage.local.set({ lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
+    } else {
+      await saveFingerprintProbe(fingerprintProbe);
+      await commitSuccessfulItemsPoll();
+    }
     await updateBadge();
     console.log(`[AI HOT] manual poll done, ${merged.length} total items (fetched ${allItems.length})`);
   } catch (e) {
+    if (e.backoff) throw e;
     console.error(`[AI HOT] manual poll error:`, e);
-    await incrementFailCount();
+    await recordApiFailure(e.response || e.status || 0);
     throw e;
   }
 }
@@ -445,11 +756,12 @@ async function manualPoll() {
 async function updateBadge() {
   const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
   const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS } = data;
+  const readIdSet = new Set(readIds);
   const readAllBefore = getReadAllBeforeForMode(data);
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const unread = history.filter(i => {
     if (!isWithinHistoryWindow(i, cutoff)) return false;
-    if (readIds.includes(i.url)) return false;
+    if (getItemAliases(i).some(alias => readIdSet.has(alias))) return false;
     if (readAllBefore && getUnreadReferenceTime(i) <= new Date(readAllBefore).getTime()) return false;
     return true;
   }).length;
@@ -458,67 +770,60 @@ async function updateBadge() {
 }
 
 async function resetAndPoll(feedMode) {
+  await assertNotInBackoff();
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
-    const { historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get('historyDays');
+    const { historyDays = DEFAULT_HISTORY_DAYS, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['historyDays', 'watchRules', 'watchNotifyState']);
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
 
-    let allItems = [];
-    let cursor = null;
-    const maxPages = 3;
-
-    for (let page = 0; page < maxPages; page++) {
-      let url = `${getApiUrl(feedMode)}&since=${encodeURIComponent(sinceTime)}`;
-      if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-
-      const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error(`API returned ${res.status}`);
-      }
-      const json = await res.json();
-      if (!json.items || json.items.length === 0) break;
-
-      allItems = allItems.concat(json.items);
-
-      if (!json.hasNext || !json.nextCursor) break;
-      const oldest = json.items[json.items.length - 1];
-      if (new Date(oldest.publishedAt).getTime() < cutoff) break;
-      cursor = json.nextCursor;
-    }
-
-    const history = allItems
-      .map(i => toHistoryEntry(i, i.publishedAt))
+    const allItems = await fetchItems({ mode: feedMode, sinceTime, cutoff });
+    const discoveredAt = new Date().toISOString();
+    const { newEntries: history, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, [], watchRules, watchNotifyState, discoveredAt);
+    const nextHistory = history
       .filter(i => isWithinHistoryWindow(i, cutoff))
       .sort((a, b) => getItemTime(b) - getItemTime(a));
 
-    await chrome.storage.local.set({ history, feedMode: normalizeFeedMode(feedMode), lastCheck: new Date().toISOString(), failCount: 0 });
+    const fingerprintProbe = await probeFingerprint(feedMode).catch(() => null);
+    const resetData = {
+      history: nextHistory,
+      lastItems: [...watchItems, ...normalItems].slice(0, 5),
+      watchNotifyState: nextWatchNotifyState,
+      feedMode: normalizeFeedMode(feedMode)
+    };
+    if (!allItems.truncated) {
+      await saveFingerprintProbe(fingerprintProbe);
+      await commitSuccessfulItemsPoll(resetData);
+    } else {
+      await chrome.storage.local.set({ ...resetData, lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
+    }
     await updateBadge();
-    console.log(`[AI HOT] resetAndPoll done, ${history.length} items from ${allItems.length} fetched`);
+    console.log(`[AI HOT] resetAndPoll done, ${nextHistory.length} items from ${allItems.length} fetched`);
   } catch (e) {
+    if (e.backoff) throw e;
     console.error(`[AI HOT] resetAndPoll error:`, e);
-    await incrementFailCount();
+    await recordApiFailure(e.response || e.status || 0);
     throw e;
   }
 }
 
 chrome.notifications.onClicked.addListener(async (notificationId) => {
   if (notificationId.startsWith('aihot-')) {
-    const { lastItems = [], notificationUrlMap = {} } = await chrome.storage.local.get(['lastItems', 'notificationUrlMap']);
+    const { lastItems = [], notificationUrlMap = {}, notificationStateKeyMap = {} } = await chrome.storage.local.get(['lastItems', 'notificationUrlMap', 'notificationStateKeyMap']);
     const url = notificationUrlMap[notificationId] || lastItems[0]?.url;
     if (url) {
       if (notificationId.startsWith('aihot-watch-')) {
-        await markWatchViewed(url);
+        await markWatchViewed([notificationStateKeyMap[notificationId], url]);
       }
       await forgetNotificationUrl(notificationId);
-      chrome.tabs.create({ url });
+      await chrome.tabs.create({ url });
     }
   }
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
-    return pollForUpdates().then(() => checkWatchReminders());
+    return pollForUpdates().then((result = {}) => checkWatchReminders(getCycleWatchNotificationBudget(result.watchNotificationsSent || 0)));
   }
 });
 
@@ -538,33 +843,12 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       const { feedMode, historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
       const mode = normalizeFeedMode(feedMode);
       const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-      const maxPages = 3;
-      let allItems = [];
-      let cursor = null;
-
-      for (let page = 0; page < maxPages; page++) {
-        let url = getApiUrl(mode);
-        if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
-
-        const res = await fetch(url);
-        if (!res.ok) break;
-        const json = await res.json();
-        if (!json.items || json.items.length === 0) break;
-
-        allItems = allItems.concat(json.items);
-
-        if (!json.hasNext || !json.nextCursor) break;
-        const oldest = json.items[json.items.length - 1];
-        if (new Date(oldest.publishedAt).getTime() < cutoff) break;
-        cursor = json.nextCursor;
-      }
+      const allItems = await fetchItems({ mode, cutoff, maxPages: Math.min(getMaxPages(mode), SELECTED_MAX_PAGES) });
 
       if (allItems.length > 0) {
         const { history = [] } = await chrome.storage.local.get('history');
-        const existingUrls = new Set(history.map(i => i.url));
-        const newEntries = allItems
-          .filter(i => !existingUrls.has(i.url))
-          .map(i => toHistoryEntry(i, i.publishedAt));
+        const newEntries = filterNewApiItems(allItems, history)
+          .map(i => toHistoryEntry(i, getNormalizedItemTime(i)));
         const merged = [...newEntries, ...history]
           .filter(i => isWithinHistoryWindow(i, cutoff))
           .sort((a, b) => getItemTime(b) - getItemTime(a));
