@@ -7,6 +7,8 @@ const assert = require('assert');
 const {
   createMutationQueue,
   createFeedModeSwitchController,
+  createAllFeedContinuationStatusController,
+  createPopupStorageChangeHandler,
   getSafeHttpsUrl,
   openHttpsUrl
 } = require('./popup-reliability.js');
@@ -110,11 +112,85 @@ async function testSafeOpenReadOrdering() {
   assert(!events.includes('unexpected-read'), 'tab creation failure does not submit read state');
 }
 
+async function testPopupHistoryRenderOwnership() {
+  let controllerRenders = 0;
+  const controller = createFeedModeSwitchController({
+    enqueue: createMutationQueue(),
+    setDisabled: () => {},
+    sendChange: async () => ({ ok: true }),
+    getFailCount: async () => 0,
+    clearScrollPosition: () => {},
+    loadHistory: async () => { controllerRenders++; },
+    persist: () => {},
+    rollback: async () => {},
+    onSuccess: () => {},
+    onFailure: () => {}
+  });
+  await controller.switchFeedMode('all', 'selected');
+  assert.strictEqual(controllerRenders, 0, '内容源 controller 不重复渲染；history storage change 是唯一列表刷新来源');
+
+  let renders = 0;
+  const statuses = [];
+  const handleStorageChange = createPopupStorageChangeHandler({
+    refreshHistory: () => {
+      renders++;
+      statuses.push('正在补充更多内容…');
+    },
+    showStatus: value => statuses.push(value)
+  });
+  handleStorageChange({
+    history: { newValue: [] },
+    allFeedContinuation: { newValue: { active: true, expiresAt: new Date(Date.now() + 60 * 1000).toISOString() } }
+  }, 'local');
+  assert.strictEqual(renders, 1, '同一 storage 事件中的 history 仅触发一次列表刷新');
+  assert.deepStrictEqual(statuses, ['正在补充更多内容…'], 'history 与续拉状态同变时只由列表加载路径发布一次状态');
+  handleStorageChange({ allFeedContinuation: { newValue: { active: false } } }, 'local');
+  assert.strictEqual(renders, 1, '仅状态变更不重渲染列表');
+  assert.deepStrictEqual(statuses, ['正在补充更多内容…', ''], '续拉完成清除状态提示');
+  handleStorageChange({ allFeedContinuation: { newValue: { active: true, expiresAt: new Date(Date.now() - 60 * 1000).toISOString() } } }, 'local');
+  assert.deepStrictEqual(statuses, ['正在补充更多内容…', '', ''], '过期的续拉状态不会让 popup 持续显示补充提示');
+}
+
+async function testContinuationStatusExpiryTimer() {
+  let now = 1_000;
+  let nextTimerId = 0;
+  const timers = new Map();
+  const statuses = [];
+  const controller = createAllFeedContinuationStatusController({
+    now: () => now,
+    setTimer: (callback, delay) => {
+      const id = ++nextTimerId;
+      timers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimer: id => timers.delete(id),
+    showStatus: value => statuses.push(value)
+  });
+
+  controller.update({ active: true, expiresAt: new Date(1_500).toISOString() });
+  const firstTimer = timers.get(1);
+  assert.deepStrictEqual(statuses, ['正在补充更多内容…'], 'active 状态立即显示提示');
+  assert.strictEqual(firstTimer.delay, 500, '提示计时器精确等待至 expiresAt');
+
+  now = 1_200;
+  controller.update({ active: true, expiresAt: new Date(2_000).toISOString() });
+  const secondTimer = timers.get(2);
+  assert(!timers.has(1) && secondTimer, '新状态会取消旧到期计时器');
+  firstTimer.callback();
+  assert.deepStrictEqual(statuses, ['正在补充更多内容…', '正在补充更多内容…'], '已取消的旧计时器不会清除较新的提示');
+
+  now = 2_000;
+  secondTimer.callback();
+  assert.deepStrictEqual(statuses, ['正在补充更多内容…', '正在补充更多内容…', ''], 'expiresAt 到期时无需 storage 事件即可清除提示');
+}
+
 (async () => {
   await testMutationQueue();
   await testFeedModeStaleResponseAndRollback();
   await testSafeOpenReadOrdering();
-  console.log('结果: 3 passed, 0 failed');
+  await testPopupHistoryRenderOwnership();
+  await testContinuationStatusExpiryTimer();
+  console.log('结果: 5 passed, 0 failed');
 })().catch(error => {
   console.error(error);
   process.exit(1);

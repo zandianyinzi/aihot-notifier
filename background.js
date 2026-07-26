@@ -4,6 +4,7 @@ const API_LIMIT = 100;
 const MAX_CURSOR_LENGTH = 1024;
 const FINGERPRINT_URL = 'https://aihot.virxact.com/api/public/fingerprint';
 const ALARM_NAME = 'aihot-poll';
+const ALL_CONTINUATION_ALARM_NAME = 'aihot-all-continuation';
 const DEFAULT_INTERVAL = 5;
 const MIN_INTERVAL = 2;
 const DEFAULT_HISTORY_DAYS = 2;
@@ -14,13 +15,15 @@ const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
 const SELECTED_MAX_PAGES = 3;
 const ALL_MAX_PAGES = 20;
 const MANUAL_MAX_PAGES = 3;
-const PAGE_DELAY_MS = Number.isFinite(globalThis.__AIHOT_TEST_PAGE_DELAY_MS) ? globalThis.__AIHOT_TEST_PAGE_DELAY_MS : 1100;
+const ALL_CONTINUATION_MAX_429_RETRIES = 2;
+const ALL_CONTINUATION_STATUS_TTL_MS = 15 * 60 * 1000;
 const RETRY_AFTER_FALLBACK_MS = 45 * 1000;
 const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 let notificationCounter = 0;
 let stateMutationQueue = Promise.resolve();
+let feedModeGeneration = 0;
 
 function runStateMutation(task) {
   const operation = stateMutationQueue.then(task, task);
@@ -270,7 +273,6 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
     if (seenCursors.has(response.nextCursor)) throw new Error('Repeated API cursor');
     seenCursors.add(response.nextCursor);
     cursor = response.nextCursor;
-    await sleep(PAGE_DELAY_MS);
   }
 
   allItems.truncated = truncated;
@@ -725,6 +727,10 @@ async function persistFetchedItems(items, options = {}) {
     watchNotifyState = {}
   } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState']);
 
+  if (typeof options.isCurrent === 'function' && !await options.isCurrent()) {
+    return { skipped: true, updated: history, newEntries: [], watchNotificationsSent: 0 };
+  }
+
   const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, discoveredAt);
   const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState);
   const updated = persisted.history;
@@ -757,10 +763,9 @@ async function persistFetchedItems(items, options = {}) {
     }
   }
 
-  await chrome.storage.local.set({
-    lastItems: [...watchItems, ...normalItems].slice(0, 5),
-    watchNotifyState: persistedWatchNotifyState
-  });
+  const updates = { watchNotifyState: persistedWatchNotifyState };
+  if (options.updateLastItems !== false) updates.lastItems = [...watchItems, ...normalItems].slice(0, 5);
+  await chrome.storage.local.set(updates);
 
   await updateBadge();
   return { updated, newEntries, watchNotificationsSent: notifiedWatchItems.length };
@@ -856,6 +861,199 @@ async function updateBadge() {
   chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
 }
 
+async function isCurrentFeedModeGeneration(generation, mode) {
+  if (generation !== null && generation !== undefined && generation !== feedModeGeneration) return false;
+  const { feedMode } = await chrome.storage.local.get('feedMode');
+  return (generation === null || generation === undefined || generation === feedModeGeneration) && normalizeFeedMode(feedMode) === normalizeFeedMode(mode);
+}
+
+function getContinuationId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID();
+  return `${Date.now()}-${Math.random()}`;
+}
+
+function getActiveAllContinuationStatus(cursor, continuationId) {
+  return {
+    active: true,
+    id: continuationId,
+    cursor,
+    retryAttempts: 0,
+    retryAt: '',
+    expiresAt: new Date(Date.now() + ALL_CONTINUATION_STATUS_TTL_MS).toISOString()
+  };
+}
+
+async function recoverAllFeedContinuationStatus() {
+  const { allFeedContinuation = {}, feedMode } = await chrome.storage.local.get(['allFeedContinuation', 'feedMode']);
+  if (allFeedContinuation.active !== true) return;
+  if (normalizeFeedMode(feedMode) !== 'all' || !allFeedContinuation.id || !allFeedContinuation.cursor) {
+    await chrome.storage.local.set({ allFeedContinuation: { ...allFeedContinuation, active: false } });
+    await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+    return;
+  }
+  const retryAt = new Date(allFeedContinuation.retryAt || 0).getTime();
+  chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt > Date.now() ? retryAt : Date.now() });
+}
+
+function startFingerprintProbe(mode) {
+  return probeFingerprint(mode).catch(() => null);
+}
+
+function saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId = '') {
+  void Promise.resolve(fingerprintProbe)
+    .then(probe => runStateMutation(async () => {
+      if (!probe || !await isCurrentFeedModeGeneration(generation, 'all')) return;
+      if (continuationId) {
+        const { allFeedContinuation = {} } = await chrome.storage.local.get('allFeedContinuation');
+        if (allFeedContinuation.id !== continuationId) return;
+      }
+      await saveFingerprintProbe(probe);
+    }))
+    .catch(e => console.warn('[AI HOT] deferred fingerprint save failed:', e));
+}
+
+async function getActiveAllContinuation(generation, continuationId, expected = {}) {
+  if (!await isCurrentFeedModeGeneration(generation, 'all')) return null;
+  const { allFeedContinuation = {} } = await chrome.storage.local.get('allFeedContinuation');
+  if (allFeedContinuation.active !== true || !allFeedContinuation.cursor || allFeedContinuation.id !== continuationId) return null;
+  if (expected.cursor !== undefined && allFeedContinuation.cursor !== expected.cursor) return null;
+  if (expected.retryAttempts !== undefined && Number(allFeedContinuation.retryAttempts || 0) !== Number(expected.retryAttempts || 0)) return null;
+  if (expected.retryAt !== undefined && (allFeedContinuation.retryAt || '') !== (expected.retryAt || '')) return null;
+  return allFeedContinuation;
+}
+
+async function commitAllContinuationMutation(generation, continuationId, expected, mutation) {
+  return runStateMutation(async () => {
+    const continuation = await getActiveAllContinuation(generation, continuationId, expected);
+    if (!continuation) return { skipped: true };
+    return mutation(continuation);
+  });
+}
+
+async function scheduleAllContinuationRetry(generation, continuationId, expected, retryAfterMs) {
+  const retryAt = Date.now() + retryAfterMs;
+  const scheduled = {
+    ...expected,
+    retryAttempts: expected.retryAttempts + 1,
+    retryAt: new Date(retryAt).toISOString()
+  };
+  let retryPersisted = false;
+  try {
+    const result = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
+      await chrome.storage.local.set({ allFeedContinuation: { ...continuation, retryAttempts: scheduled.retryAttempts, retryAt: scheduled.retryAt } });
+      retryPersisted = true;
+      chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt });
+      return { scheduled: true };
+    });
+    return !result.skipped;
+  } catch (e) {
+    const rollbackExpected = retryPersisted ? scheduled : expected;
+    await commitAllContinuationMutation(generation, continuationId, rollbackExpected, async continuation => {
+      await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '' } });
+      await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+    });
+    throw e;
+  }
+}
+
+async function continueAllFeedInternal({ generation, continuationId, cursor, retryAttempts = 0, retryAt = '', fingerprintProbe = null }) {
+  let nextCursor = cursor;
+  const seenCursors = new Set();
+
+  try {
+    for (let page = 1; page < ALL_MAX_PAGES && nextCursor; page++) {
+      const expected = { cursor: nextCursor, retryAttempts, retryAt };
+      if (!await getActiveAllContinuation(generation, continuationId, expected)) return;
+      if (seenCursors.has(nextCursor)) throw new Error('Repeated API cursor');
+      seenCursors.add(nextCursor);
+
+      const url = `${getApiUrl('all')}&cursor=${encodeURIComponent(nextCursor)}`;
+      const response = getV1Page(await fetchItemsPage(url));
+      if (!await getActiveAllContinuation(generation, continuationId, expected)) return;
+
+      const items = response.items.map(normalizeV1Item).filter(Boolean);
+      const persisted = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
+        const result = await persistFetchedItems(items, {
+          notify: false,
+          updateLastItems: false,
+          isCurrent: () => getActiveAllContinuation(generation, continuationId, expected)
+        });
+        if (!result.skipped && response.hasMore) {
+          await chrome.storage.local.set({
+            allFeedContinuation: { ...continuation, cursor: response.nextCursor, retryAttempts: 0, retryAt: '' }
+          });
+        }
+        return result;
+      });
+      if (persisted.skipped) return;
+
+      if (!response.hasMore) {
+        const completed = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
+          await commitSuccessfulItemsPoll({ allFeedContinuation: { ...continuation, active: false, retryAt: '' } });
+          await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+          await updateBadge();
+          return { completed: true };
+        });
+        if (!completed.skipped && fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
+        return;
+      }
+      nextCursor = response.nextCursor;
+      retryAttempts = 0;
+      retryAt = '';
+    }
+
+    const expected = { cursor: nextCursor, retryAttempts, retryAt };
+    if (await getActiveAllContinuation(generation, continuationId, expected)) {
+      await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
+        await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '' }, lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
+        await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+        await updateBadge();
+      });
+    }
+  } catch (e) {
+    const expected = { cursor: nextCursor, retryAttempts, retryAt };
+    if (!await getActiveAllContinuation(generation, continuationId, expected)) return;
+    const status = e.status || e.response?.status;
+    const hasRetryAfter = Boolean(getResponseHeader(e.response, 'Retry-After'));
+    if (status === 429 && hasRetryAfter && retryAttempts < ALL_CONTINUATION_MAX_429_RETRIES) {
+      await scheduleAllContinuationRetry(generation, continuationId, expected, getRetryAfterMs(e.response, 429));
+      return;
+    }
+    console.error('[AI HOT] all feed continuation error:', e);
+    await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
+      await incrementFailCount();
+      await chrome.storage.local.set({ allFeedContinuation: { ...continuation, active: false, retryAt: '' } });
+      await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+    });
+  }
+}
+
+function continueAllFeed(continuation) {
+  void continueAllFeedInternal(continuation)
+    .catch(e => console.error('[AI HOT] all feed continuation failed:', e));
+}
+
+async function resumeAllFeedContinuation() {
+  const { allFeedContinuation = {}, feedMode } = await chrome.storage.local.get(['allFeedContinuation', 'feedMode']);
+  if (normalizeFeedMode(feedMode) !== 'all' || allFeedContinuation.active !== true || !allFeedContinuation.id || !allFeedContinuation.cursor) {
+    await chrome.storage.local.set({ allFeedContinuation: { ...allFeedContinuation, active: false } });
+    await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+    return;
+  }
+  const retryAt = new Date(allFeedContinuation.retryAt || 0).getTime();
+  if (retryAt > Date.now()) {
+    chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: retryAt });
+    return;
+  }
+  continueAllFeed({
+    generation: null,
+    continuationId: allFeedContinuation.id,
+    cursor: allFeedContinuation.cursor,
+    retryAttempts: Number(allFeedContinuation.retryAttempts || 0),
+    retryAt: allFeedContinuation.retryAt || ''
+  });
+}
+
 async function resetAndPollInternal(feedMode) {
   await assertNotInBackoff();
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
@@ -864,28 +1062,50 @@ async function resetAndPollInternal(feedMode) {
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
 
-    const allItems = await fetchItems({ mode: feedMode, sinceTime, cutoff });
+    const mode = normalizeFeedMode(feedMode);
+    const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: mode === 'all' ? 1 : getMaxPages(mode) });
     const discoveredAt = new Date().toISOString();
     const { newEntries: history, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, [], watchRules, watchNotifyState, discoveredAt);
     const nextHistory = history
       .filter(i => isWithinHistoryWindow(i, cutoff))
       .sort((a, b) => getItemTime(b) - getItemTime(a));
 
-    const fingerprintProbe = await probeFingerprint(feedMode).catch(() => null);
+    const fingerprintProbe = startFingerprintProbe(mode);
     const resetData = {
       history: nextHistory,
       lastItems: [...watchItems, ...normalItems].slice(0, 5),
       watchNotifyState: pruneWatchNotifyState(nextHistory, nextWatchNotifyState),
-      feedMode: normalizeFeedMode(feedMode)
+      feedMode: mode
     };
-    if (!allItems.truncated) {
-      await saveFingerprintProbe(fingerprintProbe);
-      await commitSuccessfulItemsPoll(resetData);
+    const nextGeneration = feedModeGeneration + 1;
+    const continuationId = getContinuationId();
+    const continuation = mode === 'all' && allItems.truncated && allItems.nextCursor
+      ? { generation: nextGeneration, continuationId, cursor: allItems.nextCursor, fingerprintProbe }
+      : null;
+    if (continuation) {
+      await chrome.storage.local.set({
+        ...resetData,
+        allFeedContinuation: getActiveAllContinuationStatus(allItems.nextCursor, continuationId),
+        lastCheck: new Date().toISOString(),
+        failCount: 0,
+        nextAllowedPollAt: ''
+      });
+      feedModeGeneration = nextGeneration;
+    } else if (!allItems.truncated) {
+      if (mode !== 'all') await saveFingerprintProbe(await fingerprintProbe);
+      await commitSuccessfulItemsPoll({ ...resetData, allFeedContinuation: { active: false } });
+      feedModeGeneration = nextGeneration;
+      if (mode === 'all') {
+        saveDeferredAllFingerprintProbe(nextGeneration, fingerprintProbe);
+      }
     } else {
-      await chrome.storage.local.set({ ...resetData, lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
+      await chrome.storage.local.set({ ...resetData, allFeedContinuation: { active: false }, lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
+      feedModeGeneration = nextGeneration;
     }
+    await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
     await updateBadge();
     console.log(`[AI HOT] resetAndPoll done, ${nextHistory.length} items from ${allItems.length} fetched`);
+    if (continuation) continueAllFeed(continuation);
   } catch (e) {
     if (e.backoff) throw e;
     console.error(`[AI HOT] resetAndPoll error:`, e);
@@ -913,6 +1133,9 @@ chrome.notifications.onClicked.addListener((notificationId) => runStateMutation(
 }));
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ALL_CONTINUATION_ALARM_NAME) {
+    return runStateMutation(resumeAllFeedContinuation);
+  }
   if (alarm.name === ALARM_NAME) {
     return runStateMutation(async () => {
       const result = await pollForUpdatesInternal();
@@ -953,9 +1176,12 @@ async function handleInstalled(details) {
 chrome.runtime.onInstalled.addListener((details) => runStateMutation(() => handleInstalled(details)));
 
 chrome.runtime.onStartup.addListener(() => runStateMutation(async () => {
+  await recoverAllFeedContinuationStatus();
   await migrateReadAllBefore();
   await setupAlarm();
 }));
+
+void runStateMutation(recoverAllFeedContinuationStatus);
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'configChanged') {
