@@ -31,6 +31,8 @@ let badgeTexts = [];
 let failSetWhen = null;
 let alarmCreateImpl = null;
 let alarmClearImpl = null;
+let canonicalMigrationCommitCount = 0;
+let activeAlarmNames = new Set();
 globalThis.__AIHOT_TEST_PAGE_DELAY_MS = 0;
 
 function assert(condition, message) {
@@ -74,6 +76,7 @@ function resetState(overrides = {}) {
   failSetWhen = null;
   alarmCreateImpl = null;
   alarmClearImpl = null;
+  activeAlarmNames = new Set();
 }
 
 function v1Item(overrides = {}) {
@@ -133,6 +136,7 @@ globalThis.chrome = {
       },
       set: (values) => {
         if (failSetWhen && failSetWhen(values)) return Promise.reject(new Error('mock storage set failed'));
+        if (Object.prototype.hasOwnProperty.call(values, 'canonicalHistoryVersion')) canonicalMigrationCommitCount++;
         Object.assign(storageData, values);
         return Promise.resolve();
       }
@@ -155,10 +159,12 @@ globalThis.chrome = {
   alarms: {
     create: (name, info) => {
       alarmCreateCalls.push({ name, info });
+      activeAlarmNames.add(name);
       if (alarmCreateImpl) return alarmCreateImpl(name, info);
     },
     clear: (name) => {
       alarmClearCalls.push(name);
+      activeAlarmNames.delete(name);
       return alarmClearImpl ? alarmClearImpl() : Promise.resolve();
     },
     onAlarm: { addListener: (handler) => { onAlarmHandler = handler; } }
@@ -187,11 +193,26 @@ function sendMessageWithTimeout(message, timeoutMs = 50) {
 
 async function runTests() {
   console.log('\n[canonical history 一次性迁移]');
-  const initialMigrationCompleted = await waitFor(() => storageData.canonicalHistoryVersion === 1, 100);
-  assert(initialMigrationCompleted && storageData.history[0]?.selected === true, '冷 worker 首次进入时把 legacy selected history 提升为 canonical selected membership');
-  storageData.history[0].selected = false;
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('cold-selected', 'cold-all')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'cold-entry-item' })])) });
+  const coldAlarm = onAlarmHandler({ name: 'aihot-poll' });
+  const coldSourceSwitch = sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const [, coldSourceResult] = await Promise.all([coldAlarm, coldSourceSwitch]);
+  const initialMigrationCompleted = storageData.canonicalHistoryVersion === 1;
+  const migratedLegacySelected = storageData.history.find(item => item.id === 'legacy-selected-before-migration');
+  assert(initialMigrationCompleted && migratedLegacySelected?.selected === true, '冷 worker 首次进入时把 legacy selected history 提升为 canonical selected membership');
+  assert(coldSourceResult.ok === true && canonicalMigrationCommitCount === 1, 'startup 初始化前到达的 alarm/source-switch 共用同一次 migration barrier');
+  migratedLegacySelected.selected = false;
   await onStartupHandler();
-  assert(storageData.canonicalHistoryVersion === 1 && storageData.history[0]?.selected === false, 'canonical migration marker 存在时不会再次批量提升 membership');
+  assert(storageData.canonicalHistoryVersion === 1 && migratedLegacySelected.selected === false && canonicalMigrationCommitCount === 1, 'canonical migration marker 存在时不会再次批量提升 membership');
+  const allModeMigration = typeof backgroundApi.migrateCanonicalHistoryState === 'function'
+    ? backgroundApi.migrateCanonicalHistoryState({
+      feedMode: 'all',
+      history: [{ id: 'all-explicit', selected: true }, { id: 'all-missing' }, { id: 'all-false', selected: false }]
+    })
+    : null;
+  assert(allModeMigration?.history[0]?.selected === true && allModeMigration?.history[1]?.selected === false && allModeMigration?.history[2]?.selected === false && allModeMigration?.canonicalHistoryVersion === 1, 'marker 缺失的 all-mode migration 仅规范化显式 membership');
   assert(backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 0, truncated: false }, 'selected', true) === true, '能力开启时仅正常完整 selected 快照允许按缺席降级');
   assert(backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 1, truncated: false }, 'selected', true) === false && backgroundApi.isCompleteSelectedSnapshot({ termination: 'page-bound', skippedItems: 0, truncated: true }, 'selected', true) === false && backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 0, truncated: false }, 'selected', false) === false, '无效条目、截断或生产能力关闭时禁止 selected 缺席降级');
 
@@ -916,6 +937,63 @@ async function runTests() {
   await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
   assert(storageData.history.find(item => item.id === 'canonical-alias-id')?.discoveredAt === canonicalAliasDiscovery, '次级别名命中 canonical 记录时旧 discovery 索引不能覆盖 canonical 时间');
 
+  const uniqueLegacyAliasDiscovery = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    canonicalHistoryVersion: 1,
+    allFeedContinuation: {
+      active: true,
+      id: 'unique-legacy-alias-continuation',
+      cursor: 'unique-legacy-alias-cursor',
+      retryAttempts: 0,
+      retryAt: '',
+      discoveredAtByAlias: { 'permalink:https://aihot.virxact.com/items/unique-legacy-alias': uniqueLegacyAliasDiscovery }
+    }
+  });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({
+      id: 'unique-legacy-alias-item',
+      links: {
+        original: 'https://example.com/unique-legacy-alias',
+        aihot: 'https://aihot.virxact.com/items/unique-legacy-alias'
+      }
+    })]))
+  });
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
+  assert(storageData.history.find(item => item.id === 'unique-legacy-alias-item')?.discoveredAt === uniqueLegacyAliasDiscovery, 'canonical 缺失时唯一 permalink/url legacy alias 可作为 discovery fallback');
+
+  const ambiguousFallbackStartedAt = Date.now();
+  resetState({
+    feedMode: 'all',
+    canonicalHistoryVersion: 1,
+    allFeedContinuation: {
+      active: true,
+      id: 'ambiguous-legacy-alias-continuation',
+      cursor: 'ambiguous-legacy-alias-cursor',
+      retryAttempts: 0,
+      retryAt: '',
+      discoveredAtByAlias: {
+        'permalink:https://aihot.virxact.com/items/ambiguous-legacy-alias': new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString(),
+        'url:https://example.com/ambiguous-legacy-alias': new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString()
+      }
+    }
+  });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({
+      id: 'ambiguous-legacy-alias-item',
+      links: {
+        original: 'https://example.com/ambiguous-legacy-alias',
+        aihot: 'https://aihot.virxact.com/items/ambiguous-legacy-alias'
+      }
+    })]))
+  });
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
+  assert(new Date(storageData.history.find(item => item.id === 'ambiguous-legacy-alias-item')?.discoveredAt || 0).getTime() >= ambiguousFallbackStartedAt, '多个 legacy alias 候选有歧义时不回退 discovery');
+
   const denseContinuationHistory = Array.from({ length: 2363 }, (_, index) => ({
     id: `dense-continuation-${index + 1}`,
     title: `续拉历史 ${index + 1}`,
@@ -1505,7 +1583,71 @@ async function runTests() {
   assert(storageData.history.length === 2364 && storageData.history.some(item => item.id === 'latest-wins-2363') && storageData.history.find(item => item.id === 'latest-wins-1')?.selected === true, 'selected 切换保留 2363 条 canonical history 且不按缺席降级 membership');
   releaseOlderAll();
   await Promise.all([olderAllSwitch, latestSelectedSwitch]);
-  assert(olderAllResult.ok === true && storageData.feedMode === 'selected' && !storageData.history.some(item => item.id === 'stale-older-all'), '较旧 all 响应后到时不能覆盖最新 selected 提交');
+  assert(olderAllResult.ok === false && olderAllResult.stale === true && storageData.feedMode === 'selected' && !storageData.history.some(item => item.id === 'stale-older-all'), '较旧 all 响应后到时明确返回 stale，不能误报 durable success');
+
+  console.log('\n[selected authoritative snapshot membership]');
+  const selectedSnapshotHistory = () => [{
+    id: 'snapshot-present',
+    url: 'https://example.com/snapshot-present',
+    permalink: 'https://aihot.virxact.com/items/snapshot-present',
+    time: new Date().toISOString(),
+    discoveredAt: new Date().toISOString(),
+    selected: true
+  }, {
+    id: 'snapshot-absent',
+    url: 'https://example.com/snapshot-absent',
+    permalink: 'https://aihot.virxact.com/items/snapshot-absent',
+    time: new Date().toISOString(),
+    discoveredAt: new Date().toISOString(),
+    selected: true
+  }];
+  globalThis.__AIHOT_TEST_SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT = true;
+  resetState({ feedMode: 'all', canonicalHistoryVersion: 1, history: selectedSnapshotHistory() });
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-authoritative-selected', 'fp-all')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'snapshot-present' })])) });
+  const authoritativeSelectedResult = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  assert(authoritativeSelectedResult.ok === true && storageData.history.find(item => item.id === 'snapshot-absent')?.selected === false, '能力开启时 authoritative complete selected 快照通过真实 upsert 路径按缺席降级');
+
+  resetState({ feedMode: 'all', canonicalHistoryVersion: 1, history: selectedSnapshotHistory() });
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-skipped-selected', 'fp-all')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'snapshot-present' }), {}])) });
+  const skippedSelectedResult = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  assert(skippedSelectedResult.ok === true && storageData.history.find(item => item.id === 'snapshot-absent')?.selected === true, '包含跳过无效项的 selected 快照不按缺席降级');
+
+  const invalidSelectedCases = [{
+    name: 'missing cursor',
+    fetch: (url) => url.includes('/api/public/fingerprint')
+      ? legacyFingerprintResponse('fp-missing-cursor', 'fp-all')
+      : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'snapshot-present' })], { hasMore: true, nextCursor: null })) })
+  }, {
+    name: 'invalid cursor',
+    fetch: (url) => url.includes('/api/public/fingerprint')
+      ? legacyFingerprintResponse('fp-invalid-cursor', 'fp-all')
+      : Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [v1Item({ id: 'snapshot-present' })], page: { hasMore: true, nextCursor: 42 } }) })
+  }, {
+    name: 'repeated cursor',
+    fetch: (url) => url.includes('/api/public/fingerprint')
+      ? legacyFingerprintResponse('fp-repeated-cursor', 'fp-all')
+      : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'snapshot-present' })], { hasMore: true, nextCursor: 'same-selected-cursor' })) })
+  }, {
+    name: 'malformed container',
+    fetch: (url) => url.includes('/api/public/fingerprint')
+      ? legacyFingerprintResponse('fp-malformed-selected', 'fp-all')
+      : Promise.resolve({ ok: true, json: () => Promise.resolve({ items: null, page: { hasMore: false, nextCursor: null } }) })
+  }, {
+    name: 'rejected page',
+    fetch: (url) => url.includes('/api/public/fingerprint')
+      ? legacyFingerprintResponse('fp-rejected-selected', 'fp-all')
+      : Promise.resolve({ ok: false, status: 500, headers: { get: () => '' } })
+  }];
+  for (const invalidSelectedCase of invalidSelectedCases) {
+    resetState({ feedMode: 'all', canonicalHistoryVersion: 1, history: selectedSnapshotHistory() });
+    fetchImpl = invalidSelectedCase.fetch;
+    const invalidSelectedResult = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+    assert(invalidSelectedResult.ok === false && storageData.feedMode === 'all' && storageData.history.find(item => item.id === 'snapshot-absent')?.selected === true, `${invalidSelectedCase.name} selected source-switch 失败且不按缺席降级`);
+  }
 
   resetState({
     feedMode: 'all',
@@ -1524,6 +1666,7 @@ async function runTests() {
   const selectedTruncatedResult = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
   assert(selectedTruncatedResult.ok === true && selectedTruncatedPage === 3 && storageData.feedMode === 'selected', 'selected 达到页数上限时仍成功提交返回项');
   assert(storageData.history.find(item => item.id === 'selected-before-truncation')?.selected === true && !storageData.lastItemsPollAt, 'selected 截断快照不按缺席降级且不标记完整 items poll');
+  delete globalThis.__AIHOT_TEST_SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT;
 
   const preservedSwitchHistory = [{ id: 'preserved-storage-failure', url: 'https://example.com/preserved-storage-failure', time: new Date().toISOString(), discoveredAt: new Date().toISOString() }];
   resetState({
@@ -1532,6 +1675,7 @@ async function runTests() {
     history: preservedSwitchHistory,
     allFeedContinuation: { active: true, id: 'preserved-storage-continuation', cursor: 'preserved-storage-cursor', retryAttempts: 0, retryAt: '' }
   });
+  await chrome.alarms.create('aihot-all-continuation', { when: Date.now() + 60 * 1000 });
   alarmClearCalls = [];
   failSetWhen = values => values.feedMode === 'selected';
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
@@ -1539,7 +1683,7 @@ async function runTests() {
     : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'must-not-commit-storage-failure' })])) });
   const storageFailureSwitch = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
   assert(storageFailureSwitch.ok === false && storageData.feedMode === 'all' && storageData.history === preservedSwitchHistory, '切源最终 storage 提交失败时保留原 mode 与 canonical history');
-  assert(storageData.allFeedContinuation?.id === 'preserved-storage-continuation' && storageData.allFeedContinuation?.active === true && !alarmClearCalls.includes('aihot-all-continuation'), '切源 storage 失败时原 continuation 与 alarm 继续有效');
+  assert(storageData.allFeedContinuation?.id === 'preserved-storage-continuation' && storageData.allFeedContinuation?.active === true && activeAlarmNames.has('aihot-all-continuation') && !alarmClearCalls.includes('aihot-all-continuation'), '切源 storage 失败时已建立的 continuation alarm 继续有效');
 
   console.log('\n[自动轮询-fingerprint 未变化时跳过 items]');
   resetState({

@@ -40,17 +40,23 @@ function runStateMutation(task) {
   return operation;
 }
 
+function migrateCanonicalHistoryState(data = {}) {
+  const mode = normalizeFeedMode(data.feedMode);
+  return {
+    history: (data.history || []).map(item => ({
+      ...item,
+      selected: mode === 'selected' ? true : item?.selected === true
+    })),
+    canonicalHistoryVersion: CANONICAL_HISTORY_VERSION
+  };
+}
+
 function ensureCanonicalHistoryMigration() {
   if (!canonicalHistoryMigrationPromise) {
     canonicalHistoryMigrationPromise = runStateMutation(async () => {
       const data = await chrome.storage.local.get(['canonicalHistoryVersion', 'history', 'feedMode']);
       if (Number(data.canonicalHistoryVersion || 0) >= CANONICAL_HISTORY_VERSION) return;
-      const mode = normalizeFeedMode(data.feedMode);
-      const history = (data.history || []).map(item => ({
-        ...item,
-        selected: mode === 'selected' ? true : item?.selected === true
-      }));
-      await chrome.storage.local.set({ history, canonicalHistoryVersion: CANONICAL_HISTORY_VERSION });
+      await chrome.storage.local.set(migrateCanonicalHistoryState(data));
     });
   }
   return canonicalHistoryMigrationPromise;
@@ -157,9 +163,14 @@ function getKnownDiscoveredAt(item, discoveredAtByAlias, fallback) {
   return known || fallback;
 }
 
-function getLegacyExactIdDiscoveredAt(item, discoveredAtByAlias, fallback) {
-  const known = item?.id ? discoveredAtByAlias?.[`id:${item.id}`] : '';
-  return known && Number.isFinite(new Date(known).getTime()) ? known : fallback;
+function getLegacyDiscoveredAtFallback(item, discoveredAtByAlias, fallback) {
+  const exactId = item?.id ? discoveredAtByAlias?.[`id:${item.id}`] : '';
+  if (exactId && Number.isFinite(new Date(exactId).getTime())) return exactId;
+  const aliasMatches = getDiscoveredAtAliases(item)
+    .filter(alias => !alias.startsWith('id:'))
+    .map(alias => discoveredAtByAlias?.[alias])
+    .filter(value => value && Number.isFinite(new Date(value).getTime()));
+  return aliasMatches.length === 1 ? aliasMatches[0] : fallback;
 }
 
 function isSafetyItemsPollDue(lastItemsPollAt) {
@@ -333,6 +344,10 @@ function isCompleteSelectedSnapshot(items, mode, supportsConsistentSnapshot = SU
     items?.termination === 'complete' &&
     Number(items?.skippedItems || 0) === 0 &&
     items?.truncated !== true;
+}
+
+function supportsConsistentSelectedSnapshot() {
+  return SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT || globalThis.__AIHOT_TEST_SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT === true;
 }
 
 function splitWatchKeywords(value) {
@@ -972,7 +987,7 @@ async function persistFetchedItems(items, options = {}) {
       return earliestIso([match.index, ...match.legacyIndexes]
         .map(index => history[index]?.discoveredAt)) || discoveredAt;
     }
-    return getLegacyExactIdDiscoveredAt(item, options.discoveredAtByAlias, discoveredAt);
+    return getLegacyDiscoveredAtFallback(item, options.discoveredAtByAlias, discoveredAt);
   };
   const retainUnmatchedWatchState = options.retainUnmatchedWatchState === undefined
     ? normalizeFeedMode(feedMode) === 'all' && allFeedContinuation.active === true
@@ -1398,7 +1413,7 @@ async function resetAndPollInternal(feedMode, generation) {
         discoveredAt,
         matchedAt: discoveredAt,
         historyDays: committedHistoryDays,
-        completeSelectedSnapshot: isCompleteSelectedSnapshot(allItems, mode)
+        completeSelectedSnapshot: isCompleteSelectedSnapshot(allItems, mode, supportsConsistentSelectedSnapshot())
       });
       const watchItems = canonical.inserted.filter(item => item.watchMatched === true);
       const normalItems = canonical.inserted.filter(item => item.watchMatched !== true);
@@ -1557,7 +1572,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === 'feedModeChanged') {
     resetAndPoll(msg.feedMode)
-      .then(() => sendResponse({ ok: true }))
+      .then(result => sendResponse(result?.stale ? { ok: false, stale: true } : { ok: true }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
@@ -1587,5 +1602,5 @@ chrome.storage.onChanged.addListener((changes) => {
 });
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = { isCompleteSelectedSnapshot };
+  module.exports = { isCompleteSelectedSnapshot, migrateCanonicalHistoryState };
 }
