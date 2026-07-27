@@ -1,3 +1,8 @@
+const feedState = typeof importScripts === 'function'
+  ? (importScripts('feed-state.js'), globalThis.FeedState)
+  : require('./feed-state.js');
+const { normalizeFeedMode, projectHistory } = feedState;
+
 const API_BASE = 'https://aihot.virxact.com/api/v1/items';
 const API_WINDOW = '7d';
 const API_LIMIT = 100;
@@ -642,10 +647,6 @@ if (chrome.notifications.onClosed && chrome.notifications.onClosed.addListener) 
 }
 
 
-function normalizeFeedMode(mode) {
-  return mode === 'all' ? 'all' : 'selected';
-}
-
 function getReadAllBefore(data) {
   return [data.readAllBefore, ...Object.values(data.readAllBeforeByMode || {})]
     .filter(value => value && Number.isFinite(new Date(value).getTime()))
@@ -929,11 +930,12 @@ function manualPoll() {
 
 async function updateBadge() {
   const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
-  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS } = data;
+  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = data;
   const readIdSet = new Set(readIds);
   const readAllBefore = getReadAllBefore(data);
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
-  const unread = history.filter(i => {
+  const projectedHistory = projectHistory(history, feedMode);
+  const unread = projectedHistory.filter(i => {
     if (!isWithinHistoryWindow(i, cutoff)) return false;
     if (getItemAliases(i).some(alias => readIdSet.has(alias))) return false;
     if (readAllBefore && getUnreadReferenceTime(i) <= new Date(readAllBefore).getTime()) return false;

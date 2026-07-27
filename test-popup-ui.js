@@ -79,6 +79,7 @@ function assertThemeTokenContrast(themeName, tokenName, backgroundNames, minimum
 }
 
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
+const backgroundJs = fs.readFileSync('background.js', 'utf8');
 const popupLogJs = fs.readFileSync('popup-log.js', 'utf8');
 const popupJs = fs.readFileSync('popup.js', 'utf8');
 const popupReliabilityJs = fs.readFileSync('popup-reliability.js', 'utf8');
@@ -545,6 +546,7 @@ const localScripts = [...popupHtml.matchAll(/<script\s+src="([^"]+\.js)"><\/scri
 localScripts.forEach(script => {
   assert(new RegExp(`(^|\\s)${script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|\\\\|$)`, 'm').test(packSh), `打包包含 popup 引用脚本 ${script}`);
 });
+assert(/(^|\s)feed-state\.js(\s|\\|$)/m.test(packSh), '打包包含共享内容源投影模块');
 
 console.log('\n[README]');
 assert(/支持四套主题（墨夜\/暗森\/铬墨\/石青）/.test(readme), 'README 描述四套主题');
@@ -563,7 +565,13 @@ assert(/const promoThemes = \['dark', 'green-dark', 'chrome-dark', 'slate-night'
 assert(/const marqueeThemes = \['dark', 'green-dark', 'chrome-dark', 'slate-night'\]/.test(screenshotMjs), '顶部宣传图块包含四套主题');
 
 console.log('\n[默认内容源]');
-assert(/function\s+normalizeFeedMode\(mode\)\s*{[\s\S]*?return\s+mode\s+===\s+'all'\s*\?\s*'all'\s*:\s*'selected';[\s\S]*?}/.test(popupJs), 'popup 未设置内容源默认精选');
+const feedStateScriptIndex = popupHtml.indexOf('<script src="feed-state.js"></script>');
+const popupReliabilityScriptIndex = popupHtml.indexOf('<script src="popup-reliability.js"></script>');
+const popupScriptIndex = popupHtml.indexOf('<script src="popup.js"></script>');
+assert(feedStateScriptIndex >= 0 && feedStateScriptIndex < popupReliabilityScriptIndex && feedStateScriptIndex < popupScriptIndex, 'popup 在可靠性与应用脚本前加载共享内容源投影模块');
+assert(/const\s*{\s*normalizeFeedMode,\s*projectHistory\s*}\s*=\s*window\.FeedState/.test(popupJs), 'popup 使用共享内容源投影 contract');
+assert(/const\s+rawHistory\s*=\s*projectHistory\(data\.history\s*\|\|\s*\[\],\s*data\.feedMode\)/.test(popupJs), 'popup 渲染前按当前内容源投影 canonical history');
+assert(/projectHistory\(history,\s*feedMode\)/.test(backgroundJs), 'background badge 按当前内容源投影 canonical history');
 assert(/feedModeEl\.value\s*=\s*normalizeFeedMode\(data\.feedMode\)/.test(popupJs), '配置加载使用统一内容源归一化');
 
 console.log('\n[可访问性]');

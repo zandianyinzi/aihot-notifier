@@ -5,6 +5,7 @@ rm -f aihot-notifier.zip
 zip -r aihot-notifier.zip \
   manifest.json \
   background.js \
+  feed-state.js \
   popup.html \
   popup-log.js \
   popup-boot.js \

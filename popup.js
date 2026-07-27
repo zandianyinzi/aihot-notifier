@@ -40,6 +40,7 @@ const watchKeywordsEl = document.getElementById('watchKeywords');
 const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
+const { normalizeFeedMode, projectHistory } = window.FeedState;
 const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController } = popupReliability;
 
 const CATEGORY_MAP = {
@@ -413,10 +414,6 @@ function normalizeOpenPositionMode(mode) {
   return VALID_OPEN_POSITION_MODES.has(mode) ? mode : 'unread';
 }
 
-function normalizeFeedMode(mode) {
-  return mode === 'all' ? 'all' : 'selected';
-}
-
 function getScrollContext(data) {
   return {
     feedMode: normalizeFeedMode(data.feedMode),
@@ -631,7 +628,7 @@ function renderHistory(data, options = {}) {
   const shouldUpdateBadge = options.updateBadge !== false;
   const skipUnchanged = options.skipUnchanged !== false;
   const shouldApplyInitialPosition = options.applyInitialPosition === true;
-  const rawHistory = data.history || [];
+  const rawHistory = projectHistory(data.history || [], data.feedMode);
   const readIds = data.readIds || [];
   const readAllBefore = getReadAllBefore(data);
   const historyDays = data.historyDays || DEFAULT_HISTORY_DAYS;
@@ -745,12 +742,12 @@ function updateBadgeFromData(history, readIdSet, readAllBeforeTime) {
 
 async function updateBadge() {
   const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
-  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS } = data;
+  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = data;
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const readIdSet = new Set(readIds);
   const readAllBefore = getReadAllBefore(data);
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
-  const filtered = history.filter(i => isWithinHistoryWindow(i, cutoff));
+  const filtered = projectHistory(history, feedMode).filter(i => isWithinHistoryWindow(i, cutoff));
   updateBadgeFromData(filtered, readIdSet, readAllBeforeTime);
 }
 

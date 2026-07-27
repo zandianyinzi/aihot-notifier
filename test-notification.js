@@ -59,6 +59,7 @@ function v1Item(overrides = {}) {
     },
     category: 'industry',
     summary: 'v1 摘要',
+    selected: true,
     publishedAt: new Date().toISOString(),
     ...item
   };
