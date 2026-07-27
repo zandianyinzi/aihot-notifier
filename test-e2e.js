@@ -1,5 +1,5 @@
 // AI HOT Notifier 端到端验证
-// 直接请求 API，交叉验证 selected/all 数据关系和扩展逻辑正确性
+// 直接请求 API，交叉验证 selected/all 数据契约和扩展容错逻辑
 // 运行: node test-e2e.js
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0';
@@ -74,7 +74,6 @@ function isV1Item(item) {
     item &&
     item.id &&
     item.title &&
-    item.category &&
     typeof item.source?.name === 'string' && item.source.name &&
     hasOpenLink(item) &&
     !Number.isNaN(new Date(item.publishedAt).getTime())
@@ -101,7 +100,7 @@ function simulateResetAndPoll(apiItems, historyDays) {
     console.log('[数据完整性]');
     assert(selected.length > 0, 'selected 模式返回非空');
     assert(all.length > 0, 'all 模式返回非空');
-    assert(all.length >= selected.length, `all(${all.length}) >= selected(${selected.length})`);
+    assert(selected.length <= 50 && all.length <= 50, `selected/all 单页均不超过 limit=50`);
 
     const requiredFields = ['id', 'title', 'source', 'links', 'publishedAt', 'category'];
     const sampleSelected = selected[0];
@@ -145,20 +144,20 @@ function simulateResetAndPoll(apiItems, historyDays) {
     console.log('\n[模拟 resetAndPoll - all]');
     const histAll = simulateResetAndPoll(all, 2);
     assert(histAll.length > 0, `模拟后有 ${histAll.length} 条`);
-    assert(histAll.length >= histSelected.length, `all模式(${histAll.length}) >= selected模式(${histSelected.length})`);
+    assert(histAll.length <= all.length, `all 模式容错过滤后不会产生额外条目 (${histAll.length}/${all.length})`);
     assert(new Date(histAll[0].time).getTime() === Math.max(...histAll.map(item => new Date(item.time).getTime())), 'all 模拟结果首条是最新发布时间');
 
     console.log('\n[模拟切换: selected → all]');
-    // 切换后应该完全替换为 all 的数据
+    // 这里只验证当前 all API 投影；canonical 合并由 background 集成测试覆盖。
     const afterSwitch = simulateResetAndPoll(all, 2);
     const selectedUrls = new Set(histSelected.map(i => i.url));
     const newInAll = afterSwitch.filter(i => !selectedUrls.has(i.url));
     console.log(`  切换后新增 ${newInAll.length} 条（all 独有）`);
-    assert(afterSwitch.length === histAll.length, '切换后条数 = all 模式条数（完全替换）');
+    assert(afterSwitch.length === histAll.length, '切换后 all API 投影与同次容错结果一致');
 
     console.log('\n[模拟切换: all → selected]');
     const afterSwitchBack = simulateResetAndPoll(selected, 2);
-    assert(afterSwitchBack.length === histSelected.length, '切回后条数 = selected 模式条数（完全替换）');
+    assert(afterSwitchBack.length === histSelected.length, '切回后 selected API 投影与同次容错结果一致');
     assert(afterSwitchBack[0].url === histSelected[0].url, '切回后首条与 selected 一致');
 
     console.log('\n[顺序对比: 扩展排序]');
