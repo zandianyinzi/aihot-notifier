@@ -28,9 +28,13 @@ let notificationCreateIds = [];
 let alarmCreateCalls = [];
 let alarmClearCalls = [];
 let badgeTexts = [];
-let failSetWhen = null;
+let canonicalMigrationFailuresRemaining = 1;
+let failSetWhen = values => Object.prototype.hasOwnProperty.call(values, 'canonicalHistoryVersion') && canonicalMigrationFailuresRemaining-- > 0;
+let storageSetImpl = null;
 let alarmCreateImpl = null;
 let alarmClearImpl = null;
+let badgeTextImpl = null;
+let badgeBackgroundImpl = null;
 let canonicalMigrationCommitCount = 0;
 let activeAlarmNames = new Set();
 globalThis.__AIHOT_TEST_PAGE_DELAY_MS = 0;
@@ -74,8 +78,11 @@ function resetState(overrides = {}) {
   alarmClearCalls = [];
   badgeTexts = [];
   failSetWhen = null;
+  storageSetImpl = null;
   alarmCreateImpl = null;
   alarmClearImpl = null;
+  badgeTextImpl = null;
+  badgeBackgroundImpl = null;
   activeAlarmNames = new Set();
 }
 
@@ -136,6 +143,7 @@ globalThis.chrome = {
       },
       set: (values) => {
         if (failSetWhen && failSetWhen(values)) return Promise.reject(new Error('mock storage set failed'));
+        if (storageSetImpl) return storageSetImpl(values);
         if (Object.prototype.hasOwnProperty.call(values, 'canonicalHistoryVersion')) canonicalMigrationCommitCount++;
         Object.assign(storageData, values);
         return Promise.resolve();
@@ -152,8 +160,13 @@ globalThis.chrome = {
     onClosed: { addListener: (handler) => { onClosedHandler = handler; } }
   },
   action: {
-    setBadgeText: ({ text }) => { badgeTexts.push(text); },
-    setBadgeBackgroundColor: () => {}
+    setBadgeText: ({ text }) => {
+      badgeTexts.push(text);
+      if (badgeTextImpl) return badgeTextImpl(text);
+    },
+    setBadgeBackgroundColor: ({ color }) => {
+      if (badgeBackgroundImpl) return badgeBackgroundImpl(color);
+    }
   },
   tabs: { create: (options) => { openedTabs.push(options.url); } },
   alarms: {
@@ -164,8 +177,11 @@ globalThis.chrome = {
     },
     clear: (name) => {
       alarmClearCalls.push(name);
-      activeAlarmNames.delete(name);
-      return alarmClearImpl ? alarmClearImpl() : Promise.resolve();
+      const result = alarmClearImpl ? alarmClearImpl(name) : Promise.resolve();
+      return Promise.resolve(result).then(value => {
+        activeAlarmNames.delete(name);
+        return value;
+      });
     },
     onAlarm: { addListener: (handler) => { onAlarmHandler = handler; } }
   },
@@ -193,6 +209,16 @@ function sendMessageWithTimeout(message, timeoutMs = 50) {
 
 async function runTests() {
   console.log('\n[canonical history 一次性迁移]');
+  const failedMigration = await sendMessage({ type: 'configChanged' });
+  failSetWhen = null;
+  const retriedMigration = await sendMessage({ type: 'configChanged' });
+  assert(failedMigration.ok === false && retriedMigration.ok === true && storageData.canonicalHistoryVersion === 1 && canonicalMigrationCommitCount === 1, 'canonical migration 首次写入失败后清除 rejection cache 并在下一次入口重试成功');
+  if (!retriedMigration.ok) {
+    console.log(`\n${'='.repeat(40)}`);
+    console.log(`结果: ${passed} passed, ${failed} failed`);
+    process.exit(1);
+    return;
+  }
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
     ? legacyFingerprintResponse('cold-selected', 'cold-all')
     : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'cold-entry-item' })])) });
@@ -638,6 +664,55 @@ async function runTests() {
   await onAlarmHandler({ name: 'aihot-all-continuation' });
   await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
   assert(!storageData.history.some(item => item.id === 'atomic-page-item'), '续拉 cursor 提交失败时不单独提交页面 history');
+
+  resetState({
+    feedMode: 'all',
+    canonicalHistoryVersion: 1,
+    allFeedContinuation: { active: true, id: 'partial-success-continuation', cursor: 'partial-success-cursor', retryAttempts: 0, retryAt: '' }
+  });
+  let partialSuccessNextStarted = false;
+  let redundantContinuationSetFailures = 0;
+  failSetWhen = values => {
+    const redundantSet = Object.keys(values).length === 1 && Object.prototype.hasOwnProperty.call(values, 'watchNotifyState');
+    if (redundantSet) redundantContinuationSetFailures++;
+    return redundantSet;
+  };
+  fetchImpl = (url) => {
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'partial-success-next') {
+      partialSuccessNextStarted = true;
+      return new Promise(() => {});
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: 'partial-success-item' })], { hasMore: true, nextCursor: 'partial-success-next' }))
+    });
+  };
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const partialSuccessContinued = await waitFor(() => partialSuccessNextStarted, 100);
+  assert(partialSuccessContinued && redundantContinuationSetFailures === 0 && storageData.history.some(item => item.id === 'partial-success-item'), '续拉原子提交后不再执行可失败的重复 storage 写，已推进 cursor 继续运行');
+
+  resetState({
+    feedMode: 'all',
+    canonicalHistoryVersion: 1,
+    allFeedContinuation: { active: true, id: 'badge-failure-continuation', cursor: 'badge-failure-cursor', retryAttempts: 0, retryAt: '' }
+  });
+  let badgeFailureNextStarted = false;
+  badgeTextImpl = () => Promise.reject(new Error('mock continuation badge failed'));
+  fetchImpl = (url) => {
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'badge-failure-next') {
+      badgeFailureNextStarted = true;
+      return new Promise(() => {});
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: 'badge-failure-item' })], { hasMore: true, nextCursor: 'badge-failure-next' }))
+    });
+  };
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const badgeFailureContinued = await waitFor(() => badgeFailureNextStarted, 100);
+  assert(badgeFailureContinued && storageData.allFeedContinuation?.cursor === 'badge-failure-next', '续拉页面已提交后 badge 失败不搁置已推进的 cursor');
 
   const expiredContinuationTime = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
   resetState({
@@ -1585,6 +1660,66 @@ async function runTests() {
   await Promise.all([olderAllSwitch, latestSelectedSwitch]);
   assert(olderAllResult.ok === false && olderAllResult.stale === true && storageData.feedMode === 'selected' && !storageData.history.some(item => item.id === 'stale-older-all'), '较旧 all 响应后到时明确返回 stale，不能误报 durable success');
 
+  resetState({ feedMode: 'selected', canonicalHistoryVersion: 1 });
+  let releaseDelayedAllCommit;
+  let delayedAllCommitStarted = false;
+  storageSetImpl = values => {
+    if (values.feedMode === 'all' && !delayedAllCommitStarted) {
+      delayedAllCommitStarted = true;
+      return new Promise(resolve => {
+        releaseDelayedAllCommit = () => {
+          Object.assign(storageData, values);
+          resolve();
+        };
+      });
+    }
+    Object.assign(storageData, values);
+    return Promise.resolve();
+  };
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-delayed-selected', 'fp-delayed-all');
+    const mode = new URL(url).searchParams.get('mode');
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: `${mode}-delayed-commit-item` })])) });
+  };
+  let delayedAllResult;
+  let delayedSelectedResult;
+  const delayedAllSwitch = sendMessage({ type: 'feedModeChanged', feedMode: 'all' }).then(result => { delayedAllResult = result; return result; });
+  assert(await waitFor(() => delayedAllCommitStarted), '较旧 all 已进入延迟的最终 storage 提交');
+  const delayedSelectedSwitch = sendMessage({ type: 'feedModeChanged', feedMode: 'selected' }).then(result => { delayedSelectedResult = result; return result; });
+  releaseDelayedAllCommit();
+  await Promise.all([delayedAllSwitch, delayedSelectedSwitch]);
+  assert(delayedAllResult.ok === false && delayedAllResult.stale === true && delayedSelectedResult.ok === true && storageData.feedMode === 'selected' && storageData.history.some(item => item.id === 'selected-delayed-commit-item'), '最终 storage await 期间出现更新切源意图时旧提交返回 stale，最终 durable 状态属于最新意图');
+
+  for (const postCommitFailure of ['alarm-clear', 'badge']) {
+    resetState({ feedMode: 'selected', canonicalHistoryVersion: 1 });
+    let postCommitCursorStarted = false;
+    if (postCommitFailure === 'alarm-clear') {
+      alarmClearImpl = name => name === 'aihot-all-continuation'
+        ? Promise.reject(new Error('mock post-commit alarm clear failed'))
+        : Promise.resolve();
+    } else {
+      badgeTextImpl = () => Promise.reject(new Error('mock post-commit badge failed'));
+    }
+    fetchImpl = (url) => {
+      if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-post-commit-selected', `fp-post-commit-${postCommitFailure}`);
+      const cursor = new URL(url).searchParams.get('cursor');
+      if (cursor === `post-commit-${postCommitFailure}-cursor`) {
+        postCommitCursorStarted = true;
+        return new Promise(() => {});
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(v1Page([v1Item({ id: `post-commit-${postCommitFailure}-first` })], {
+          hasMore: true,
+          nextCursor: `post-commit-${postCommitFailure}-cursor`
+        }))
+      });
+    };
+    const postCommitResult = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+    const postCommitContinuationStarted = await waitFor(() => postCommitCursorStarted, 100);
+    assert(postCommitResult.ok === true && storageData.feedMode === 'all' && storageData.allFeedContinuation?.active === true && postCommitContinuationStarted && alarmCreateCalls.some(call => call.name === 'aihot-all-continuation'), `切源 durable 提交后 ${postCommitFailure} 失败仍报告成功并启动 alarm-backed continuation`);
+  }
+
   console.log('\n[selected authoritative snapshot membership]');
   const selectedSnapshotHistory = () => [{
     id: 'snapshot-present',
@@ -1601,13 +1736,12 @@ async function runTests() {
     discoveredAt: new Date().toISOString(),
     selected: true
   }];
-  globalThis.__AIHOT_TEST_SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT = true;
   resetState({ feedMode: 'all', canonicalHistoryVersion: 1, history: selectedSnapshotHistory() });
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
     ? legacyFingerprintResponse('fp-authoritative-selected', 'fp-all')
     : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'snapshot-present' })])) });
-  const authoritativeSelectedResult = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
-  assert(authoritativeSelectedResult.ok === true && storageData.history.find(item => item.id === 'snapshot-absent')?.selected === false, '能力开启时 authoritative complete selected 快照通过真实 upsert 路径按缺席降级');
+  const authoritativeSelectedResult = await backgroundApi.resetAndPollForTest('selected', { supportsConsistentSelectedSnapshot: true });
+  assert(authoritativeSelectedResult?.stale === false && storageData.history.find(item => item.id === 'snapshot-absent')?.selected === false, 'Node-only capability 注入时 authoritative complete selected 快照通过真实 upsert 路径按缺席降级');
 
   resetState({ feedMode: 'all', canonicalHistoryVersion: 1, history: selectedSnapshotHistory() });
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
@@ -1666,8 +1800,6 @@ async function runTests() {
   const selectedTruncatedResult = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
   assert(selectedTruncatedResult.ok === true && selectedTruncatedPage === 3 && storageData.feedMode === 'selected', 'selected 达到页数上限时仍成功提交返回项');
   assert(storageData.history.find(item => item.id === 'selected-before-truncation')?.selected === true && !storageData.lastItemsPollAt, 'selected 截断快照不按缺席降级且不标记完整 items poll');
-  delete globalThis.__AIHOT_TEST_SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT;
-
   const preservedSwitchHistory = [{ id: 'preserved-storage-failure', url: 'https://example.com/preserved-storage-failure', time: new Date().toISOString(), discoveredAt: new Date().toISOString() }];
   resetState({
     feedMode: 'all',

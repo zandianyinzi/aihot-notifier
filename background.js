@@ -53,10 +53,14 @@ function migrateCanonicalHistoryState(data = {}) {
 
 function ensureCanonicalHistoryMigration() {
   if (!canonicalHistoryMigrationPromise) {
-    canonicalHistoryMigrationPromise = runStateMutation(async () => {
+    const migration = runStateMutation(async () => {
       const data = await chrome.storage.local.get(['canonicalHistoryVersion', 'history', 'feedMode']);
       if (Number(data.canonicalHistoryVersion || 0) >= CANONICAL_HISTORY_VERSION) return;
       await chrome.storage.local.set(migrateCanonicalHistoryState(data));
+    });
+    canonicalHistoryMigrationPromise = migration;
+    void migration.catch(() => {
+      if (canonicalHistoryMigrationPromise === migration) canonicalHistoryMigrationPromise = null;
     });
   }
   return canonicalHistoryMigrationPromise;
@@ -344,10 +348,6 @@ function isCompleteSelectedSnapshot(items, mode, supportsConsistentSnapshot = SU
     items?.termination === 'complete' &&
     Number(items?.skippedItems || 0) === 0 &&
     items?.truncated !== true;
-}
-
-function supportsConsistentSelectedSnapshot() {
-  return SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT || globalThis.__AIHOT_TEST_SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT === true;
 }
 
 function splitWatchKeywords(value) {
@@ -1037,11 +1037,13 @@ async function persistFetchedItems(items, options = {}) {
     }
   }
 
-  const updates = { watchNotifyState: persistedWatchNotifyState };
-  if (options.updateLastItems !== false) updates.lastItems = [...watchItems, ...normalItems].slice(0, 5);
-  await chrome.storage.local.set(updates);
+  if (shouldNotify || options.updateLastItems !== false) {
+    const updates = { watchNotifyState: persistedWatchNotifyState };
+    if (options.updateLastItems !== false) updates.lastItems = [...watchItems, ...normalItems].slice(0, 5);
+    await chrome.storage.local.set(updates);
+  }
 
-  await updateBadge();
+  if (options.updateBadge !== false) await updateBadge();
   return {
     updated,
     newEntries: persisted.inserted,
@@ -1160,8 +1162,16 @@ async function updateBadge() {
     if (readAllBefore && getUnreadReferenceTime(i) <= new Date(readAllBefore).getTime()) return false;
     return true;
   }).length;
-  chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+  await chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
+  await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+}
+
+async function runPostCommitSideEffect(label, effect) {
+  try {
+    await effect();
+  } catch (e) {
+    console.warn(`[AI HOT] ${label} failed after durable commit:`, e);
+  }
 }
 
 async function isCurrentFeedModeGeneration(generation, mode) {
@@ -1303,6 +1313,7 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
         return persistFetchedItems(items, {
           notify: false,
           updateLastItems: false,
+          updateBadge: false,
           discoveredAtByAlias: continuation.discoveredAtByAlias,
           retainUnmatchedWatchState: false,
           isCurrent: () => getActiveAllContinuation(generation, continuationId, expected),
@@ -1320,15 +1331,15 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
       if (persisted.skipped) return;
 
       const reachedPageLimit = response.hasMore && page === ALL_MAX_PAGES - 1;
-      if (!response.hasMore || reachedPageLimit) {
-        await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
-        await updateBadge();
-        if (!response.hasMore && fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
-        return;
-      }
       nextCursor = response.nextCursor;
       retryAttempts = 0;
       retryAt = '';
+      await runPostCommitSideEffect('continuation badge update', updateBadge);
+      if (!response.hasMore || reachedPageLimit) {
+        await runPostCommitSideEffect('continuation alarm cleanup', () => chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME));
+        if (!response.hasMore && fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
+        return;
+      }
     }
 
   } catch (e) {
@@ -1384,7 +1395,7 @@ async function resumeAllFeedContinuation() {
   });
 }
 
-async function resetAndPollInternal(feedMode, generation) {
+async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
   await assertNotInBackoff();
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
@@ -1413,7 +1424,11 @@ async function resetAndPollInternal(feedMode, generation) {
         discoveredAt,
         matchedAt: discoveredAt,
         historyDays: committedHistoryDays,
-        completeSelectedSnapshot: isCompleteSelectedSnapshot(allItems, mode, supportsConsistentSelectedSnapshot())
+        completeSelectedSnapshot: isCompleteSelectedSnapshot(
+          allItems,
+          mode,
+          capabilities.supportsConsistentSelectedSnapshot === true || SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT
+        )
       });
       const watchItems = canonical.inserted.filter(item => item.watchMatched === true);
       const normalItems = canonical.inserted.filter(item => item.watchMatched !== true);
@@ -1437,15 +1452,16 @@ async function resetAndPollInternal(feedMode, generation) {
         nextAllowedPollAt: '',
         ...(!allItems.truncated ? { lastItemsPollAt: new Date().toISOString() } : {})
       });
+      if (generation !== sourceSwitchGeneration) return { stale: true };
       feedModeGeneration = nextGeneration;
       return { continuation, nextHistory: canonical.history, nextGeneration };
     });
     if (committed.stale) return committed;
 
-    await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
-    await updateBadge();
     console.log(`[AI HOT] resetAndPoll done, ${committed.nextHistory.length} items from ${allItems.length} fetched`);
+    await runPostCommitSideEffect('source-switch continuation alarm cleanup', () => chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME));
     if (committed.continuation) {
+      await runPostCommitSideEffect('source-switch continuation alarm scheduling', () => chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: Date.now() + RETRY_AFTER_FALLBACK_MS }));
       continueAllFeed(committed.continuation);
     } else if (mode === 'all') {
       saveDeferredAllFingerprintProbe(committed.nextGeneration, fingerprintProbe);
@@ -1459,6 +1475,7 @@ async function resetAndPollInternal(feedMode, generation) {
         }))
         .catch(e => console.warn('[AI HOT] deferred fingerprint save failed:', e));
     }
+    await runPostCommitSideEffect('source-switch badge update', updateBadge);
     return { stale: false };
   } catch (e) {
     if (generation !== sourceSwitchGeneration) return { stale: true };
@@ -1602,5 +1619,13 @@ chrome.storage.onChanged.addListener((changes) => {
 });
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = { isCompleteSelectedSnapshot, migrateCanonicalHistoryState };
+  module.exports = {
+    isCompleteSelectedSnapshot,
+    migrateCanonicalHistoryState,
+    resetAndPollForTest(feedMode, capabilities = {}) {
+      const generation = ++sourceSwitchGeneration;
+      return ensureCanonicalHistoryMigration()
+        .then(() => resetAndPollInternal(feedMode, generation, capabilities));
+    }
+  };
 }
