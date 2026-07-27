@@ -1162,6 +1162,61 @@ async function runTests() {
   const [, concurrentResponse] = await Promise.all([migratePromise, markAllPromise]);
   assert(concurrentResponse.ok === true && storageData.readAllBefore === concurrentReadAt && Object.keys(storageData.readAllBeforeByMode || {}).length === 0, '旧水位迁移与全部已读并发时保留最新全局水位');
 
+  console.log('\n[popup durable mutations 由 background 串行拥有]');
+  resetState({
+    canonicalHistoryVersion: 1,
+    readIds: Array.from({ length: 99 }, (_, index) => `bounded-${index}`),
+    history: [{
+      id: 'race-watch',
+      url: 'https://example.com/race-watch',
+      permalink: 'https://aihot.virxact.com/items/race-watch',
+      title: '并发特关条目',
+      source: '旧来源',
+      time: new Date().toISOString(),
+      discoveredAt: new Date().toISOString(),
+      selected: true,
+      watchMatched: true,
+      watchRuleIds: ['old-rule']
+    }],
+    watchRules: [{ id: 'old-rule', source: '旧来源', author: '', keywords: [], enabled: true }],
+    watchNotifyState: {
+      'race-watch': { ruleIds: ['old-rule'], firstMatchedAt: selectedReadAt, notifyCount: 1, viewedAt: '' }
+    }
+  });
+  let releaseCanonicalPopupRace;
+  let canonicalPopupRaceCommitStarted = false;
+  storageSetImpl = values => {
+    if (values.history && !canonicalPopupRaceCommitStarted) {
+      canonicalPopupRaceCommitStarted = true;
+      return new Promise(resolve => {
+        releaseCanonicalPopupRace = () => {
+          Object.assign(storageData, values);
+          resolve();
+        };
+      });
+    }
+    Object.assign(storageData, values);
+    return Promise.resolve();
+  };
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('popup-race-fp');
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'popup-race-new-item' })])) });
+  };
+  const canonicalPopupRace = sendMessage({ type: 'pollNow' });
+  assert(await waitFor(() => canonicalPopupRaceCommitStarted), 'canonical poll 已进入延迟提交');
+  const readRace = sendMessageWithTimeout({ type: 'markItemsRead', ids: ['race-read-key', 'https://example.com/race-read'] });
+  const watchRace = sendMessageWithTimeout({ type: 'markWatchViewed', urls: ['race-watch'] });
+  const nextRaceRules = [{ id: 'new-rule', source: '新来源', author: '', keywords: ['模型'], enabled: true }];
+  const rulesRace = sendMessageWithTimeout({ type: 'saveWatchRules', watchRules: nextRaceRules });
+  releaseCanonicalPopupRace();
+  const [canonicalRaceResult, readRaceResult, watchRaceResult, rulesRaceResult] = await Promise.all([canonicalPopupRace, readRace, watchRace, rulesRace]);
+  assert(canonicalRaceResult.ok === true && readRaceResult.ok === true && watchRaceResult.ok === true && rulesRaceResult.ok === true, '读、特关查看与规则消息在 canonical 写入后依次成功');
+  assert(storageData.history.some(item => item.id === 'popup-race-new-item'), 'popup mutation 不覆盖 concurrent canonical history');
+  assert(storageData.readIds.length === 100 && storageData.readIds.includes('race-read-key') && storageData.readIds.includes('https://example.com/race-read') && !storageData.readIds.includes('bounded-0'), 'markItemsRead 合并并按现有上限保留最近 100 个 alias');
+  assert(Boolean(storageData.watchNotifyState['race-watch']?.viewedAt), 'markWatchViewed 在队列内重读并保留 canonical watch state');
+  assert(storageData.watchRules.length === 1 && storageData.watchRules[0].id === 'new-rule' && storageData.history.some(item => item.id === 'race-watch'), 'saveWatchRules 不覆盖 concurrent history/read/watch state');
+  storageSetImpl = null;
+
   console.log('\n[全部已读后切源保持已读]');
   const originalDiscoveredAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
   const originalPublishedAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();

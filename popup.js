@@ -41,7 +41,7 @@ const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
 const { normalizeFeedMode, projectHistory } = window.FeedState;
-const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController } = popupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createLatestWinsLoadController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController } = popupReliability;
 
 const CATEGORY_MAP = {
   'ai-models': { cls: 'cat-model', label: '模型' },
@@ -55,11 +55,10 @@ const CATEGORY_MAP = {
 
 const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark', 'slate-night']);
 const DEFAULT_HISTORY_DAYS = 2;
-const BADGE_COLOR = '#e2231a';
 const POPUP_CACHE_KEY = 'popupDataSnapshot';
 const POPUP_SESSION_KEY = 'popupWarmSession';
 const POPUP_SCROLL_KEY = 'popupScrollPosition';
-const POPUP_CACHE_VERSION = 3;
+const POPUP_CACHE_VERSION = 4;
 const POPUP_CACHE_TTL_MS = 30 * 60 * 1000;
 const POPUP_SCROLL_TTL_MS = 30 * 60 * 1000;
 const POPUP_SCROLL_SAVE_DELAY_MS = 200;
@@ -74,7 +73,7 @@ const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
 let cachedReadIds = new Set();
 let lastRenderSignature = '';
 let scrollSaveTimer = 0;
-let sourceSwitchInFlight = 0;
+let feedModeSwitchController = null;
 const enqueuePopupMutation = popupReliability.createMutationQueue();
 
 function showPopupStatus(message) {
@@ -138,7 +137,7 @@ function showButtonConfirm(button) {
   removeClassAfterAnimation(button, 'is-confirmed');
 }
 
-function readPopupCache() {
+function readPopupCache(expectedMode) {
   try {
     const raw = localStorage.getItem(POPUP_CACHE_KEY);
     if (!raw) return null;
@@ -147,21 +146,27 @@ function readPopupCache() {
     if (!cached || cached.version !== POPUP_CACHE_VERSION || !cached.data) return null;
     if (cached.extensionVersion !== chrome.runtime.getManifest().version) return null;
     if (!cached.cachedAt || Date.now() - cached.cachedAt > POPUP_CACHE_TTL_MS) return null;
-    return cached.data;
+    const feedMode = normalizeFeedMode(cached.data.feedMode);
+    if (expectedMode !== undefined && feedMode !== normalizeFeedMode(expectedMode)) return null;
+    return {
+      ...cached.data,
+      feedMode,
+      history: projectHistory(cached.data.history || [], feedMode)
+    };
   } catch (_e) {
     localStorage.removeItem(POPUP_CACHE_KEY);
     return null;
   }
 }
 
-async function readWarmPopupCache() {
+async function readWarmPopupCache(expectedMode) {
   if (!chrome.storage.session) return null;
 
   try {
     const data = await chrome.storage.session.get(POPUP_SESSION_KEY);
     const session = data[POPUP_SESSION_KEY];
     if (!session || session.extensionVersion !== chrome.runtime.getManifest().version) return null;
-    return readPopupCache();
+    return readPopupCache(expectedMode);
   } catch (_e) {
     return null;
   }
@@ -185,14 +190,21 @@ async function markPopupSessionWarm() {
 function writePopupCache(partialData) {
   try {
     const previous = readPopupCache() || {};
+    const nextMode = normalizeFeedMode(partialData.feedMode === undefined ? previous.feedMode : partialData.feedMode);
+    const data = {
+      ...previous,
+      ...partialData,
+      feedMode: nextMode
+    };
+    if (Array.isArray(data.history)) data.history = projectHistory(data.history, nextMode);
+    if (previous.feedMode && previous.feedMode !== nextMode && !Object.prototype.hasOwnProperty.call(partialData, 'history')) {
+      delete data.history;
+    }
     localStorage.setItem(POPUP_CACHE_KEY, JSON.stringify({
       version: POPUP_CACHE_VERSION,
       extensionVersion: chrome.runtime.getManifest().version,
       cachedAt: Date.now(),
-      data: {
-        ...previous,
-        ...partialData
-      }
+      data
     }));
   } catch (_e) {
     // Keep popup rendering fast even if localStorage is full or unavailable.
@@ -320,7 +332,8 @@ function renderWatchRules(rules) {
 
 async function saveWatchRules(rules, options = {}) {
   const normalized = normalizeWatchRules(rules);
-  await chrome.storage.local.set({ watchRules: normalized });
+  const response = await chrome.runtime.sendMessage({ type: 'saveWatchRules', watchRules: normalized });
+  if (!response?.ok) throw new Error(response?.error || 'Failed to save watch rules');
   renderWatchRules(normalized);
   if (options.scrollToEnd && watchRulesList) {
     watchRulesList.scrollTop = watchRulesList.scrollHeight;
@@ -361,12 +374,7 @@ async function markWatchUrlsViewed(urls) {
     const response = await chrome.runtime.sendMessage({ type: 'markWatchViewed', urls: list });
     if (!response?.ok) throw new Error(response?.error || 'Failed to mark watch items viewed');
   } catch (_e) {
-    const { watchNotifyState = {} } = await chrome.storage.local.get('watchNotifyState');
-    const now = new Date().toISOString();
-    list.forEach(url => {
-      if (watchNotifyState[url]) watchNotifyState[url] = { ...watchNotifyState[url], viewedAt: watchNotifyState[url].viewedAt || now };
-    });
-    await chrome.storage.local.set({ watchNotifyState });
+    showPopupStatus('特关状态更新失败，请重试。');
   }
 }
 
@@ -625,7 +633,6 @@ function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) 
 }
 
 function renderHistory(data, options = {}) {
-  const shouldUpdateBadge = options.updateBadge !== false;
   const skipUnchanged = options.skipUnchanged !== false;
   const shouldApplyInitialPosition = options.applyInitialPosition === true;
   const rawHistory = projectHistory(data.history || [], data.feedMode);
@@ -643,7 +650,6 @@ function renderHistory(data, options = {}) {
   logPerf('render-start', { items: history.length, cached: signature === lastRenderSignature });
 
   if (skipUnchanged && signature === lastRenderSignature) {
-    if (shouldUpdateBadge) updateBadgeFromData(history, readIdSet, readAllBeforeTime);
     if (shouldApplyInitialPosition) applyInitialPosition(data);
     logPerf('render-skip', { items: history.length });
     return;
@@ -655,7 +661,6 @@ function renderHistory(data, options = {}) {
       : '暂无内容，等待下一次推送';
     historyList.innerHTML = `<div class="empty-state">${tip}</div>`;
     markAllReadBtn.classList.remove('visible');
-    if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
     lastRenderSignature = signature;
     logPerf('render-end', { items: 0, empty: true });
     return;
@@ -699,7 +704,6 @@ function renderHistory(data, options = {}) {
 
   historyList.innerHTML = html;
   if (shouldApplyInitialPosition) applyInitialPosition(data);
-  if (shouldUpdateBadge) updateBadgeFromData(history, cachedReadIds, readAllBeforeTime);
   lastRenderSignature = signature;
   logPerf('render-end', { items: history.length, unread });
 }
@@ -711,16 +715,17 @@ function scrollToFirstUnread() {
 }
 
 function cacheLoadedPopupData(data) {
+  const feedMode = normalizeFeedMode(data.feedMode);
   writePopupCache({
     enabled: data.enabled,
     interval: data.interval,
-    feedMode: data.feedMode,
+    feedMode,
     theme: data.theme,
     fontFamily: normalizeFontFamily(data.fontFamily),
     fontSize: data.fontSize,
     openPositionMode: normalizeOpenPositionMode(data.openPositionMode),
     historyDays: data.historyDays,
-    history: data.history || [],
+    history: projectHistory(data.history || [], feedMode),
     readIds: data.readIds || [],
     readAllBefore: data.readAllBefore || '',
     readAllBeforeByMode: data.readAllBeforeByMode || {},
@@ -734,23 +739,6 @@ function isReadFast(item, readIdSet, readAllBeforeTime) {
   return false;
 }
 
-function updateBadgeFromData(history, readIdSet, readAllBeforeTime) {
-  const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
-  chrome.action.setBadgeText({ text: unread > 0 ? String(unread) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
-}
-
-async function updateBadge() {
-  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
-  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = data;
-  const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
-  const readIdSet = new Set(readIds);
-  const readAllBefore = getReadAllBefore(data);
-  const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
-  const filtered = projectHistory(history, feedMode).filter(i => isWithinHistoryWindow(i, cutoff));
-  updateBadgeFromData(filtered, readIdSet, readAllBeforeTime);
-}
-
 async function saveConfig(options = {}) {
   const shouldNotifyBackground = options.notifyBackground !== false;
   const theme = themeEl.value;
@@ -758,7 +746,6 @@ async function saveConfig(options = {}) {
   const fontSize = fontSizeEl.value;
   const openPositionMode = normalizeOpenPositionMode(openPositionModeEl.value);
   const historyDays = Number(historyDaysEl.value);
-  const feedMode = feedModeEl.value;
   const config = {
     enabled: enabledEl.checked,
     interval: Number(intervalEl.value),
@@ -768,7 +755,6 @@ async function saveConfig(options = {}) {
     openPositionMode,
     historyDays
   };
-  if (!sourceSwitchInFlight) config.feedMode = feedMode;
   applyTheme(theme);
   applyFontFamily(fontFamily);
   applyFontSize(fontSize);
@@ -778,22 +764,58 @@ async function saveConfig(options = {}) {
   if (shouldNotifyBackground) {
     chrome.runtime.sendMessage({ type: 'configChanged' });
   }
-  loadHistory();
+  loadHistory(undefined, { immediate: true }).catch(() => showPopupStatus('内容加载失败，请重试。'));
 }
 
-async function loadHistory() {
-  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode', 'openPositionMode', 'watchRules', 'allFeedContinuation']);
-  const cachedData = await readWarmPopupCache();
-  const reconciled = reconcileCachedReadIds(data, cachedData);
-  renderHistory(reconciled.data);
-  allFeedContinuationStatusController.update(data.allFeedContinuation);
-  writePopupCache(reconciled.data);
-  if (reconciled.changed) chrome.storage.local.set({ readIds: reconciled.data.readIds });
+const POPUP_HISTORY_STORAGE_KEYS = [
+  'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays',
+  'feedMode', 'openPositionMode', 'watchRules', 'allFeedContinuation'
+];
+
+const historyLoadController = createLatestWinsLoadController({
+  read: async mode => {
+    const [data, cachedData] = await Promise.all([
+      chrome.storage.local.get(POPUP_HISTORY_STORAGE_KEYS),
+      readWarmPopupCache(mode)
+    ]);
+    const reconciled = reconcileCachedReadIds(data, cachedData);
+    return {
+      ...reconciled.data,
+      committedFeedMode: normalizeFeedMode(data.feedMode)
+    };
+  },
+  projectHistory,
+  normalizeFeedMode,
+  getSwitchRequestId: () => feedModeSwitchController?.getState().switchRequestId || 0,
+  commit: data => {
+    if (feedModeSwitchController) {
+      feedModeSwitchController.observeCommittedMode(data.committedFeedMode);
+      if (feedModeSwitchController.getState().pendingMode === null) feedModeEl.value = data.feedMode;
+    }
+    renderHistory(data);
+    allFeedContinuationStatusController.update(data.allFeedContinuation);
+    cacheLoadedPopupData(data);
+  },
+  onError: () => showPopupStatus('内容加载失败，请重试。')
+});
+
+function loadHistory(mode, options = {}) {
+  const activeMode = normalizeFeedMode(mode || feedModeSwitchController?.getDisplayMode() || feedModeEl.value);
+  const switchRequestId = options.switchRequestId === undefined
+    ? (feedModeSwitchController?.getState().switchRequestId || 0)
+    : options.switchRequestId;
+  return historyLoadController.loadProjection(activeMode, { ...options, switchRequestId });
 }
 
 chrome.storage.onChanged.addListener(createPopupStorageChangeHandler({
-  refreshHistory: loadHistory,
-  updateContinuationStatus: allFeedContinuationStatusController.update
+  getFeedMode: changes => {
+    const state = feedModeSwitchController?.getState();
+    if (state?.pendingMode) return state.pendingMode;
+    if (changes.feedMode) return normalizeFeedMode(changes.feedMode.newValue);
+    return feedModeSwitchController?.getDisplayMode() || feedModeEl.value;
+  },
+  getSwitchRequestId: () => feedModeSwitchController?.getState().switchRequestId || 0,
+  scheduleLoad: historyLoadController.scheduleLoad
 }));
 
 async function handleItemClick(e) {
@@ -813,7 +835,6 @@ async function openHistoryItem(item) {
       if (url !== key) cachedReadIds.add(url);
       const arr = [...cachedReadIds];
       if (arr.length > 100) arr.splice(0, arr.length - 100);
-      chrome.storage.local.set({ readIds: arr });
       writePopupCache({ readIds: arr });
       lastRenderSignature = '';
     }
@@ -830,8 +851,12 @@ async function openHistoryItem(item) {
     } else {
       markAllReadBtn.classList.remove('visible');
     }
-    chrome.action.setBadgeText({ text: unreadCount > 0 ? String(unreadCount) : '' });
-
+    try {
+      const readResponse = await chrome.runtime.sendMessage({ type: 'markItemsRead', ids: [key, url] });
+      if (!readResponse?.ok) throw new Error(readResponse?.error || 'Failed to mark item read');
+    } catch (_e) {
+      showPopupStatus('已读状态更新失败，请重试。');
+    }
     await markWatchUrlsViewed([key, url]);
   });
   if (!result.ok) {
@@ -858,7 +883,6 @@ markAllReadBtn.addEventListener('click', async () => {
       el.classList.add('read');
     });
     markAllReadBtn.classList.remove('visible');
-    chrome.action.setBadgeText({ text: '' });
 
     const now = new Date().toISOString();
     const response = await chrome.runtime.sendMessage({ type: 'markAllRead', readAllBefore: now });
@@ -969,23 +993,26 @@ if (watchRulesList) {
 
 enabledEl.addEventListener('change', () => saveConfig());
 intervalEl.addEventListener('change', () => saveConfig());
-const feedModeSwitchController = createFeedModeSwitchController({
-  enqueue: enqueuePopupMutation,
+feedModeSwitchController = createFeedModeSwitchController({
+  initialMode: normalizeFeedMode(readPopupCache()?.feedMode || feedModeEl.value),
+  normalizeFeedMode,
   setDisabled: disabled => { feedModeEl.disabled = disabled; },
   sendChange: feedMode => chrome.runtime.sendMessage({ type: 'feedModeChanged', feedMode }),
+  loadProjection: loadHistory,
+  readCommittedMode: async () => {
+    const { feedMode } = await chrome.storage.local.get('feedMode');
+    return feedMode;
+  },
   getFailCount: async () => {
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
     return failCount;
   },
   clearScrollPosition,
-  loadHistory,
-  persist: feedMode => writePopupCache({ feedMode }),
   rollback: async feedMode => {
     feedModeEl.value = feedMode;
-    await chrome.storage.local.set({ feedMode });
-    writePopupCache({ feedMode });
   },
-  onSuccess: (failCount, feedbackStartedAt) => {
+  onSuccess: (failCount, feedbackStartedAt, feedMode) => {
+    feedModeEl.value = feedMode;
     showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
   },
   onFailure: feedbackStartedAt => {
@@ -997,15 +1024,9 @@ const feedModeSwitchController = createFeedModeSwitchController({
 feedModeEl.addEventListener('change', async () => {
   const feedbackStartedAt = Date.now();
   const nextFeedMode = normalizeFeedMode(feedModeEl.value);
-  const previousFeedMode = normalizeFeedMode(readPopupCache()?.feedMode || 'selected');
   clearButtonFeedback(pollBtn);
   pollBtn.classList.add('is-loading');
-  sourceSwitchInFlight++;
-  try {
-    await feedModeSwitchController.switchFeedMode(nextFeedMode, previousFeedMode, feedbackStartedAt);
-  } finally {
-    sourceSwitchInFlight--;
-  }
+  await feedModeSwitchController.switchFeedMode(nextFeedMode, feedbackStartedAt);
 });
 themeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
 fontFamilyEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
@@ -1053,8 +1074,9 @@ pollBtn.addEventListener('click', async () => {
   logPerf(cachedData ? 'cache-hit' : 'cache-miss');
   if (cachedData) {
     applyConfig(cachedData);
+    feedModeSwitchController.observeCommittedMode(cachedData.feedMode);
     await waitForNextPaint();
-    renderHistory(cachedData, { updateBadge: false, applyInitialPosition: true });
+    renderHistory(cachedData, { applyInitialPosition: true });
     logPerf('render-cache');
   }
 
@@ -1063,6 +1085,9 @@ pollBtn.addEventListener('click', async () => {
   const reconciled = reconcileCachedReadIds(storageData, cachedData);
   const data = reconciled.data;
   normalizeReadAllBeforeData(data);
+  data.feedMode = normalizeFeedMode(data.feedMode);
+  data.history = projectHistory(data.history || [], data.feedMode);
+  feedModeSwitchController.observeCommittedMode(data.feedMode);
   applyConfig(data);
   if (data.theme && data.theme !== normalizeTheme(data.theme)) {
     chrome.storage.local.set({ theme: 'dark' });
@@ -1075,5 +1100,4 @@ pollBtn.addEventListener('click', async () => {
   logPerf('render-storage');
   cacheLoadedPopupData(data);
   markPopupSessionWarm();
-  if (reconciled.changed) chrome.storage.local.set({ readIds: data.readIds });
 })();

@@ -34,48 +34,145 @@
   }
 
   function createFeedModeSwitchController(deps) {
-    let sequence = 0;
+    const normalizeMode = deps.normalizeFeedMode || (mode => mode === 'all' ? 'all' : 'selected');
+    let committedMode = normalizeMode(deps.initialMode);
+    let pendingMode = null;
+    let switchRequestId = 0;
 
-    async function switchFeedMode(nextMode, previousMode, context) {
-      const requestId = ++sequence;
+    function getState() {
+      return { committedMode, pendingMode, switchRequestId };
+    }
+
+    function getDisplayMode() {
+      return pendingMode || committedMode;
+    }
+
+    function observeCommittedMode(mode) {
+      committedMode = normalizeMode(mode);
+    }
+
+    async function switchFeedMode(nextMode, context) {
+      const mode = normalizeMode(nextMode);
+      const requestId = ++switchRequestId;
+      pendingMode = mode;
       deps.setDisabled(true);
+      const optimisticLoad = Promise.resolve(deps.loadProjection(mode, {
+        immediate: true,
+        switchRequestId: requestId
+      }));
+      optimisticLoad.catch(() => {});
       try {
-        await deps.enqueue(async () => {
-          const response = await deps.sendChange(nextMode);
-          if (requestId !== sequence) return;
-          if (!response || response.ok === false) throw new Error(response?.error || 'feed mode update failed');
-          const failCount = await deps.getFailCount();
-          if (requestId !== sequence) return;
-          deps.clearScrollPosition();
-          deps.persist(nextMode);
-          deps.onSuccess(failCount, context);
-        });
+        const response = await deps.sendChange(mode);
+        if (requestId !== switchRequestId) return;
+        if (!response || response.ok === false) throw new Error(response?.error || 'feed mode update failed');
+        committedMode = mode;
+        pendingMode = null;
+        await optimisticLoad.catch(() => {});
+        await deps.loadProjection(mode, { immediate: true, switchRequestId: requestId });
+        if (requestId !== switchRequestId) return;
+        const failCount = await deps.getFailCount();
+        if (requestId !== switchRequestId) return;
+        deps.clearScrollPosition();
+        deps.onSuccess(failCount, context, mode);
       } catch (_e) {
-        if (requestId === sequence) {
-          await deps.rollback(previousMode);
+        if (requestId === switchRequestId) {
+          let authoritativeMode = committedMode;
+          try {
+            authoritativeMode = normalizeMode(await deps.readCommittedMode());
+          } catch (_readError) {
+            // Keep the last observed durable mode if the authoritative read fails.
+          }
+          committedMode = authoritativeMode;
+          pendingMode = null;
+          await deps.loadProjection(authoritativeMode, { immediate: true, switchRequestId: requestId }).catch(() => {});
+          if (requestId !== switchRequestId) return;
+          await deps.rollback(authoritativeMode);
           deps.onFailure(context);
         }
       } finally {
-        if (requestId === sequence) deps.setDisabled(false);
+        if (requestId === switchRequestId) deps.setDisabled(false);
       }
     }
 
-    return { switchFeedMode };
+    return { switchFeedMode, getState, getDisplayMode, observeCommittedMode };
+  }
+
+  const POPUP_LOAD_STORAGE_KEYS = new Set([
+    'history',
+    'feedMode',
+    'readIds',
+    'readAllBefore',
+    'readAllBeforeByMode',
+    'historyDays',
+    'allFeedContinuation'
+  ]);
+
+  function hasRelevantPopupLoadChange(changes) {
+    return Object.keys(changes || {}).some(key => POPUP_LOAD_STORAGE_KEYS.has(key));
+  }
+
+  function createLatestWinsLoadController(deps) {
+    const normalizeMode = deps.normalizeFeedMode || (mode => mode === 'all' ? 'all' : 'selected');
+    const setTimer = deps.setTimer || setTimeout;
+    const clearTimer = deps.clearTimer || clearTimeout;
+    const debounceMs = Number.isFinite(deps.debounceMs) ? deps.debounceMs : 40;
+    let timerId = null;
+    let loadVersion = 0;
+
+    function cancelTimer() {
+      if (timerId === null) return;
+      clearTimer(timerId);
+      timerId = null;
+    }
+
+    function isCurrent(version, requestId) {
+      return version === loadVersion && requestId === deps.getSwitchRequestId();
+    }
+
+    async function loadProjection(mode, options = {}) {
+      if (options.immediate) cancelTimer();
+      const version = ++loadVersion;
+      const requestId = options.switchRequestId === undefined
+        ? deps.getSwitchRequestId()
+        : options.switchRequestId;
+      const normalizedMode = normalizeMode(mode);
+      const data = await deps.read(normalizedMode);
+      if (!isCurrent(version, requestId)) return { stale: true };
+      const projected = {
+        ...data,
+        feedMode: normalizedMode,
+        history: deps.projectHistory(data?.history || [], normalizedMode)
+      };
+      if (!isCurrent(version, requestId)) return { stale: true };
+      deps.commit(projected, {
+        immediate: options.immediate === true,
+        loadVersion: version,
+        switchRequestId: requestId
+      });
+      return { stale: false, data: projected };
+    }
+
+    function scheduleLoad(changes, mode, requestId = deps.getSwitchRequestId()) {
+      if (!hasRelevantPopupLoadChange(changes)) return false;
+      cancelTimer();
+      loadVersion++;
+      timerId = setTimer(() => {
+        timerId = null;
+        loadProjection(mode, { switchRequestId: requestId }).catch(error => {
+          if (deps.onError) deps.onError(error);
+        });
+      }, debounceMs);
+      return true;
+    }
+
+    return { loadProjection, scheduleLoad };
   }
 
   function createPopupStorageChangeHandler(deps) {
-    const updateContinuationStatus = deps.updateContinuationStatus || (continuation => {
-      deps.showStatus(getAllFeedContinuationStatusMessage(continuation));
-    });
     return function handleStorageChange(changes, areaName) {
       if (areaName !== 'local') return;
-      if (changes.history) {
-        deps.refreshHistory();
-        return;
-      }
-      if (changes.allFeedContinuation) {
-        updateContinuationStatus(changes.allFeedContinuation.newValue);
-      }
+      if (!hasRelevantPopupLoadChange(changes)) return;
+      deps.scheduleLoad(changes, deps.getFeedMode(changes), deps.getSwitchRequestId());
     };
   }
 
@@ -117,6 +214,7 @@
   return {
     createMutationQueue,
     createFeedModeSwitchController,
+    createLatestWinsLoadController,
     createPopupStorageChangeHandler,
     getAllFeedContinuationStatusMessage,
     createAllFeedContinuationStatusController,

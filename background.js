@@ -574,7 +574,7 @@ async function sendWatchNotifications(items, watchNotifyState, now, limit = MAX_
 
 async function markWatchViewed(urls) {
   const list = Array.isArray(urls) ? urls : [urls];
-  const filtered = list.filter(Boolean);
+  const filtered = [...new Set(list.flatMap(getItemAliases).filter(Boolean))];
   if (filtered.length === 0) return;
   const { watchNotifyState = {} } = await chrome.storage.local.get('watchNotifyState');
   const now = new Date().toISOString();
@@ -587,6 +587,37 @@ async function markWatchViewed(urls) {
     });
   });
   await chrome.storage.local.set({ watchNotifyState });
+  await updateBadge();
+}
+
+async function markItemsRead(ids) {
+  const aliases = [...new Set((Array.isArray(ids) ? ids : [ids]).flatMap(getItemAliases).filter(Boolean))];
+  const { readIds = [] } = await chrome.storage.local.get('readIds');
+  const merged = [...new Set([...readIds, ...aliases])];
+  const bounded = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
+  await chrome.storage.local.set({ readIds: bounded });
+  await updateBadge();
+  return bounded;
+}
+
+function normalizeStoredWatchRules(rules) {
+  if (!Array.isArray(rules)) return [];
+  return rules.map((rule, index) => ({
+    id: String(rule?.id || `wr_${index}`),
+    source: String(rule?.source || '').trim(),
+    author: String(rule?.author || '').trim(),
+    keywords: splitWatchKeywords(rule?.keywords),
+    enabled: rule?.enabled !== false,
+    createdAt: rule?.createdAt || ''
+  })).filter(rule => rule.source || rule.author || rule.keywords.length > 0);
+}
+
+async function saveWatchRules(rules) {
+  const { watchRules: storedWatchRules = [] } = await chrome.storage.local.get('watchRules');
+  const watchRules = normalizeStoredWatchRules(Array.isArray(rules) ? rules : storedWatchRules);
+  await chrome.storage.local.set({ watchRules });
+  await updateBadge();
+  return watchRules;
 }
 
 async function assertNotInBackoff() {
@@ -1648,10 +1679,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
+  if (msg.type === 'markItemsRead') {
+    runMigratedStateMutation(() => markItemsRead(msg.ids || msg.urls || msg.id || msg.url))
+      .then(readIds => sendResponse({ ok: true, readIds }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === 'saveWatchRules') {
+    runMigratedStateMutation(() => saveWatchRules(msg.watchRules || msg.rules))
+      .then(watchRules => sendResponse({ ok: true, watchRules }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
   if (msg.type === 'markAllRead') {
     runMigratedStateMutation(async () => {
       if (!msg.readAllBefore || !Number.isFinite(new Date(msg.readAllBefore).getTime())) throw new Error('Invalid readAllBefore');
-      return advanceReadAllBefore(msg.readAllBefore, true);
+      const readAllBefore = await advanceReadAllBefore(msg.readAllBefore, true);
+      await updateBadge();
+      return readAllBefore;
     })
       .then(readAllBefore => sendResponse({ ok: true, readAllBefore }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
