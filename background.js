@@ -88,13 +88,6 @@ async function recordApiFailure(responseOrStatus) {
   }
 }
 
-function getItemKey(item) {
-  if (!item) return '';
-  if (item.id || item.permalink || item.url) return item.id || item.permalink || item.url;
-  const time = item.publishedAt || item.time || item.indexedAt || '';
-  return [item.source || '', item.title || '', time, item.summary || ''].join('|');
-}
-
 function getItemOpenUrl(item) {
   return item && (item.url || item.permalink || '');
 }
@@ -153,10 +146,6 @@ function getKnownDiscoveredAt(item, discoveredAtByAlias, fallback) {
   return known || fallback;
 }
 
-function getExistingItemKeys(history) {
-  return new Set((history || []).flatMap(item => [getItemKey(item), item.id, item.url, item.permalink].filter(Boolean)));
-}
-
 function isSafetyItemsPollDue(lastItemsPollAt) {
   const last = new Date(lastItemsPollAt || 0).getTime();
   return !last || Date.now() - last >= ITEMS_SAFETY_POLL_MS;
@@ -166,25 +155,6 @@ function getAutoPollSinceTime(config, _safetyPollDue, lastItemsPollAt) {
   const bufferMs = Math.max(config.interval * 2 * 60 * 1000, AUTO_POLL_DELAY_BUFFER_MS);
   const referenceTime = lastItemsPollAt || config.lastCheck;
   return new Date(new Date(referenceTime).getTime() - bufferMs).toISOString();
-}
-
-function addItemKeys(keySet, item) {
-  [item && getItemKey(item), item && item.url, item && item.permalink]
-    .filter(Boolean)
-    .forEach(key => keySet.add(key));
-}
-
-function isNewApiItem(item, existingKeys) {
-  return !existingKeys.has(getItemKey(item)) && !existingKeys.has(item.url) && !existingKeys.has(item.permalink);
-}
-
-function filterNewApiItems(items, history) {
-  const seenKeys = getExistingItemKeys(history);
-  return (items || []).filter(item => {
-    if (!isNewApiItem(item, seenKeys)) return false;
-    addItemKeys(seenKeys, item);
-    return true;
-  });
 }
 
 async function probeFingerprint(mode) {
@@ -266,6 +236,8 @@ function normalizeV1Item(item) {
 
   return {
     ...item,
+    selectedPresent: Object.prototype.hasOwnProperty.call(item, 'selected'),
+    selected: item.selected === true,
     source: item.source.name,
     url,
     permalink,
@@ -574,32 +546,196 @@ async function commitSuccessfulItemsPoll(data = {}) {
   });
 }
 
-function buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, discoveredAt, matchedAt = '') {
-  const newEntries = [];
-  const watchItems = [];
-  const normalItems = [];
-  const nextWatchNotifyState = { ...watchNotifyState };
-  const watchMatchedAt = matchedAt || (typeof discoveredAt === 'string' ? discoveredAt : new Date().toISOString());
+function getIdentityAliases(item) {
+  return [item?.permalink, item?.url].filter(Boolean);
+}
 
-  filterNewApiItems(items, history)
-    .forEach(item => {
-      const itemDiscoveredAt = typeof discoveredAt === 'function' ? discoveredAt(item) : discoveredAt;
-      const watchMatches = matchWatchRules(item, watchRules);
-      const entry = toHistoryEntry(item, itemDiscoveredAt, watchMatches, watchMatchedAt);
-      newEntries.push(entry);
-      if (watchMatches.length > 0) {
-        const key = getItemStateKey(entry);
-        const existingState = getItemAliases(entry)
-          .map(alias => nextWatchNotifyState[alias])
-          .find(Boolean);
-        nextWatchNotifyState[key] = buildWatchStateForItem(existingState, entry, watchMatches.map(rule => rule.id), watchMatchedAt);
-        watchItems.push(entry);
-      } else {
-        normalItems.push(entry);
-      }
+function findAliasCandidates(history, item) {
+  const aliases = new Set(getIdentityAliases(item));
+  return (history || [])
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate }) => getIdentityAliases(candidate).some(alias => aliases.has(alias)))
+    .map(({ index }) => index);
+}
+
+function findLegacyDuplicates(history, item, winnerIndex) {
+  const aliasCandidates = findAliasCandidates(history, item);
+  const candidates = aliasCandidates
+    .filter(index => index !== winnerIndex && !history[index].id);
+  const conflictingId = aliasCandidates
+    .some(index => index !== winnerIndex && Boolean(history[index].id));
+  return !conflictingId && candidates.length === 1 ? candidates : [];
+}
+
+function earliestIso(values) {
+  return (values || [])
+    .filter(value => value && Number.isFinite(new Date(value).getTime()))
+    .sort((a, b) => new Date(a) - new Date(b))[0] || '';
+}
+
+function latestIso(values) {
+  return (values || [])
+    .filter(value => value && Number.isFinite(new Date(value).getTime()))
+    .sort((a, b) => new Date(b) - new Date(a))[0] || '';
+}
+
+function findCanonicalMatch(history, item) {
+  const exactIndex = item.id ? history.findIndex(candidate => candidate.id === item.id) : -1;
+  if (exactIndex >= 0) {
+    return { index: exactIndex, legacyIndexes: findLegacyDuplicates(history, item, exactIndex) };
+  }
+  const candidates = findAliasCandidates(history, item);
+  return candidates.length === 1 && !history[candidates[0]].id
+    ? { index: candidates[0], legacyIndexes: [] }
+    : { index: -1, legacyIndexes: [] };
+}
+
+function mergeCanonicalItem(existing, incoming, { mode, discoveredAt }) {
+  const knownDiscovery = earliestIso([existing?.discoveredAt, incoming.discoveredAt]) || discoveredAt;
+  const selected = normalizeFeedMode(mode) === 'selected'
+    ? true
+    : incoming.selectedPresent ? incoming.selected === true : existing?.selected === true;
+  const { selectedPresent, ...serverFields } = incoming;
+  return { ...existing, ...serverFields, discoveredAt: knownDiscovery, selected };
+}
+
+function mergeWatchStates(states, item, watchRules) {
+  const valid = (states || []).filter(Boolean);
+  if (valid.length === 0) return null;
+  const firstMatchedAt = earliestIso(valid.map(state => state.firstMatchedAt));
+  const viewedAt = earliestIso(valid.map(state => state.viewedAt));
+  const notifyCount = Math.max(0, ...valid.map(state => Number(state.notifyCount || 0)));
+  const lastNotifiedAt = latestIso(valid.map(state => state.lastNotifiedAt));
+  return {
+    ruleIds: matchWatchRules(item, watchRules).map(rule => rule.id),
+    firstMatchedAt,
+    viewedAt,
+    notifyCount,
+    lastNotifiedAt,
+    nextNotifyAt: viewedAt ? '' : getNextWatchNotifyAt(firstMatchedAt, notifyCount, lastNotifiedAt)
+  };
+}
+
+function getSafeCanonicalAliases(history, canonicalIndexes, item) {
+  const canonicalIndexSet = new Set(canonicalIndexes);
+  const aliases = new Set([item?.id, ...canonicalIndexes.flatMap(index => getItemAliases(history[index])), ...getItemAliases(item)].filter(Boolean));
+  return Array.from(aliases).filter(alias => {
+    if (alias === item?.id) return true;
+    return !history.some((candidate, index) =>
+      !canonicalIndexSet.has(index) && getItemAliases(candidate).includes(alias));
+  });
+}
+
+function coalesceApiItems(items) {
+  const coalesced = [];
+  const indexById = new Map();
+  (items || []).forEach(item => {
+    if (item?.id && indexById.has(item.id)) {
+      coalesced[indexById.get(item.id)] = item;
+      return;
+    }
+    if (item?.id) indexById.set(item.id, coalesced.length);
+    coalesced.push(item);
+  });
+  return coalesced;
+}
+
+function upsertCanonicalItems(state, items, options = {}) {
+  const mode = normalizeFeedMode(options.mode);
+  const discoveredAt = options.discoveredAt || new Date().toISOString();
+  const matchedAt = options.matchedAt || (typeof discoveredAt === 'string' ? discoveredAt : new Date().toISOString());
+  const historyDays = Number(options.historyDays || DEFAULT_HISTORY_DAYS);
+  const history = [...(state.history || [])];
+  const readIds = new Set(state.readIds || []);
+  const watchRules = state.watchRules || [];
+  const watchNotifyState = { ...(state.watchNotifyState || {}) };
+  const inserted = [];
+  const updated = [];
+  const newlyMatched = [];
+  const insertedIndexByKey = new Map();
+  const returnedCanonicalByKey = new Map();
+
+  coalesceApiItems(items).forEach(item => {
+    const match = findCanonicalMatch(history, item);
+    const isInserted = match.index < 0;
+    const canonicalIndexes = isInserted ? [] : [match.index, ...match.legacyIndexes];
+    const existing = isInserted ? null : history[match.index];
+    const absorbed = canonicalIndexes.map(index => history[index]).filter(Boolean);
+    const itemDiscoveredAt = typeof discoveredAt === 'function' ? discoveredAt(item) : discoveredAt;
+    const watchMatches = matchWatchRules(item, watchRules);
+    const incomingEntry = {
+      ...toHistoryEntry(item, itemDiscoveredAt, watchMatches, matchedAt),
+      selectedPresent: item.selectedPresent
+    };
+    const existingForMerge = existing
+      ? { ...existing, discoveredAt: earliestIso(absorbed.map(candidate => candidate.discoveredAt)) || existing.discoveredAt }
+      : null;
+    const canonical = mergeCanonicalItem(existingForMerge, incomingEntry, { mode, discoveredAt: itemDiscoveredAt });
+    if (watchMatches.length === 0) {
+      delete canonical.watchMatched;
+      delete canonical.watchRuleIds;
+      delete canonical.watchMatchedAt;
+    }
+    const priorMatchIds = new Set(existing?.watchRuleIds || []);
+    const isNewlyMatched = !isInserted && watchMatches.length > 0 && watchMatches.some(rule => !priorMatchIds.has(rule.id));
+    const safeAliases = getSafeCanonicalAliases(history, canonicalIndexes, canonical);
+    const priorWatchStates = safeAliases.map(alias => watchNotifyState[alias]).filter(Boolean);
+    const canonicalKey = getItemStateKey(canonical);
+
+    if (priorWatchStates.length > 0) {
+      watchNotifyState[canonicalKey] = mergeWatchStates(priorWatchStates, canonical, watchRules);
+    } else if (isInserted && watchMatches.length > 0) {
+      watchNotifyState[canonicalKey] = buildWatchStateForItem(null, canonical, watchMatches.map(rule => rule.id), matchedAt);
+    }
+
+    if (canonical.id && safeAliases.some(alias => readIds.has(alias))) readIds.add(canonical.id);
+    safeAliases.forEach(alias => {
+      if (alias !== canonicalKey) delete watchNotifyState[alias];
     });
 
-  return { newEntries, watchItems, normalItems, nextWatchNotifyState };
+    if (isInserted) {
+      history.push(canonical);
+      insertedIndexByKey.set(canonicalKey, inserted.length);
+      inserted.push(canonical);
+    } else {
+      history[match.index] = canonical;
+      [...match.legacyIndexes].sort((a, b) => b - a).forEach(index => history.splice(index, 1));
+      if (insertedIndexByKey.has(canonicalKey)) {
+        inserted[insertedIndexByKey.get(canonicalKey)] = canonical;
+      } else if (isNewlyMatched) {
+        newlyMatched.push(canonical);
+      } else {
+        updated.push(canonical);
+      }
+    }
+    returnedCanonicalByKey.set(canonicalKey, canonical);
+  });
+
+  const returnedCanonicalItems = Array.from(returnedCanonicalByKey.values());
+
+  if (mode === 'selected' && options.completeSelectedSnapshot === true) {
+    const returnedIds = new Set(returnedCanonicalItems.map(item => item.id).filter(Boolean));
+    history.forEach(item => {
+      if (item.id && !returnedIds.has(item.id)) item.selected = false;
+    });
+  }
+
+  const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+  const retainedHistory = (options.replaceHistory ? returnedCanonicalItems : history)
+    .filter(item => isWithinHistoryWindow(item, cutoff))
+    .sort((a, b) => getItemTime(b) - getItemTime(a));
+  const retainedWatchNotifyState = options.retainUnmatchedWatchState
+    ? watchNotifyState
+    : pruneWatchNotifyState(retainedHistory, watchNotifyState);
+
+  return {
+    history: retainedHistory,
+    readIds: Array.from(readIds),
+    watchNotifyState: retainedWatchNotifyState,
+    inserted,
+    updated,
+    newlyMatched
+  };
 }
 
 function pruneWatchNotifyState(history, watchNotifyState) {
@@ -611,18 +747,6 @@ function pruneWatchNotifyState(history, watchNotifyState) {
 async function getPrunedStoredWatchNotifyState() {
   const { history = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'watchNotifyState']);
   return pruneWatchNotifyState(history, watchNotifyState);
-}
-
-async function mergeAndPersistHistory(newEntries, history, historyDays, watchNotifyState = {}, options = {}) {
-  const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-  const updated = [...newEntries, ...history]
-    .filter(i => isWithinHistoryWindow(i, cutoff))
-    .sort((a, b) => getItemTime(b) - getItemTime(a));
-  const nextWatchNotifyState = options.retainUnmatchedWatchState
-    ? { ...watchNotifyState }
-    : pruneWatchNotifyState(updated, watchNotifyState);
-  await chrome.storage.local.set({ history: updated, watchNotifyState: nextWatchNotifyState });
-  return { history: updated, watchNotifyState: nextWatchNotifyState };
 }
 
 function getNormalizedItemTime(item, discoveredAt) {
@@ -796,11 +920,12 @@ async function persistFetchedItems(items, options = {}) {
   const {
     history = [],
     historyDays = DEFAULT_HISTORY_DAYS,
+    readIds = [],
     watchRules = [],
     watchNotifyState = {},
     allFeedContinuation = {},
     feedMode
-  } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState', 'allFeedContinuation', 'feedMode']);
+  } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'watchRules', 'watchNotifyState', 'allFeedContinuation', 'feedMode']);
 
   if (typeof options.isCurrent === 'function' && !await options.isCurrent()) {
     return { skipped: true, updated: history, newEntries: [], watchNotificationsSent: 0 };
@@ -808,14 +933,24 @@ async function persistFetchedItems(items, options = {}) {
 
   const discoveredAtByAlias = mergeDiscoveredAtByAlias(options.discoveredAtByAlias, buildDiscoveredAtByAlias(history));
   const resolveDiscoveredAt = item => getKnownDiscoveredAt(item, discoveredAtByAlias, discoveredAt);
-  const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(items, history, watchRules, watchNotifyState, resolveDiscoveredAt, discoveredAt);
   const retainUnmatchedWatchState = options.retainUnmatchedWatchState === true ||
     (normalizeFeedMode(feedMode) === 'all' && allFeedContinuation.active === true);
-  const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState, {
+  const persisted = upsertCanonicalItems({ history, readIds, watchRules, watchNotifyState }, items, {
+    mode: feedMode,
+    discoveredAt: resolveDiscoveredAt,
+    matchedAt: discoveredAt,
+    historyDays,
     retainUnmatchedWatchState
+  });
+  await chrome.storage.local.set({
+    history: persisted.history,
+    readIds: persisted.readIds,
+    watchNotifyState: persisted.watchNotifyState
   });
   const updated = persisted.history;
   const persistedWatchNotifyState = persisted.watchNotifyState;
+  const watchItems = persisted.inserted.filter(item => item.watchMatched === true);
+  const normalItems = persisted.inserted.filter(item => item.watchMatched !== true);
 
   const notifiedWatchItems = shouldNotify
     ? await sendWatchNotifications(watchItems, persistedWatchNotifyState, discoveredAt, watchNotificationLimit)
@@ -849,7 +984,15 @@ async function persistFetchedItems(items, options = {}) {
   await chrome.storage.local.set(updates);
 
   await updateBadge();
-  return { updated, newEntries, watchNotifyState: persistedWatchNotifyState, watchNotificationsSent: notifiedWatchItems.length };
+  return {
+    updated,
+    newEntries: persisted.inserted,
+    inserted: persisted.inserted,
+    updatedEntries: persisted.updated,
+    newlyMatched: persisted.newlyMatched,
+    watchNotifyState: persistedWatchNotifyState,
+    watchNotificationsSent: notifiedWatchItems.length
+  };
 }
 
 async function showNotification(items) {
@@ -859,8 +1002,9 @@ async function showNotification(items) {
 
 async function checkWatchRemindersInternal(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
   if (limit <= 0) return 0;
-  const { history = [], watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'watchRules', 'watchNotifyState']);
-  const watchItems = history.filter(item => getActiveWatchMatchIds(item, watchRules).length > 0 && findWatchState(watchNotifyState, item).state);
+  const { history = [], feedMode, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'feedMode', 'watchRules', 'watchNotifyState']);
+  const watchItems = projectHistory(history, feedMode)
+    .filter(item => getActiveWatchMatchIds(item, watchRules).length > 0 && findWatchState(watchNotifyState, item).state);
   if (watchItems.length === 0) return;
   const now = new Date().toISOString();
   const nextWatchNotifyState = { ...watchNotifyState };
@@ -877,7 +1021,17 @@ function checkWatchReminders(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
 
 async function manualPollInternal() {
   await assertNotInBackoff();
-  const { history = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode, lastCheck = '', lastItemsPollAt = '' } = await chrome.storage.local.get(['history', 'historyDays', 'feedMode', 'lastCheck', 'lastItemsPollAt']);
+  const {
+    history = [],
+    historyDays = DEFAULT_HISTORY_DAYS,
+    readIds = [],
+    feedMode,
+    lastCheck = '',
+    lastItemsPollAt = '',
+    watchRules = [],
+    watchNotifyState = {},
+    allFeedContinuation = {}
+  } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'feedMode', 'lastCheck', 'lastItemsPollAt', 'watchRules', 'watchNotifyState', 'allFeedContinuation']);
   const mode = normalizeFeedMode(feedMode);
   const now = new Date().toISOString();
 
@@ -901,13 +1055,20 @@ async function manualPollInternal() {
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES });
     const discoveredAt = new Date().toISOString();
-    const { watchRules = [], watchNotifyState = {}, allFeedContinuation = {} } = await chrome.storage.local.get(['watchRules', 'watchNotifyState', 'allFeedContinuation']);
-    const { newEntries, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, history, watchRules, watchNotifyState, discoveredAt);
-    const persisted = await mergeAndPersistHistory(newEntries, history, historyDays, nextWatchNotifyState, {
+    const persisted = upsertCanonicalItems({ history, readIds, watchRules, watchNotifyState }, allItems, {
+      mode,
+      discoveredAt,
+      matchedAt: discoveredAt,
+      historyDays,
       retainUnmatchedWatchState: mode === 'all' && allFeedContinuation.active === true
     });
     const merged = persisted.history;
-    await chrome.storage.local.set({ lastItems: [...watchItems, ...normalItems].slice(0, 5), watchNotifyState: persisted.watchNotifyState });
+    await chrome.storage.local.set({
+      history: persisted.history,
+      readIds: persisted.readIds,
+      watchNotifyState: persisted.watchNotifyState,
+      lastItems: persisted.inserted.slice(0, 5)
+    });
     if (allItems.truncated) {
       await chrome.storage.local.set({ lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
     } else {
@@ -1165,7 +1326,7 @@ async function resetAndPollInternal(feedMode) {
   await assertNotInBackoff();
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
-    const { history: previousHistory = [], historyDays = DEFAULT_HISTORY_DAYS, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'historyDays', 'watchRules', 'watchNotifyState']);
+    const { history: previousHistory = [], historyDays = DEFAULT_HISTORY_DAYS, readIds = [], watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'watchRules', 'watchNotifyState']);
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
 
@@ -1174,10 +1335,17 @@ async function resetAndPollInternal(feedMode) {
     const discoveredAt = new Date().toISOString();
     const discoveredAtByAlias = buildDiscoveredAtByAlias(previousHistory);
     const resolveDiscoveredAt = item => getKnownDiscoveredAt(item, discoveredAtByAlias, discoveredAt);
-    const { newEntries: history, watchItems, normalItems, nextWatchNotifyState } = buildHistoryEntriesWithWatch(allItems, [], watchRules, watchNotifyState, resolveDiscoveredAt, discoveredAt);
-    const nextHistory = history
-      .filter(i => isWithinHistoryWindow(i, cutoff))
-      .sort((a, b) => getItemTime(b) - getItemTime(a));
+    const canonical = upsertCanonicalItems({ history: previousHistory, readIds, watchRules, watchNotifyState }, allItems, {
+      mode,
+      discoveredAt: resolveDiscoveredAt,
+      matchedAt: discoveredAt,
+      historyDays,
+      replaceHistory: true,
+      retainUnmatchedWatchState: mode === 'all' && allItems.truncated
+    });
+    const nextHistory = canonical.history;
+    const watchItems = canonical.inserted.filter(item => item.watchMatched === true);
+    const normalItems = canonical.inserted.filter(item => item.watchMatched !== true);
 
     const fingerprintProbe = startFingerprintProbe(mode);
     const nextGeneration = feedModeGeneration + 1;
@@ -1190,10 +1358,11 @@ async function resetAndPollInternal(feedMode) {
       : {};
     const resetData = {
       history: nextHistory,
+      readIds: canonical.readIds,
       lastItems: [...watchItems, ...normalItems].slice(0, 5),
       watchNotifyState: continuation
-        ? nextWatchNotifyState
-        : pruneWatchNotifyState(nextHistory, nextWatchNotifyState),
+        ? canonical.watchNotifyState
+        : pruneWatchNotifyState(nextHistory, canonical.watchNotifyState),
       feedMode: mode
     };
     if (continuation) {
@@ -1271,13 +1440,28 @@ async function handleInstalled(details) {
   await migrateReadAllBefore();
   if (details.reason === 'install') {
     try {
-      const { feedMode, historyDays = DEFAULT_HISTORY_DAYS, history = [], watchNotifyState = {} } = await chrome.storage.local.get(['feedMode', 'historyDays', 'history', 'watchNotifyState']);
+      const {
+        feedMode,
+        historyDays = DEFAULT_HISTORY_DAYS,
+        history = [],
+        readIds = [],
+        watchRules = [],
+        watchNotifyState = {}
+      } = await chrome.storage.local.get(['feedMode', 'historyDays', 'history', 'readIds', 'watchRules', 'watchNotifyState']);
       const mode = normalizeFeedMode(feedMode);
       const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
       const allItems = await fetchItems({ mode, cutoff, maxPages: Math.min(getMaxPages(mode), SELECTED_MAX_PAGES) });
-      const newEntries = filterNewApiItems(allItems, history)
-        .map(i => toHistoryEntry(i, getNormalizedItemTime(i)));
-      await mergeAndPersistHistory(newEntries, history, historyDays, watchNotifyState);
+      const canonical = upsertCanonicalItems({ history, readIds, watchRules, watchNotifyState }, allItems, {
+        mode,
+        discoveredAt: item => getNormalizedItemTime(item),
+        matchedAt: new Date().toISOString(),
+        historyDays
+      });
+      await chrome.storage.local.set({
+        history: canonical.history,
+        readIds: canonical.readIds,
+        watchNotifyState: canonical.watchNotifyState
+      });
     } catch (e) {
       console.warn('[AI HOT] failed to fetch initial items:', e);
     }

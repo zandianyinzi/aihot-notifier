@@ -11,6 +11,7 @@ let onClickedHandler = null;
 let onClosedHandler = null;
 let onStorageChangedHandler = null;
 let onStartupHandler = null;
+let onInstalledHandler = null;
 let storageData = {};
 let fetchImpl = null;
 let requestedUrls = [];
@@ -155,7 +156,7 @@ globalThis.chrome = {
     onAlarm: { addListener: (handler) => { onAlarmHandler = handler; } }
   },
   runtime: {
-    onInstalled: { addListener: () => {} },
+    onInstalled: { addListener: (handler) => { onInstalledHandler = handler; } },
     onStartup: { addListener: (handler) => { onStartupHandler = handler; } },
     onMessage: { addListener: (handler) => { onMessageHandler = handler; } }
   }
@@ -908,6 +909,143 @@ async function runTests() {
   await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
   assert(storageData.history[0]?.discoveredAt === exactIdDiscoveredAt, '发现时间优先按精确 ID 继承，不被碰撞 URL 的更早时间覆盖');
 
+  console.log('\n[标准身份 upsert 与本地状态迁移]');
+  const refreshedPublishedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { all: 'fp-old' },
+    history: [
+      { id: 'exact-refresh', title: '旧标题', source: '旧来源', url: collidingUrl, permalink: 'https://aihot.virxact.com/items/exact-refresh', time: originalPublishedAt, discoveredAt: exactIdDiscoveredAt, selected: true },
+      { id: 'different-id', title: '碰撞条目', source: '其它来源', url: collidingUrl, permalink: 'https://aihot.virxact.com/items/different-id', time: refreshedPublishedAt, discoveredAt: collidingUrlDiscoveredAt, selected: true }
+    ]
+  });
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-selected', 'fp-refresh')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+      id: 'exact-refresh',
+      title: '新标题',
+      source: { name: '新来源' },
+      summary: '新摘要',
+      selected: false,
+      publishedAt: refreshedPublishedAt,
+      links: { original: collidingUrl, aihot: 'https://aihot.virxact.com/items/exact-refresh' }
+    })])) });
+  const exactRefreshResponse = await sendMessage({ type: 'pollNow' });
+  const exactRefreshed = storageData.history.find(item => item.id === 'exact-refresh');
+  const differentId = storageData.history.find(item => item.id === 'different-id');
+  assert(exactRefreshResponse.ok === true && storageData.history.length === 2 && exactRefreshed?.title === '新标题' && exactRefreshed?.source === '新来源' && exactRefreshed?.summary === '新摘要', '精确 ID 刷新 API 字段且不合并 URL 碰撞的非空 ID');
+  assert(exactRefreshed?.discoveredAt === exactIdDiscoveredAt && exactRefreshed?.selected === false && differentId?.title === '碰撞条目', '精确 ID 保留最早发现时间并应用 all 响应的显式 false');
+  assert(storageData.history[0]?.id === 'exact-refresh' && storageData.history[1]?.id === 'different-id', '刷新后按 getItemTime 降序排序');
+
+  const legacyUrl = 'https://example.com/legacy-canonical';
+  const legacyPermalink = 'https://aihot.virxact.com/items/legacy-canonical';
+  const firstMatchedEarly = new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString();
+  const firstMatchedLate = new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString();
+  const viewedEarly = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+  const viewedLate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const notifiedEarly = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+  const notifiedLate = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { all: 'fp-old' },
+    history: [{ id: '', title: '旧身份条目', source: '目标来源', url: legacyUrl, permalink: legacyPermalink, time: originalPublishedAt, discoveredAt: originalDiscoveredAt, selected: true }],
+    readIds: [legacyUrl],
+    watchRules: [{ id: 'wr_canonical', source: '目标来源', author: '', keywords: [], enabled: true }],
+    watchNotifyState: {
+      [legacyUrl]: { ruleIds: ['wr_old'], firstMatchedAt: firstMatchedLate, viewedAt: viewedLate, notifyCount: 1, lastNotifiedAt: notifiedEarly, nextNotifyAt: '' },
+      [legacyPermalink]: { ruleIds: ['wr_other'], firstMatchedAt: firstMatchedEarly, viewedAt: viewedEarly, notifyCount: 2, lastNotifiedAt: notifiedLate, nextNotifyAt: '' }
+    }
+  });
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-selected', 'fp-legacy')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+      id: 'canonical-id',
+      title: '标准身份条目',
+      source: { name: '目标来源' },
+      selected: true,
+      links: { original: legacyUrl, aihot: legacyPermalink }
+    })])) });
+  await sendMessage({ type: 'pollNow' });
+  const mergedWatchState = storageData.watchNotifyState['canonical-id'];
+  assert(storageData.history.length === 1 && storageData.history[0]?.id === 'canonical-id' && storageData.history[0]?.discoveredAt === originalDiscoveredAt, '唯一无 ID 旧记录被标准 ID 安全吸收');
+  assert(storageData.readIds.includes('canonical-id'), '旧 URL 已读别名迁移到标准 ID');
+  assert(mergedWatchState?.firstMatchedAt === firstMatchedEarly && mergedWatchState?.viewedAt === viewedEarly && mergedWatchState?.notifyCount === 2 && mergedWatchState?.lastNotifiedAt === notifiedLate && mergedWatchState?.nextNotifyAt === '', '多个旧特关别名确定性合并到标准 ID');
+  assert(JSON.stringify(mergedWatchState?.ruleIds) === JSON.stringify(['wr_canonical']) && !storageData.watchNotifyState[legacyUrl] && !storageData.watchNotifyState[legacyPermalink], '特关规则重算且移除已吸收的旧别名状态');
+
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { all: 'fp-old' },
+    history: [
+      { id: '', title: '歧义1', url: legacyUrl, permalink: 'https://aihot.virxact.com/items/legacy-one', time: originalPublishedAt, discoveredAt: originalDiscoveredAt },
+      { id: '', title: '歧义2', url: legacyUrl, permalink: 'https://aihot.virxact.com/items/legacy-two', time: originalPublishedAt, discoveredAt: exactIdDiscoveredAt }
+    ],
+    readIds: [legacyUrl],
+    watchRules: [],
+    watchNotifyState: {
+      [legacyUrl]: { ruleIds: ['wr_ambiguous'], firstMatchedAt: firstMatchedEarly, viewedAt: viewedEarly, notifyCount: 2, lastNotifiedAt: notifiedLate, nextNotifyAt: '' }
+    }
+  });
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-selected', 'fp-ambiguous')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
+      id: 'ambiguous-api-id',
+      title: '新标准条目',
+      links: { original: legacyUrl, aihot: 'https://aihot.virxact.com/items/ambiguous-api-id' }
+    })])) });
+  await sendMessage({ type: 'pollNow' });
+  assert(storageData.history.length === 3 && storageData.history.filter(item => !item.id).length === 2 && storageData.history.some(item => item.id === 'ambiguous-api-id'), '多个无 ID 别名候选有歧义时都不吸收');
+  assert(!storageData.readIds.includes('ambiguous-api-id') && !storageData.watchNotifyState['ambiguous-api-id'] && storageData.watchNotifyState[legacyUrl], '歧义无 ID 别名不迁移已读或特关状态');
+
+  resetState({ feedMode: 'all' });
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-selected', 'fp-duplicate')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
+      v1Item({ id: 'duplicate-id', title: '重复旧字段', links: { original: 'https://example.com/duplicate', aihot: 'https://aihot.virxact.com/items/duplicate-id' } }),
+      v1Item({ id: 'duplicate-id', title: '重复最终字段', links: { original: 'https://example.com/duplicate', aihot: 'https://aihot.virxact.com/items/duplicate-id' } })
+    ])) });
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  assert(storageData.history.length === 1 && storageData.history[0]?.title === '重复最终字段', '同一响应的重复 ID 确定性收敛到最终 API 字段');
+
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { all: 'fp-old' },
+    history: [{ id: 'duplicate-existing', title: '既有精选', source: 'v1 来源', url: 'https://example.com/duplicate-existing', permalink: 'https://aihot.virxact.com/items/duplicate-existing', time: originalPublishedAt, discoveredAt: originalDiscoveredAt, selected: true }]
+  });
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-selected', 'fp-duplicate-existing')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
+      v1Item({ id: 'duplicate-existing', title: '中间显式降级', selected: false, links: { original: 'https://example.com/duplicate-existing', aihot: 'https://aihot.virxact.com/items/duplicate-existing' } }),
+      v1Item({ id: 'duplicate-existing', title: '最终字段缺失', links: { original: 'https://example.com/duplicate-existing', aihot: 'https://aihot.virxact.com/items/duplicate-existing' } })
+    ])) });
+  await sendMessage({ type: 'pollNow' });
+  const duplicateExisting = storageData.history.find(item => item.id === 'duplicate-existing');
+  assert(duplicateExisting?.title === '最终字段缺失' && duplicateExisting?.selected === true, '重复既有 ID 只用最终行相对原始 membership 计算一次');
+
+  resetState({ feedMode: 'selected' });
+  fetchImpl = () => Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
+    v1Item({ id: 'install-selected', selected: false })
+  ])) });
+  await onInstalledHandler({ reason: 'install' });
+  assert(storageData.history.find(item => item.id === 'install-selected')?.selected === true, '安装初次 selected 抓取也强制标准成员资格');
+
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { all: 'fp-old' },
+    history: [{ id: 'membership-item', title: '精选条目', source: 'v1 来源', url: 'https://example.com/membership', permalink: 'https://aihot.virxact.com/items/membership-item', time: originalPublishedAt, discoveredAt: originalDiscoveredAt, selected: true }]
+  });
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-selected', 'fp-missing-membership')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'membership-item', links: { original: 'https://example.com/membership', aihot: 'https://aihot.virxact.com/items/membership-item' } })])) });
+  await sendMessage({ type: 'pollNow' });
+  assert(storageData.history.find(item => item.id === 'membership-item')?.selected === true, 'all 响应缺少 selected 字段时保留原精选成员资格');
+  storageData.feedMode = 'selected';
+  storageData.apiFingerprints = { selected: 'fp-old' };
+  fetchImpl = (url) => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-force-selected', 'fp-all')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'membership-item', selected: false, links: { original: 'https://example.com/membership', aihot: 'https://aihot.virxact.com/items/membership-item' } })])) });
+  await sendMessage({ type: 'pollNow' });
+  assert(storageData.history.find(item => item.id === 'membership-item')?.selected === true && !Object.prototype.hasOwnProperty.call(storageData.history.find(item => item.id === 'membership-item'), 'selectedPresent'), 'selected 响应强制成员资格且不持久化瞬时字段');
+
   const viewedBeforeSwitchAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const matchedBeforeSwitchAt = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
   resetState({
@@ -1338,7 +1476,7 @@ async function runTests() {
 
   const cleanupResponse = await sendMessage({ type: 'pollNow' });
   assert(cleanupResponse.ok === true, '合并已有条目时清理特关状态仍可成功');
-  assert(storageData.watchNotifyState['v1-retained'] && storageData.watchNotifyState['https://example.com/v1-retained'] && storageData.watchNotifyState['https://aihot.virxact.com/items/v1-retained'], '清理 orphan 特关状态时保留 history 关联的所有 aliases');
+  assert(storageData.watchNotifyState['v1-retained'] && !storageData.watchNotifyState['https://example.com/v1-retained'] && !storageData.watchNotifyState['https://aihot.virxact.com/items/v1-retained'], '合并已有条目后特关状态收敛到标准 ID');
   assert(!storageData.watchNotifyState['orphan-watch-state'], '合并 history 时移除 orphan 特关状态');
 
   console.log('\n[API 失败语义]');

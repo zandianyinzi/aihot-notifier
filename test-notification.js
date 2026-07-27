@@ -92,6 +92,14 @@ function sendMessage(message) {
   return new Promise(resolve => onMessageHandler(message, {}, resolve));
 }
 
+async function waitFor(check, attempts = 30) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (check()) return true;
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  return false;
+}
+
 async function autoPoll() {
   await onAlarmHandler({ name: 'aihot-poll' });
 }
@@ -278,6 +286,121 @@ async function runTests() {
   notificationsCreated = [];
   await autoPoll();
   assert(notificationsCreated.length === 0, '停用规则后不再重复提醒');
+
+  console.log('\n[标准 upsert 通知分类与隐藏提醒]');
+  const retainedUrl = 'https://example.com/retained-new-match';
+  resetState({
+    apiFingerprints: { selected: 'fp-old' },
+    history: [{
+      id: 'retained-new-match',
+      title: '旧标题',
+      source: '普通来源',
+      url: retainedUrl,
+      permalink: 'https://aihot.virxact.com/items/retained-new-match',
+      time: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      discoveredAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      selected: true
+    }],
+    watchRules: [{ id: 'wr_new_match', source: '目标来源', author: '', keywords: [], enabled: true }]
+  });
+  useV1Feed([v1Item({
+    id: 'retained-new-match',
+    title: '刷新后标题',
+    source: { name: '目标来源' },
+    links: { original: retainedUrl, aihot: 'https://aihot.virxact.com/items/retained-new-match' }
+  })]);
+  await autoPoll();
+  const newlyMatchedRetained = storageData.history.find(item => item.id === 'retained-new-match');
+  assert(notificationsCreated.length === 0 && newlyMatchedRetained?.title === '刷新后标题' && newlyMatchedRetained?.watchMatched === true, '已保留条目刷新并新命中特关时不立即通知');
+  assert(!storageData.watchNotifyState['retained-new-match'], '新命中的已保留条目没有旧特关状态时不新建提醒状态');
+
+  resetState({
+    apiFingerprints: { selected: 'fp-old' },
+    history: [{
+      id: 'stale-watch-match',
+      title: '旧命中条目',
+      source: '旧目标来源',
+      url: 'https://example.com/stale-watch-match',
+      permalink: 'https://aihot.virxact.com/items/stale-watch-match',
+      time: new Date().toISOString(),
+      discoveredAt: new Date().toISOString(),
+      selected: true,
+      watchMatched: true,
+      watchRuleIds: ['wr_stale'],
+      watchMatchedAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+    }],
+    watchRules: [{ id: 'wr_stale', source: '旧目标来源', author: '', keywords: [], enabled: true }],
+    watchNotifyState: {
+      'stale-watch-match': { ruleIds: ['wr_stale'], firstMatchedAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(), lastNotifiedAt: '', notifyCount: 0, nextNotifyAt: new Date(Date.now() - 1000).toISOString(), viewedAt: '' }
+    }
+  });
+  useV1Feed([v1Item({ id: 'stale-watch-match', source: { name: '新非目标来源' }, links: { original: 'https://example.com/stale-watch-match', aihot: 'https://aihot.virxact.com/items/stale-watch-match' } })]);
+  await autoPoll();
+  const noLongerMatched = storageData.history.find(item => item.id === 'stale-watch-match');
+  assert(notificationsCreated.length === 0 && noLongerMatched?.watchMatched !== true && !noLongerMatched?.watchRuleIds, '刷新后不再命中的保留条目清除匹配元数据且不提醒');
+
+  resetState({ apiFingerprints: { selected: 'fp-old' } });
+  useV1Feed([
+    v1Item({ id: 'duplicate-notification', title: '通知旧字段', links: { original: 'https://example.com/duplicate-notification', aihot: 'https://aihot.virxact.com/items/duplicate-notification' } }),
+    v1Item({ id: 'duplicate-notification', title: '通知最终字段', links: { original: 'https://example.com/duplicate-notification', aihot: 'https://aihot.virxact.com/items/duplicate-notification' } })
+  ]);
+  await autoPoll();
+  assert(storageData.history.length === 1 && notificationsCreated.length === 1 && notificationsCreated[0]?.message === '通知最终字段', '重复 ID 只作为一个 inserted 分类并使用最终字段通知');
+
+  const hiddenFirstMatchedAt = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'selected',
+    apiFingerprints: { selected: 'fp-same' },
+    lastItemsPollAt: new Date().toISOString(),
+    history: [{
+      id: 'hidden-watch',
+      title: '隐藏特关',
+      source: '隐藏来源',
+      url: 'https://example.com/hidden-watch',
+      permalink: 'https://aihot.virxact.com/items/hidden-watch',
+      time: new Date().toISOString(),
+      discoveredAt: new Date().toISOString(),
+      selected: false,
+      watchMatched: true,
+      watchRuleIds: ['wr_hidden']
+    }],
+    watchRules: [{ id: 'wr_hidden', source: '隐藏来源', author: '', keywords: [], enabled: true }],
+    watchNotifyState: {
+      'hidden-watch': { ruleIds: ['wr_hidden'], firstMatchedAt: hiddenFirstMatchedAt, lastNotifiedAt: hiddenFirstMatchedAt, notifyCount: 1, nextNotifyAt: new Date(Date.now() - 1000).toISOString(), viewedAt: '' }
+    }
+  });
+  useV1Feed([], 'fp-same');
+  await autoPoll();
+  assert(notificationsCreated.length === 0 && storageData.watchNotifyState['hidden-watch']?.notifyCount === 1, '隐藏的 all-only 特关状态保留但不进入 selected 提醒候选');
+
+  resetState({
+    apiFingerprints: { selected: 'fp-old' },
+    watchRules: [{ id: 'wr_silent_paths', source: '静默来源', author: '', keywords: [], enabled: true }]
+  });
+  useV1Feed([v1Item({ id: 'manual-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/manual-watch', aihot: 'https://aihot.virxact.com/items/manual-watch' } })]);
+  await sendMessage({ type: 'pollNow' });
+  assert(notificationsCreated.length === 0 && storageData.watchNotifyState['manual-watch']?.notifyCount === 0, '手动刷新的新特关条目静默建立提醒状态');
+
+  resetState({
+    feedMode: 'selected',
+    watchRules: [{ id: 'wr_silent_paths', source: '静默来源', author: '', keywords: [], enabled: true }]
+  });
+  let continuationRequested = false;
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return fingerprintResponse('fp-selected', 'fp-all-switch');
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'silent-watch-cursor') {
+      continuationRequested = true;
+      return responseForItems([v1Item({ id: 'continuation-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/continuation-watch', aihot: 'https://aihot.virxact.com/items/continuation-watch' } })]);
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
+      v1Item({ id: 'switch-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/switch-watch', aihot: 'https://aihot.virxact.com/items/switch-watch' } })
+    ], { hasMore: true, nextCursor: 'silent-watch-cursor' })) });
+  };
+  await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  await waitFor(() => continuationRequested && Boolean(storageData.watchNotifyState['continuation-watch']));
+  assert(notificationsCreated.length === 0 && storageData.watchNotifyState['switch-watch']?.notifyCount === 0, '内容源切换的新特关条目静默建立提醒状态');
+  assert(storageData.watchNotifyState['continuation-watch']?.notifyCount === 0, 'all 续拉的新特关条目静默建立提醒状态');
 
   console.log(`\n${'='.repeat(40)}`);
   console.log(`结果: ${passed} passed, ${failed} failed`);
