@@ -130,6 +130,46 @@ async function testFeedModeOptimisticProjectionAndLatestWins() {
   assert.deepStrictEqual(failedProjections.map(entry => entry.mode), ['all', 'selected'], 'failure replaces optimistic projection with authoritative projection');
 }
 
+async function testStaleSwitchCannotInvalidateNewOptimisticLoad() {
+  const requests = [];
+  const projections = [];
+  const controller = createFeedModeSwitchController({
+    initialMode: 'selected',
+    setDisabled: () => {},
+    sendChange: mode => new Promise(resolve => requests.push({ mode, resolve })),
+    loadProjection: mode => {
+      const deferred = createDeferred();
+      projections.push({ mode, deferred });
+      return deferred.promise;
+    },
+    readCommittedMode: async () => 'selected',
+    getFailCount: async () => 0,
+    clearScrollPosition: () => {},
+    rollback: async () => {},
+    onSuccess: () => {},
+    onFailure: () => {}
+  });
+
+  const first = controller.switchFeedMode('all');
+  requests[0].resolve({ ok: true });
+  await Promise.resolve();
+  const second = controller.switchFeedMode('selected');
+  projections[0].deferred.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepStrictEqual(
+    projections.map(entry => entry.mode),
+    ['all', 'selected'],
+    'stale switch must stop after its deferred optimistic projection and must not start another load'
+  );
+
+  requests[1].resolve({ ok: true });
+  projections[1].deferred.resolve();
+  await waitFor(() => projections.length === 3);
+  projections[2].deferred.resolve();
+  await Promise.all([first, second]);
+}
+
 async function testPendingModeStorageChanges() {
   const requests = [];
   const scheduled = [];
@@ -301,6 +341,7 @@ async function testContinuationStatusExpiryTimer() {
 (async () => {
   await testMutationQueue();
   await testFeedModeOptimisticProjectionAndLatestWins();
+  await testStaleSwitchCannotInvalidateNewOptimisticLoad();
   await testPendingModeStorageChanges();
   await testLatestWinsLoadCoalescing();
   await testLatestWinsLoadDropsStaleReads();

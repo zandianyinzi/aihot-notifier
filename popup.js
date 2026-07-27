@@ -590,12 +590,12 @@ function applyFontFamily(font) {
   localStorage.setItem('fontFamily', font);
 }
 
-function applyConfig(data) {
+function applyConfig(data, options = {}) {
   enabledEl.checked = data.enabled !== false;
   let interval = data.interval || 5;
   if (interval < 2) interval = 2;
   intervalEl.value = String(interval);
-  feedModeEl.value = normalizeFeedMode(data.feedMode);
+  if (options.preserveFeedMode !== true) feedModeEl.value = normalizeFeedMode(data.feedMode);
   const theme = normalizeTheme(data.theme);
   themeEl.value = theme;
   applyTheme(theme);
@@ -1066,21 +1066,31 @@ pollBtn.addEventListener('click', async () => {
 // Keep cold start on the skeleton; only use cached content after this browser session has warmed.
 (async function init() {
   logPerf('init-start');
+  const initialLoadVersion = historyLoadController.getVersion();
+  const initialSwitchRequestId = feedModeSwitchController.getState().switchRequestId;
+  function isInitialLoadCurrent() {
+    const switchState = feedModeSwitchController.getState();
+    return historyLoadController.getVersion() === initialLoadVersion &&
+      switchState.switchRequestId === initialSwitchRequestId &&
+      switchState.pendingMode === null;
+  }
   const storageDataPromise = chrome.storage.local.get([
     'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'openPositionMode', 'historyDays',
     'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules'
   ]);
-  const cachedData = await readWarmPopupCache();
+  const storageData = await storageDataPromise;
+  const cachedData = await readWarmPopupCache(normalizeFeedMode(storageData.feedMode));
   logPerf(cachedData ? 'cache-hit' : 'cache-miss');
-  if (cachedData) {
+  if (cachedData && isInitialLoadCurrent()) {
     applyConfig(cachedData);
     feedModeSwitchController.observeCommittedMode(cachedData.feedMode);
     await waitForNextPaint();
-    renderHistory(cachedData, { applyInitialPosition: true });
-    logPerf('render-cache');
+    if (isInitialLoadCurrent()) {
+      renderHistory(cachedData, { applyInitialPosition: true });
+      logPerf('render-cache');
+    }
   }
 
-  const storageData = await storageDataPromise;
   logPerf('storage-ready');
   const reconciled = reconcileCachedReadIds(storageData, cachedData);
   const data = reconciled.data;
@@ -1088,7 +1098,7 @@ pollBtn.addEventListener('click', async () => {
   data.feedMode = normalizeFeedMode(data.feedMode);
   data.history = projectHistory(data.history || [], data.feedMode);
   feedModeSwitchController.observeCommittedMode(data.feedMode);
-  applyConfig(data);
+  applyConfig(data, { preserveFeedMode: !isInitialLoadCurrent() });
   if (data.theme && data.theme !== normalizeTheme(data.theme)) {
     chrome.storage.local.set({ theme: 'dark' });
   }
@@ -1096,6 +1106,7 @@ pollBtn.addEventListener('click', async () => {
     chrome.storage.local.set({ fontFamily: 'system' });
   }
   await waitForNextPaint();
+  if (!isInitialLoadCurrent()) return;
   renderHistory(data, { applyInitialPosition: true });
   logPerf('render-storage');
   cacheLoadedPopupData(data);

@@ -68,6 +68,7 @@
         committedMode = mode;
         pendingMode = null;
         await optimisticLoad.catch(() => {});
+        if (requestId !== switchRequestId) return;
         await deps.loadProjection(mode, { immediate: true, switchRequestId: requestId });
         if (requestId !== switchRequestId) return;
         const failCount = await deps.getFailCount();
@@ -165,7 +166,7 @@
       return true;
     }
 
-    return { loadProjection, scheduleLoad };
+    return { loadProjection, scheduleLoad, getVersion: () => loadVersion };
   }
 
   function createPopupStorageChangeHandler(deps) {
