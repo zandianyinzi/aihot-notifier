@@ -41,7 +41,7 @@ const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
 const { normalizeFeedMode, projectHistory } = window.FeedState;
-const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createLatestWinsLoadController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController } = popupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController } = popupReliability;
 
 const CATEGORY_MAP = {
   'ai-models': { cls: 'cat-model', label: '模型' },
@@ -772,6 +772,11 @@ const POPUP_HISTORY_STORAGE_KEYS = [
   'feedMode', 'openPositionMode', 'watchRules', 'allFeedContinuation'
 ];
 
+const POPUP_INITIAL_STORAGE_KEYS = [
+  'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'openPositionMode', 'historyDays',
+  'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules'
+];
+
 const historyLoadController = createLatestWinsLoadController({
   read: async mode => {
     const [data, cachedData] = await Promise.all([
@@ -1064,51 +1069,52 @@ pollBtn.addEventListener('click', async () => {
 });
 
 // Keep cold start on the skeleton; only use cached content after this browser session has warmed.
-(async function init() {
-  logPerf('init-start');
-  const initialLoadVersion = historyLoadController.getVersion();
-  const initialSwitchRequestId = feedModeSwitchController.getState().switchRequestId;
-  function isInitialLoadCurrent() {
-    const switchState = feedModeSwitchController.getState();
-    return historyLoadController.getVersion() === initialLoadVersion &&
-      switchState.switchRequestId === initialSwitchRequestId &&
-      switchState.pendingMode === null;
-  }
-  const storageDataPromise = chrome.storage.local.get([
-    'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'openPositionMode', 'historyDays',
-    'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules'
-  ]);
-  const storageData = await storageDataPromise;
-  const cachedData = await readWarmPopupCache(normalizeFeedMode(storageData.feedMode));
-  logPerf(cachedData ? 'cache-hit' : 'cache-miss');
-  if (cachedData && isInitialLoadCurrent()) {
-    applyConfig(cachedData);
-    feedModeSwitchController.observeCommittedMode(cachedData.feedMode);
-    await waitForNextPaint();
-    if (isInitialLoadCurrent()) {
-      renderHistory(cachedData, { applyInitialPosition: true });
-      logPerf('render-cache');
+logPerf('init-start');
+const popupInitializationController = createPopupInitializationController({
+  getLoadVersion: historyLoadController.getVersion,
+  getSwitchState: feedModeSwitchController.getState,
+  normalizeFeedMode,
+  readCommittedMode: async () => {
+    const { feedMode } = await chrome.storage.local.get('feedMode');
+    return feedMode;
+  },
+  readWarmCache: () => readWarmPopupCache(),
+  readFullStorage: () => chrome.storage.local.get(POPUP_INITIAL_STORAGE_KEYS),
+  onCacheResolved: cachedData => logPerf(cachedData ? 'cache-hit' : 'cache-miss'),
+  applyCache: data => {
+    applyConfig(data);
+    feedModeSwitchController.observeCommittedMode(data.feedMode);
+  },
+  waitForPaint: waitForNextPaint,
+  renderCache: data => {
+    renderHistory(data, { applyInitialPosition: true });
+    logPerf('render-cache');
+  },
+  onStorageResolved: () => logPerf('storage-ready'),
+  prepareStorage: (storageData, cachedData) => {
+    const reconciled = reconcileCachedReadIds(storageData, cachedData);
+    const data = reconciled.data;
+    normalizeReadAllBeforeData(data);
+    data.feedMode = normalizeFeedMode(data.feedMode);
+    data.history = projectHistory(data.history || [], data.feedMode);
+    return data;
+  },
+  applyStorage: data => {
+    feedModeSwitchController.observeCommittedMode(data.feedMode);
+    applyConfig(data);
+    if (data.theme && data.theme !== normalizeTheme(data.theme)) {
+      chrome.storage.local.set({ theme: 'dark' });
     }
+    if (data.fontFamily && data.fontFamily !== normalizeFontFamily(data.fontFamily)) {
+      chrome.storage.local.set({ fontFamily: 'system' });
+    }
+  },
+  renderStorage: data => {
+    renderHistory(data, { applyInitialPosition: true });
+    logPerf('render-storage');
+    cacheLoadedPopupData(data);
+    markPopupSessionWarm();
   }
-
-  logPerf('storage-ready');
-  const reconciled = reconcileCachedReadIds(storageData, cachedData);
-  const data = reconciled.data;
-  normalizeReadAllBeforeData(data);
-  data.feedMode = normalizeFeedMode(data.feedMode);
-  data.history = projectHistory(data.history || [], data.feedMode);
-  feedModeSwitchController.observeCommittedMode(data.feedMode);
-  applyConfig(data, { preserveFeedMode: !isInitialLoadCurrent() });
-  if (data.theme && data.theme !== normalizeTheme(data.theme)) {
-    chrome.storage.local.set({ theme: 'dark' });
-  }
-  if (data.fontFamily && data.fontFamily !== normalizeFontFamily(data.fontFamily)) {
-    chrome.storage.local.set({ fontFamily: 'system' });
-  }
-  await waitForNextPaint();
-  if (!isInitialLoadCurrent()) return;
-  renderHistory(data, { applyInitialPosition: true });
-  logPerf('render-storage');
-  cacheLoadedPopupData(data);
-  markPopupSessionWarm();
-})();
+});
+popupInitializationController.initialize()
+  .catch(() => showPopupStatus('内容加载失败，请重试。'));

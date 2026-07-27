@@ -535,8 +535,8 @@ assert(!/\.skeleton-item:last-child\s*{[^}]*box-shadow:\s*none/i.test(popupHtml)
 assert(/\.settings-inner\s*{[\s\S]*?max-height:[\s\S]*?overflow-y:\s*auto/.test(popupHtml), '设置面板内容可滚动');
 console.log('\n[popup首帧初始化顺序]');
 assert(/function\s+waitForNextPaint\(\)/.test(popupJs), '存在首帧让步 helper');
-assert(/await\s+waitForNextPaint\(\);[\s\S]*?renderHistory\(data,\s*\{\s*applyInitialPosition:\s*true\s*\}\s*\);/s.test(popupJs), 'storage 渲染前先等待下一帧');
-assert(/await\s+waitForNextPaint\(\);[\s\S]*?renderHistory\(cachedData,\s*\{\s*applyInitialPosition:\s*true\s*\}\s*\);/s.test(popupJs), '缓存渲染前先等待下一帧');
+assert(/waitForPaint:\s*waitForNextPaint/.test(popupJs) && /await\s+deps\.waitForPaint\(\);[\s\S]*?deps\.renderStorage/.test(popupReliabilityJs), 'storage 渲染前先等待下一帧');
+assert(/await\s+deps\.waitForPaint\(\);[\s\S]*?deps\.renderCache/.test(popupReliabilityJs), '缓存渲染前先等待下一帧');
 assert(/<script\s+src="popup-log\.js"><\/script>/i.test(popupHtml), 'popup 首屏接入统一性能日志脚本');
 assert(/window\.__popupPerfLog/.test(popupLogJs), '统一性能日志脚本导出全局 helper');
 assert(/String\(a\[0\]\)\.startsWith\('\[POPUP\]\[perf\]'\)/.test(popupJs), '只复制标准化性能日志');
@@ -600,10 +600,11 @@ assert(/type:\s*'markItemsRead'/.test(popupJs), '条目打开后通过 backgroun
 assert(/type:\s*'saveWatchRules'/.test(popupJs), '特关规则通过 background 串行保存');
 assert(/createLatestWinsLoadController/.test(popupJs), 'popup 使用 coalesced latest-wins load controller');
 assert(/cached\.data\.feedMode[\s\S]*?expectedMode/.test(popupJs), 'popup cache 拒绝与请求内容源不匹配的数据');
-assert(/readWarmPopupCache\(normalizeFeedMode\(storageData\.feedMode\)\)/.test(popupJs), 'popup 初始化 warm cache 必须匹配权威 storage mode');
-assert(/const\s+initialLoadVersion\s*=\s*historyLoadController\.getVersion\(\)/.test(popupJs) && /function\s+isInitialLoadCurrent\(\)/.test(popupJs), 'popup 初始化捕获 latest-wins load version fence');
-assert(/const\s+initialSwitchRequestId\s*=\s*feedModeSwitchController\.getState\(\)\.switchRequestId/.test(popupJs) && /if\s*\(isInitialLoadCurrent\(\)\)\s*{\s*renderHistory\(cachedData/.test(popupJs), 'popup 初始化缓存渲染受 switch request fence 保护');
-assert(/await\s+waitForNextPaint\(\);\s*if\s*\(!isInitialLoadCurrent\(\)\)\s*return;\s*renderHistory\(data/.test(popupJs), 'popup 初始化 storage 渲染在 paint 后再次校验 fence');
+assert(/createPopupInitializationController/.test(popupJs), 'popup 初始化交由可测试的 latest-wins coordinator');
+assert(/readCommittedMode:\s*async\s*\(\)\s*=>[\s\S]*?chrome\.storage\.local\.get\('feedMode'\)/.test(popupJs), 'popup 初始化单独发起轻量权威 mode 读取');
+assert(/readWarmCache:\s*\(\)\s*=>\s*readWarmPopupCache\(\)/.test(popupJs), 'popup 初始化不等待 full history 即开始 warm cache 读取');
+assert(/readFullStorage:\s*\(\)\s*=>\s*chrome\.storage\.local\.get\(POPUP_INITIAL_STORAGE_KEYS\)/.test(popupJs), 'popup 初始化并发发起 full storage 读取');
+assert(/applyStorage:[\s\S]*?observeCommittedMode\(data\.feedMode\)/.test(popupJs), '权威 mode 更新仅位于 coordinator fenced storage commit 中');
 assert(/chrome\.runtime\.sendMessage\(\{\s*type:\s*'markAllRead',\s*readAllBefore:\s*now\s*}\)/.test(markAllReadHandler), '全部已读通过 background 串行推进全局水位');
 assert(!/chrome\.storage\.local\.set\(\{[\s\S]*?readAllBefore/.test(markAllReadHandler), 'popup 不独立覆写全部已读水位');
 assert(!/watchAliases|markWatchItemsViewed\(/.test(markAllReadHandler), '全部已读由 background 原子提交全局水位与全部特关已查看状态');

@@ -8,6 +8,7 @@ const {
   createMutationQueue,
   createFeedModeSwitchController,
   createLatestWinsLoadController,
+  createPopupInitializationController,
   createAllFeedContinuationStatusController,
   createPopupStorageChangeHandler,
   getSafeHttpsUrl,
@@ -265,6 +266,95 @@ async function testLatestWinsLoadDropsStaleReads() {
   assert.deepStrictEqual(commits.map(entry => entry.data.history[0].id), ['newer'], 'load captured by a stale switch request performs zero callbacks');
 }
 
+async function testStaleInitializationCannotOverwriteCommittedMode() {
+  let loadVersion = 0;
+  const fullStorage = createDeferred();
+  const scheduledModes = [];
+  const feedController = createFeedModeSwitchController({
+    initialMode: 'selected',
+    setDisabled: () => {},
+    sendChange: async () => ({ ok: true }),
+    loadProjection: async () => {},
+    readCommittedMode: async () => 'selected',
+    getFailCount: async () => 0,
+    clearScrollPosition: () => {},
+    rollback: async () => {},
+    onSuccess: () => {},
+    onFailure: () => {}
+  });
+  const initializer = createPopupInitializationController({
+    getLoadVersion: () => loadVersion,
+    getSwitchState: feedController.getState,
+    normalizeFeedMode: mode => mode === 'all' ? 'all' : 'selected',
+    readCommittedMode: async () => 'selected',
+    readWarmCache: async () => null,
+    readFullStorage: () => fullStorage.promise,
+    prepareStorage: data => data,
+    applyCache: () => assert.fail('stale init must not apply cache state'),
+    renderCache: () => assert.fail('stale init must not render cache state'),
+    applyStorage: data => feedController.observeCommittedMode(data.feedMode),
+    renderStorage: () => assert.fail('stale init must not render storage state'),
+    waitForPaint: async () => {}
+  });
+
+  const initializing = initializer.initialize();
+  loadVersion++;
+  feedController.observeCommittedMode('all');
+  fullStorage.resolve({ feedMode: 'selected', history: [{ id: 'stale-selected' }] });
+  const result = await initializing;
+  const handleStorageChange = createPopupStorageChangeHandler({
+    getFeedMode: feedController.getDisplayMode,
+    getSwitchRequestId: () => feedController.getState().switchRequestId,
+    scheduleLoad: (_changes, mode) => scheduledModes.push(mode)
+  });
+  handleStorageChange({ history: { newValue: [] } }, 'local');
+
+  assert.strictEqual(result.stale, true, 'older initialization exits stale after a newer load version commits');
+  assert.strictEqual(feedController.getState().committedMode, 'all', 'stale full snapshot cannot overwrite the newer committed mode');
+  assert.deepStrictEqual(scheduledModes, ['all'], 'later history-only storage changes continue projecting the newer committed mode');
+}
+
+async function testWarmCacheRendersBeforeFullStorage() {
+  const fullStorage = createDeferred();
+  const calls = [];
+  let initializeSettled = false;
+  const initializer = createPopupInitializationController({
+    getLoadVersion: () => 0,
+    getSwitchState: () => ({ switchRequestId: 0, pendingMode: null }),
+    normalizeFeedMode: mode => mode === 'all' ? 'all' : 'selected',
+    readCommittedMode: () => {
+      calls.push('read-mode');
+      return Promise.resolve('all');
+    },
+    readWarmCache: () => {
+      calls.push('read-cache');
+      return Promise.resolve({ feedMode: 'all', history: [{ id: 'cached-all' }] });
+    },
+    readFullStorage: () => {
+      calls.push('read-full');
+      return fullStorage.promise;
+    },
+    prepareStorage: data => data,
+    applyCache: data => calls.push(`apply-cache:${data.history[0].id}`),
+    renderCache: data => calls.push(`render-cache:${data.history[0].id}`),
+    applyStorage: data => calls.push(`apply-storage:${data.history[0].id}`),
+    renderStorage: data => calls.push(`render-storage:${data.history[0].id}`),
+    waitForPaint: async () => calls.push('paint')
+  });
+
+  const initializing = initializer.initialize().then(result => {
+    initializeSettled = true;
+    return result;
+  });
+  assert.deepStrictEqual(calls.slice(0, 3), ['read-mode', 'read-cache', 'read-full'], 'mode, warm cache, and full storage reads start concurrently');
+  await waitFor(() => calls.includes('render-cache:cached-all'));
+  assert.strictEqual(initializeSettled, false, 'matching warm cache renders while full history read remains pending');
+  fullStorage.resolve({ feedMode: 'all', history: [{ id: 'stored-all' }] });
+  const result = await initializing;
+  assert.strictEqual(result.stale, false, 'current initialization completes after full storage arrives');
+  assert(calls.indexOf('render-cache:cached-all') < calls.indexOf('apply-storage:stored-all'), 'warm cache render precedes full storage application');
+}
+
 async function testSafeOpenReadOrdering() {
   assert.strictEqual(getSafeHttpsUrl('https://example.com/a'), 'https://example.com/a');
   assert.strictEqual(getSafeHttpsUrl('http://example.com/a'), '');
@@ -345,10 +435,12 @@ async function testContinuationStatusExpiryTimer() {
   await testPendingModeStorageChanges();
   await testLatestWinsLoadCoalescing();
   await testLatestWinsLoadDropsStaleReads();
+  await testStaleInitializationCannotOverwriteCommittedMode();
+  await testWarmCacheRendersBeforeFullStorage();
   await testSafeOpenReadOrdering();
   await testPopupHistoryRenderOwnership();
   await testContinuationStatusExpiryTimer();
-  console.log('结果: 8 passed, 0 failed');
+  console.log('结果: 10 passed, 0 failed');
 })().catch(error => {
   console.error(error);
   process.exit(1);

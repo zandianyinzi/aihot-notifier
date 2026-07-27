@@ -169,6 +169,55 @@
     return { loadProjection, scheduleLoad, getVersion: () => loadVersion };
   }
 
+  function createPopupInitializationController(deps) {
+    async function initialize() {
+      const initialLoadVersion = deps.getLoadVersion();
+      const initialSwitchRequestId = deps.getSwitchState().switchRequestId;
+      const isCurrent = () => {
+        const switchState = deps.getSwitchState();
+        return deps.getLoadVersion() === initialLoadVersion &&
+          switchState.switchRequestId === initialSwitchRequestId &&
+          switchState.pendingMode === null;
+      };
+
+      const committedModePromise = Promise.resolve(deps.readCommittedMode());
+      const cachedDataPromise = Promise.resolve(deps.readWarmCache());
+      const storageDataPromise = Promise.resolve(deps.readFullStorage());
+      cachedDataPromise.catch(() => {});
+      storageDataPromise.catch(() => {});
+      const committedMode = deps.normalizeFeedMode(await committedModePromise);
+      const cachedCandidate = await cachedDataPromise;
+      const cachedData = cachedCandidate &&
+        deps.normalizeFeedMode(cachedCandidate.feedMode) === committedMode
+        ? cachedCandidate
+        : null;
+      if (deps.onCacheResolved) deps.onCacheResolved(cachedData);
+
+      if (cachedData) {
+        if (!isCurrent()) return { stale: true };
+        deps.applyCache(cachedData, committedMode);
+        await deps.waitForPaint();
+        if (!isCurrent()) return { stale: true };
+        deps.renderCache(cachedData, committedMode);
+      }
+
+      const storageData = await storageDataPromise;
+      if (deps.onStorageResolved) deps.onStorageResolved(storageData);
+      if (!isCurrent() || deps.normalizeFeedMode(storageData.feedMode) !== committedMode) {
+        return { stale: true };
+      }
+      const preparedData = deps.prepareStorage(storageData, cachedData);
+      if (!isCurrent()) return { stale: true };
+      deps.applyStorage(preparedData, committedMode);
+      await deps.waitForPaint();
+      if (!isCurrent()) return { stale: true };
+      deps.renderStorage(preparedData, committedMode);
+      return { stale: false, data: preparedData };
+    }
+
+    return { initialize };
+  }
+
   function createPopupStorageChangeHandler(deps) {
     return function handleStorageChange(changes, areaName) {
       if (areaName !== 'local') return;
@@ -216,6 +265,7 @@
     createMutationQueue,
     createFeedModeSwitchController,
     createLatestWinsLoadController,
+    createPopupInitializationController,
     createPopupStorageChangeHandler,
     getAllFeedContinuationStatusMessage,
     createAllFeedContinuationStatusController,
