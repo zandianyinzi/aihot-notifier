@@ -236,4 +236,4 @@ Required regressions:
 
 The implementation should introduce small pure helpers for identity upsert and a single feed-projection contract used consistently in both extension contexts, then route existing background and popup consumers through them. It should remove ongoing correctness dependence on `discoveredAtByAlias`, update contradictory integration expectations, route intersecting popup mutations through background messages, and add focused migration, optimistic-switch, debounce, and latest-wins controller tests.
 
-No manifest version bump, packaging, external dependency, API contract change, or unrelated UI redesign is part of this work.
+No manifest version bump, generated release package, external dependency, API contract change, or unrelated UI redesign is part of this work. Maintaining `pack.sh` so the new runtime source is included in a future package is required source maintenance, not a release operation.

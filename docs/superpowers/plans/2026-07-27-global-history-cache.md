@@ -168,6 +168,7 @@ function mergeCanonicalItem(existing, incoming, { mode, discoveredAt }) {
 
 function mergeWatchStates(states, item, watchRules) {
   const valid = states.filter(Boolean);
+  if (valid.length === 0) return null;
   const firstMatchedAt = earliestIso(valid.map(state => state.firstMatchedAt));
   const viewedAt = earliestIso(valid.map(state => state.viewedAt));
   const notifyCount = Math.max(0, ...valid.map(state => Number(state.notifyCount || 0)));
@@ -185,9 +186,11 @@ function mergeWatchStates(states, item, watchRules) {
 
 Implement `upsertCanonicalItems(state, items, options)` to return new `history`, `readIds`, `watchNotifyState`, `inserted`, `updated`, and `newlyMatched` values. `options` includes `mode`, `discoveredAt`, `completeSelectedSnapshot`, and `notify`. The helper removes only safely absorbed ID-less duplicates, migrates `readIds`, recomputes watch rule IDs, and retains notification progress. It never merges different non-empty IDs through URL aliases.
 
+Call `mergeWatchStates` only when at least one prior alias owns reminder state. Inserted watch items initialize state through the existing new-item path. Updated items that newly match a rule update `watchMatched/watchRuleIds` on history but deliberately leave `watchNotifyState` absent.
+
 - [ ] **Step 5: Route persistence and notifications through upsert classifications**
 
-Replace `filterNewApiItems` in persistence paths. Send normal/watch notifications only for `inserted` classifications according to `notify`; keep `updated/newlyMatched` silent. Project reminder candidates through the committed feed mode, but retain hidden watch state. Trim canonical history first, then prune watch state against retained canonical aliases. Keep mark-all-read global: it marks retained watch states at or before the watermark viewed even when their items are hidden, without suppressing later matches.
+Replace `filterNewApiItems` in persistence paths. Send normal/watch notifications only for `inserted` classifications according to `notify`; keep `updated/newlyMatched` silent. Project reminder candidates through the committed feed mode, but retain hidden watch state. Trim canonical history first, sort with the existing descending `getItemTime` rule, then prune watch state against retained canonical aliases. Keep mark-all-read global: it marks retained watch states at or before the watermark viewed even when their items are hidden, without suppressing later matches. Add assertions that hidden all-only watch state is retained but never enters selected-mode reminder candidates, and that merged history ordering remains unchanged.
 
 - [ ] **Step 6: Verify GREEN and commit**
 
@@ -205,7 +208,7 @@ Commit: `feat: upsert canonical feed history`
 
 - [ ] **Step 1: Add failing continuation and retention tests**
 
-Add integration cases that seed 2,363 retained identities and assert records 2,001 and 2,363 keep their original `discoveredAt`, read aliases, and watch state through all-feed continuation. Assert each page upserts into the current canonical snapshot, stale cursor/generation responses cannot write, terminal failure retains committed pages, and retention cleanup removes only expired canonical entries plus their orphan watch aliases.
+Add integration cases that seed 2,363 retained identities and assert records 2,001 and 2,363 keep their original `discoveredAt`, read aliases, and watch state through all-feed continuation. Assert each page upserts into the current canonical snapshot, stale cursor/generation responses cannot write, terminal failure retains committed pages, and retention cleanup removes only expired canonical entries plus their orphan watch aliases. Exercise duplicate continuation alarms, retry scheduling resolved out of order, and service-worker restart recovery with persisted cursor state.
 
 - [ ] **Step 2: Run the targeted suite and verify RED**
 
@@ -239,6 +242,8 @@ Commit: `fix: preserve canonical history during continuation`
 
 Cover migration with marker-absent selected/all fixtures and repeat startup after the marker is stored. Cover switching with the 2,363 all-item/96 selected-item fixture, a deferred all first page, two deferred source messages resolved in reverse order, a failed latest switch with an active continuation, and a selected response that reaches the page bound. Assert one-time promotion, stable canonical count, cached all availability, latest-generation commit, continuation preservation, successful truncated selected switch, and no absence downgrade.
 
+Add selected-snapshot metadata cases for normal `hasMore: false` termination, page-bound truncation, skipped invalid items, repeated/missing/invalid cursors, malformed containers, rejected pages, and stale generations. With `SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT = false`, none may downgrade by absence. With an injected capability-enabled test branch, only normal termination with zero skipped items and valid cursor history may downgrade missing selected membership.
+
 - [ ] **Step 2: Run tests and verify RED**
 
 Run: `node test-background.js`
@@ -247,11 +252,13 @@ Expected: legacy migration is absent, selected switch shrinks history, and a slo
 
 - [ ] **Step 3: Implement the idempotent migration**
 
-Add `CANONICAL_HISTORY_VERSION = 1` and `migrateCanonicalHistory()` through `runStateMutation`. Commit normalized history and `canonicalHistoryVersion` together before startup/install polling. Preserve a legacy active continuation fallback as specified in Task 3.
+Add `CANONICAL_HISTORY_VERSION = 1` and one memoized `ensureCanonicalHistoryMigration()` initialization barrier. Every entry point that can observe or mutate feed state, including startup/install, alarm recovery, scheduled/manual polling, source-switch messages, continuation alarms, and read/watch mutation messages, awaits this barrier before its normal queued mutation. Commit normalized history and `canonicalHistoryVersion` together. Preserve a legacy active continuation fallback as specified in Task 3. Add cold-worker tests where an alarm and source-switch message arrive before startup initialization and still observe migrated state exactly once.
 
 - [ ] **Step 4: Separate source-switch fetch from commit**
 
 Increment background-owned `sourceSwitchGeneration` immediately when a `feedModeChanged` message arrives. Fetch outside `stateMutationQueue`; then queue a commit that checks generation, rereads canonical/read/watch/rule state, upserts, checks generation again, and writes history/read/watch/mode/continuation/poll metadata once. Successful mode commit advances `feedModeGeneration`; failure or supersession leaves the old continuation authoritative.
+
+Inject a rejected `chrome.storage.local.set` during the final switch commit and assert the message fails while prior durable history/mode/continuation state and its scheduled alarm remain authoritative.
 
 Set `SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT = false`. Selected page-bound results succeed and promote returned items; absence downgrade stays disabled. Keep the helper branch testable for a future documented capability.
 
@@ -267,10 +274,10 @@ Commit: `fix: switch feed modes from canonical cache`
 
 **Files:**
 - Modify: `popup-reliability.js:1-90`
-- Modify: `popup.js:140-205,320-375,630-815,970-1020`
+- Modify: `popup.js:140-205,300-430,630-850,930-1100`
 - Modify: `test-popup-reliability.js`
 - Modify: `test-popup-ui.js`
-- Modify: `background.js:1290-1335`
+- Modify: `background.js:20-45,430-700,900-950,1280-1360`
 - Modify: `test-background.js`
 
 - [ ] **Step 1: Add failing controller tests**
@@ -305,7 +312,7 @@ Expected: all suites exit 0; the list changes immediately from local projection,
 
 Commit: `perf: render feed switches from canonical cache`
 
-### Task 6: Lock the production-equivalent regression and complete review
+### Task 6: Verify the production-equivalent regression and complete review
 
 **Files:**
 - Modify: `test-background.js`
@@ -313,13 +320,13 @@ Commit: `perf: render feed switches from canonical cache`
 - Modify: `test-popup-ui.js`
 - Verify: `feed-state.js`, `background.js`, `popup-reliability.js`, `popup.js`, `popup.html`, `pack.sh`, all `test*.js`
 
-- [ ] **Step 1: Add the final end-to-end mocked regression**
+- [ ] **Step 1: Re-run the end-to-end mocked regression added before Tasks 3-5 implementation**
 
-Freeze time and model the reported sequence exactly: 2,363 all items, global mark-all-read, complete 96-item selected response, selected mark-all-read, then all first page plus 100-item continuation pages. Assert canonical history does not shrink because of switching, selected shows 96, all cached projection is available before the first response, identities 2,001/2,363 remain read, only genuinely new identities are unread, watch progress survives, and popup render/load counts are bounded rather than one full rebuild per page.
+The regression freezes time and models the reported sequence exactly: 2,363 all items, global mark-all-read, complete 96-item selected response, selected mark-all-read, then all first page plus 100-item continuation pages. It asserts canonical history does not shrink because of switching, selected shows 96, all cached projection is available before the first response, identities 2,001/2,363 remain read, only genuinely new identities are unread, watch progress survives, and popup render/load counts are bounded rather than one full rebuild per page. This regression must first be added and observed RED in Task 3 for background state and Task 5 for popup load counts; Task 6 adds no post-implementation behavior test.
 
-- [ ] **Step 2: Verify the regression fails without the feature and passes with it**
+- [ ] **Step 2: Verify recorded RED/GREEN evidence and run the current regression GREEN**
 
-Run the new focused regression against `HEAD^` or temporarily revert the implementation files: it must fail for destructive history replacement. Restore the implementation and run `node test-background.js; node test-popup-reliability.js`; both must pass.
+Confirm Task 3 and Task 5 reports contain the expected pre-implementation failures for destructive history replacement and repeated popup loads. Run `node test-background.js; node test-popup-reliability.js` on the current branch and require both to pass. Do not revert implementation files or use a later task commit as a false baseline.
 
 - [ ] **Step 3: Run the complete offline suite**
 
