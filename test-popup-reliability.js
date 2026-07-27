@@ -387,12 +387,45 @@ async function testPopupHistoryRenderOwnership() {
   });
   handleStorageChange({
     history: { newValue: [] },
-    allFeedContinuation: { newValue: { active: true, expiresAt: new Date(Date.now() + 60 * 1000).toISOString() } }
+    allFeedContinuation: { newValue: { active: false } }
   }, 'local');
   assert.strictEqual(scheduled.length, 1, '同一 storage 事件中的 relevant keys schedule one coalesced load');
   assert.strictEqual(scheduled[0].mode, 'all', 'storage load uses the controller display mode');
   handleStorageChange({ theme: { newValue: 'dark' } }, 'local');
   assert.strictEqual(scheduled.length, 1, 'irrelevant storage changes do not rebuild history');
+}
+
+async function testActiveContinuationDefersIntermediateHistoryRenders() {
+  const scheduled = [];
+  const continuationStatuses = [];
+  const handleStorageChange = createPopupStorageChangeHandler({
+    getFeedMode: () => 'all',
+    getSwitchRequestId: () => 9,
+    updateContinuationStatus: status => continuationStatuses.push(status),
+    scheduleLoad: (changes, mode, requestId) => scheduled.push({ changes, mode, requestId })
+  });
+
+  for (let page = 1; page <= 20; page++) {
+    handleStorageChange({
+      history: { newValue: Array.from({ length: page * 100 }) },
+      allFeedContinuation: { newValue: { active: true, cursor: `page-${page}` } }
+    }, 'local');
+  }
+  assert.strictEqual(scheduled.length, 0, 'active continuation pages do not trigger one full popup rebuild per page');
+  assert.strictEqual(continuationStatuses.length, 20, 'active continuation progress still updates without rebuilding history');
+
+  handleStorageChange({
+    history: { newValue: Array.from({ length: 2000 }) },
+    readIds: { newValue: ['read-during-continuation'] },
+    allFeedContinuation: { newValue: { active: true, cursor: 'page-20' } }
+  }, 'local');
+  assert.strictEqual(scheduled.length, 1, 'read-state changes remain immediately renderable during continuation');
+
+  handleStorageChange({
+    history: { newValue: Array.from({ length: 2363 }) },
+    allFeedContinuation: { newValue: { active: false } }
+  }, 'local');
+  assert.strictEqual(scheduled.length, 2, 'terminal continuation commit schedules one final canonical render');
 }
 
 async function testContinuationStatusExpiryTimer() {
@@ -439,8 +472,9 @@ async function testContinuationStatusExpiryTimer() {
   await testWarmCacheRendersBeforeFullStorage();
   await testSafeOpenReadOrdering();
   await testPopupHistoryRenderOwnership();
+  await testActiveContinuationDefersIntermediateHistoryRenders();
   await testContinuationStatusExpiryTimer();
-  console.log('结果: 10 passed, 0 failed');
+  console.log('结果: 11 passed, 0 failed');
 })().catch(error => {
   console.error(error);
   process.exit(1);

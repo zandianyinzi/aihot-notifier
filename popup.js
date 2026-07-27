@@ -820,6 +820,7 @@ chrome.storage.onChanged.addListener(createPopupStorageChangeHandler({
     return feedModeSwitchController?.getDisplayMode() || feedModeEl.value;
   },
   getSwitchRequestId: () => feedModeSwitchController?.getState().switchRequestId || 0,
+  updateContinuationStatus: continuation => allFeedContinuationStatusController.update(continuation),
   scheduleLoad: historyLoadController.scheduleLoad
 }));
 

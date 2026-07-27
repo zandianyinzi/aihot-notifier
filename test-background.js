@@ -195,6 +195,7 @@ globalThis.chrome = {
 globalThis.fetch = (...args) => fetchImpl(...args);
 
 const backgroundApi = require('./background.js');
+const { projectHistory } = require('./feed-state.js');
 
 function sendMessage(message) {
   return new Promise(resolve => onMessageHandler(message, {}, resolve));
@@ -1268,6 +1269,123 @@ async function runTests() {
   await waitFor(() => badgeTexts.length > 0);
   assert(markBeforeSwitch.ok === true && switchedAfterRead.ok === true && sharedAfterSwitch?.discoveredAt === originalDiscoveredAt, '切源重建同一条目时保留原发现时间');
   assert(new Date(newAfterSwitch?.discoveredAt || 0) > new Date(globalReadAt) && badgeTexts.at(-1) === '1', '切源后首次发现的条目仍计为未读');
+
+  console.log('\n[生产等价内容源切换回归]');
+  const regressionPublishedAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const regressionHistory = Array.from({ length: 2363 }, (_, index) => ({
+    id: `source-regression-${index + 1}`,
+    title: `内容源回归 ${index + 1}`,
+    source: index === 2000 || index === 2362 ? '回归关注源' : '回归普通源',
+    url: `https://example.com/source-regression-${index + 1}`,
+    permalink: `https://aihot.virxact.com/items/source-regression-${index + 1}`,
+    time: regressionPublishedAt,
+    discoveredAt: new Date(Date.now() - (index + 1) * 1000).toISOString(),
+    selected: index < 96,
+    ...(index === 2000 || index === 2362 ? { watchMatched: true, watchRuleIds: ['source-regression-rule'] } : {})
+  }));
+  const regressionWatchFirstMatchedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    canonicalHistoryVersion: 1,
+    history: regressionHistory,
+    watchRules: [{ id: 'source-regression-rule', source: '回归关注源', author: '', keywords: [], enabled: true }],
+    watchNotifyState: {
+      'source-regression-2001': {
+        ruleIds: ['source-regression-rule'],
+        firstMatchedAt: regressionWatchFirstMatchedAt,
+        lastNotifiedAt: regressionWatchFirstMatchedAt,
+        notifyCount: 1,
+        nextNotifyAt: ''
+      },
+      'source-regression-2363': {
+        ruleIds: ['source-regression-rule'],
+        firstMatchedAt: regressionWatchFirstMatchedAt,
+        lastNotifiedAt: regressionWatchFirstMatchedAt,
+        notifyCount: 2,
+        nextNotifyAt: ''
+      }
+    }
+  });
+  const firstRegressionReadAt = new Date(Date.now() - 1000).toISOString();
+  const firstRegressionRead = await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: firstRegressionReadAt });
+  const selectedRegressionItems = regressionHistory.slice(0, 96).map(item => v1Item({
+    id: item.id,
+    title: item.title,
+    selected: true,
+    publishedAt: regressionPublishedAt,
+    source: { name: item.source },
+    links: { original: item.url, aihot: item.permalink }
+  }));
+  fetchImpl = url => url.includes('/api/public/fingerprint')
+    ? legacyFingerprintResponse('fp-source-regression-selected', 'fp-source-regression-all')
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page(selectedRegressionItems)) });
+  const selectedRegressionSwitch = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  const selectedRegressionProjection = projectHistory(storageData.history, 'selected');
+  const secondRegressionReadAt = new Date(Date.now() - 500).toISOString();
+  const secondRegressionRead = await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: secondRegressionReadAt });
+  const cachedAllRegressionProjection = projectHistory(storageData.history, 'all');
+  assert(firstRegressionRead.ok === true && selectedRegressionSwitch.ok === true && secondRegressionRead.ok === true, '生产等价回归中两次全部已读与 selected 切换均成功');
+  assert(storageData.history.length === 2363 && selectedRegressionProjection.length === 96, 'selected 切换不收缩 2363 条 canonical history，可见投影严格为 96 条');
+  assert(cachedAllRegressionProjection.length === 2363, '切回 all 发起网络请求前已可从 canonical cache 投影完整历史');
+
+  const allRegressionItems = [
+    v1Item({
+      id: 'source-regression-new',
+      title: '切回 all 后新身份',
+      selected: false,
+      publishedAt: regressionPublishedAt,
+      links: {
+        original: 'https://example.com/source-regression-new',
+        aihot: 'https://aihot.virxact.com/items/source-regression-new'
+      }
+    }),
+    ...regressionHistory.map(item => v1Item({
+      id: item.id,
+      title: item.title,
+      selected: item.selected,
+      publishedAt: regressionPublishedAt,
+      source: { name: item.source },
+      links: { original: item.url, aihot: item.permalink }
+    }))
+  ];
+  const allRegressionPages = [];
+  for (let offset = 0; offset < allRegressionItems.length; offset += 100) {
+    allRegressionPages.push(allRegressionItems.slice(offset, offset + 100));
+  }
+  let regressionAllPageRequests = 0;
+  fetchImpl = url => {
+    if (url.includes('/api/public/fingerprint')) {
+      return legacyFingerprintResponse('fp-source-regression-selected', 'fp-source-regression-all-final');
+    }
+    const parsed = new URL(url);
+    const cursor = parsed.searchParams.get('cursor');
+    const pageIndex = cursor ? Number(cursor.replace('source-regression-page-', '')) : 0;
+    regressionAllPageRequests++;
+    const hasMore = pageIndex < allRegressionPages.length - 1;
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page(allRegressionPages[pageIndex], {
+        hasMore,
+        nextCursor: hasMore ? `source-regression-page-${pageIndex + 1}` : null
+      }))
+    });
+  };
+  const allRegressionSwitch = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const allRegressionCompleted = await waitFor(() =>
+    storageData.allFeedContinuation?.active === false && storageData.history.length === 2364,
+    200
+  );
+  const regression2001 = storageData.history.find(item => item.id === 'source-regression-2001');
+  const regression2363 = storageData.history.find(item => item.id === 'source-regression-2363');
+  const regressionNew = storageData.history.find(item => item.id === 'source-regression-new');
+  const readWatermark = new Date(storageData.readAllBefore || 0).getTime();
+  const unreadRegressionIds = storageData.history
+    .filter(item => !storageData.readIds.includes(item.id) && new Date(item.discoveredAt || item.time || 0).getTime() > readWatermark)
+    .map(item => item.id);
+  assert(allRegressionSwitch.ok === true && allRegressionCompleted && regressionAllPageRequests === 20, 'all 首页后按 100 条续拉到页数上限，canonical history 仍完整保留 2364 条');
+  assert(regression2001?.discoveredAt === regressionHistory[2000].discoveredAt && regression2363?.discoveredAt === regressionHistory[2362].discoveredAt, '续拉保留第 2001 与 2363 条原始发现时间');
+  assert(storageData.watchNotifyState['source-regression-2001']?.notifyCount === 1 && storageData.watchNotifyState['source-regression-2363']?.notifyCount === 2 && Boolean(storageData.watchNotifyState['source-regression-2001']?.viewedAt) && Boolean(storageData.watchNotifyState['source-regression-2363']?.viewedAt), '第 2001 与 2363 条的特关进度与已查看状态跨切源保留');
+  assert(regressionNew && unreadRegressionIds.length === 1 && unreadRegressionIds[0] === 'source-regression-new', '只有续拉期间真正新发现的身份为未读');
 
   const deepSelectedDiscoveredAt = new Date(Date.now() - 90 * 60 * 1000).toISOString();
   const deepSelectedItem = {

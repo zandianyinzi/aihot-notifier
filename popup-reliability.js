@@ -222,6 +222,14 @@
     return function handleStorageChange(changes, areaName) {
       if (areaName !== 'local') return;
       if (!hasRelevantPopupLoadChange(changes)) return;
+      const continuation = changes.allFeedContinuation?.newValue;
+      if (changes.allFeedContinuation && deps.updateContinuationStatus) {
+        deps.updateContinuationStatus(continuation);
+      }
+      const hasOtherRenderableChange = Object.keys(changes || {}).some(key =>
+        key !== 'history' && key !== 'allFeedContinuation' && POPUP_LOAD_STORAGE_KEYS.has(key)
+      );
+      if (continuation?.active === true && !hasOtherRenderableChange) return;
       deps.scheduleLoad(changes, deps.getFeedMode(changes), deps.getSwitchRequestId());
     };
   }
