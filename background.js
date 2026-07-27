@@ -26,14 +26,38 @@ const RETRY_AFTER_FALLBACK_MS = 45 * 1000;
 const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
+const CANONICAL_HISTORY_VERSION = 1;
+const SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT = false;
 let notificationCounter = 0;
 let stateMutationQueue = Promise.resolve();
 let feedModeGeneration = 0;
+let sourceSwitchGeneration = 0;
+let canonicalHistoryMigrationPromise = null;
 
 function runStateMutation(task) {
   const operation = stateMutationQueue.then(task, task);
   stateMutationQueue = operation.catch(() => {});
   return operation;
+}
+
+function ensureCanonicalHistoryMigration() {
+  if (!canonicalHistoryMigrationPromise) {
+    canonicalHistoryMigrationPromise = runStateMutation(async () => {
+      const data = await chrome.storage.local.get(['canonicalHistoryVersion', 'history', 'feedMode']);
+      if (Number(data.canonicalHistoryVersion || 0) >= CANONICAL_HISTORY_VERSION) return;
+      const mode = normalizeFeedMode(data.feedMode);
+      const history = (data.history || []).map(item => ({
+        ...item,
+        selected: mode === 'selected' ? true : item?.selected === true
+      }));
+      await chrome.storage.local.set({ history, canonicalHistoryVersion: CANONICAL_HISTORY_VERSION });
+    });
+  }
+  return canonicalHistoryMigrationPromise;
+}
+
+function runMigratedStateMutation(task) {
+  return ensureCanonicalHistoryMigration().then(() => runStateMutation(task));
 }
 
 async function getConfig() {
@@ -264,6 +288,8 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
   let cursor = null;
   let truncated = false;
   let nextCursor = '';
+  let skippedItems = 0;
+  let termination = 'page-bound';
   const seenCursors = new Set();
 
   for (let page = 0; page < maxPages; page++) {
@@ -272,11 +298,18 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
 
     const response = getV1Page(await fetchItemsPage(url));
     const items = response.items.map(normalizeV1Item).filter(Boolean);
+    skippedItems += response.items.length - items.length;
     allItems = allItems.concat(items);
 
-    if (!response.hasMore) break;
+    if (!response.hasMore) {
+      termination = 'complete';
+      break;
+    }
     const oldest = items[items.length - 1];
-    if (oldest && new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) break;
+    if (oldest && new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) {
+      termination = 'cutoff';
+      break;
+    }
     if (page === maxPages - 1) {
       truncated = true;
       nextCursor = response.nextCursor;
@@ -289,7 +322,17 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
 
   allItems.truncated = truncated;
   allItems.nextCursor = nextCursor;
+  allItems.skippedItems = skippedItems;
+  allItems.termination = termination;
   return allItems;
+}
+
+function isCompleteSelectedSnapshot(items, mode, supportsConsistentSnapshot = SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT) {
+  return supportsConsistentSnapshot === true &&
+    normalizeFeedMode(mode) === 'selected' &&
+    items?.termination === 'complete' &&
+    Number(items?.skippedItems || 0) === 0 &&
+    items?.truncated !== true;
 }
 
 function splitWatchKeywords(value) {
@@ -713,7 +756,7 @@ function upsertCanonicalItems(state, items, options = {}) {
   }
 
   const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-  const retainedHistory = (options.replaceHistory ? returnedCanonicalItems : history)
+  const retainedHistory = history
     .filter(item => isWithinHistoryWindow(item, cutoff))
     .sort((a, b) => getItemTime(b) - getItemTime(a));
   const retainedWatchNotifyState = options.retainUnmatchedWatchState
@@ -757,7 +800,7 @@ async function clearNotificationUrlOnClosed(notificationId) {
 
 if (chrome.notifications.onClosed && chrome.notifications.onClosed.addListener) {
   chrome.notifications.onClosed.addListener((notificationId) => {
-    return runStateMutation(() => clearNotificationUrlOnClosed(notificationId))
+    return runMigratedStateMutation(() => clearNotificationUrlOnClosed(notificationId))
       .catch(e => console.warn('[AI HOT] failed to forget closed notification:', e));
   });
 }
@@ -890,7 +933,7 @@ async function pollForUpdatesInternal() {
 }
 
 function pollForUpdates() {
-  return runStateMutation(pollForUpdatesInternal);
+  return runMigratedStateMutation(pollForUpdatesInternal);
 }
 
 async function incrementFailCount() {
@@ -1016,7 +1059,7 @@ async function checkWatchRemindersInternal(limit = MAX_WATCH_NOTIFICATIONS_PER_C
 }
 
 function checkWatchReminders(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
-  return runStateMutation(() => checkWatchRemindersInternal(limit));
+  return runMigratedStateMutation(() => checkWatchRemindersInternal(limit));
 }
 
 async function manualPollInternal() {
@@ -1086,7 +1129,7 @@ async function manualPollInternal() {
 }
 
 function manualPoll() {
-  return runStateMutation(manualPollInternal);
+  return runMigratedStateMutation(manualPollInternal);
 }
 
 async function updateBadge() {
@@ -1326,84 +1369,98 @@ async function resumeAllFeedContinuation() {
   });
 }
 
-async function resetAndPollInternal(feedMode) {
+async function resetAndPollInternal(feedMode, generation) {
   await assertNotInBackoff();
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
-    const { history: previousHistory = [], historyDays = DEFAULT_HISTORY_DAYS, readIds = [], watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'watchRules', 'watchNotifyState']);
+    const { historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get('historyDays');
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
-
     const mode = normalizeFeedMode(feedMode);
     const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: mode === 'all' ? 1 : getMaxPages(mode) });
+    if (generation !== sourceSwitchGeneration) return { stale: true };
     const discoveredAt = new Date().toISOString();
     const hasContinuation = mode === 'all' && allItems.truncated && allItems.nextCursor;
-    const discoveredAtByAlias = buildDiscoveredAtByAlias(previousHistory);
-    const resolveDiscoveredAt = item => getKnownDiscoveredAt(item, discoveredAtByAlias, discoveredAt);
-    const canonical = upsertCanonicalItems({ history: previousHistory, readIds, watchRules, watchNotifyState }, allItems, {
-      mode,
-      discoveredAt: resolveDiscoveredAt,
-      matchedAt: discoveredAt,
-      historyDays,
-      replaceHistory: !hasContinuation,
-      retainUnmatchedWatchState: hasContinuation
-    });
-    const nextHistory = canonical.history;
-    const watchItems = canonical.inserted.filter(item => item.watchMatched === true);
-    const normalItems = canonical.inserted.filter(item => item.watchMatched !== true);
-
     const fingerprintProbe = startFingerprintProbe(mode);
-    const nextGeneration = feedModeGeneration + 1;
-    const continuationId = getContinuationId();
-    const continuation = hasContinuation
-      ? { generation: nextGeneration, continuationId, cursor: allItems.nextCursor, fingerprintProbe }
-      : null;
-    const resetData = {
-      history: nextHistory,
-      readIds: canonical.readIds,
-      lastItems: [...watchItems, ...normalItems].slice(0, 5),
-      watchNotifyState: continuation
-        ? canonical.watchNotifyState
-        : pruneWatchNotifyState(nextHistory, canonical.watchNotifyState),
-      feedMode: mode
-    };
-    if (continuation) {
+    const committed = await runStateMutation(async () => {
+      if (generation !== sourceSwitchGeneration) return { stale: true };
+      const {
+        history: previousHistory = [],
+        historyDays: committedHistoryDays = DEFAULT_HISTORY_DAYS,
+        readIds = [],
+        watchRules = [],
+        watchNotifyState = {}
+      } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'watchRules', 'watchNotifyState']);
+      if (generation !== sourceSwitchGeneration) return { stale: true };
+
+      const canonical = upsertCanonicalItems({ history: previousHistory, readIds, watchRules, watchNotifyState }, allItems, {
+        mode,
+        discoveredAt,
+        matchedAt: discoveredAt,
+        historyDays: committedHistoryDays,
+        completeSelectedSnapshot: isCompleteSelectedSnapshot(allItems, mode)
+      });
+      const watchItems = canonical.inserted.filter(item => item.watchMatched === true);
+      const normalItems = canonical.inserted.filter(item => item.watchMatched !== true);
+      const nextGeneration = feedModeGeneration + 1;
+      const continuationId = getContinuationId();
+      const continuation = hasContinuation
+        ? { generation: nextGeneration, continuationId, cursor: allItems.nextCursor, fingerprintProbe }
+        : null;
+      if (generation !== sourceSwitchGeneration) return { stale: true };
       await chrome.storage.local.set({
-        ...resetData,
-        allFeedContinuation: getActiveAllContinuationStatus(allItems.nextCursor, continuationId),
+        history: canonical.history,
+        readIds: canonical.readIds,
+        lastItems: [...watchItems, ...normalItems].slice(0, 5),
+        watchNotifyState: pruneWatchNotifyState(canonical.history, canonical.watchNotifyState),
+        feedMode: mode,
+        allFeedContinuation: continuation
+          ? getActiveAllContinuationStatus(allItems.nextCursor, continuationId)
+          : { active: false },
         lastCheck: new Date().toISOString(),
         failCount: 0,
-        nextAllowedPollAt: ''
+        nextAllowedPollAt: '',
+        ...(!allItems.truncated ? { lastItemsPollAt: new Date().toISOString() } : {})
       });
       feedModeGeneration = nextGeneration;
-    } else if (!allItems.truncated) {
-      if (mode !== 'all') await saveFingerprintProbe(await fingerprintProbe);
-      await commitSuccessfulItemsPoll({ ...resetData, allFeedContinuation: { active: false } });
-      feedModeGeneration = nextGeneration;
-      if (mode === 'all') {
-        saveDeferredAllFingerprintProbe(nextGeneration, fingerprintProbe);
-      }
-    } else {
-      await chrome.storage.local.set({ ...resetData, allFeedContinuation: { active: false }, lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
-      feedModeGeneration = nextGeneration;
-    }
+      return { continuation, nextHistory: canonical.history, nextGeneration };
+    });
+    if (committed.stale) return committed;
+
     await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
     await updateBadge();
-    console.log(`[AI HOT] resetAndPoll done, ${nextHistory.length} items from ${allItems.length} fetched`);
-    if (continuation) continueAllFeed(continuation);
+    console.log(`[AI HOT] resetAndPoll done, ${committed.nextHistory.length} items from ${allItems.length} fetched`);
+    if (committed.continuation) {
+      continueAllFeed(committed.continuation);
+    } else if (mode === 'all') {
+      saveDeferredAllFingerprintProbe(committed.nextGeneration, fingerprintProbe);
+    } else {
+      void Promise.resolve(fingerprintProbe)
+        .then(probe => runStateMutation(async () => {
+          if (generation !== sourceSwitchGeneration) return;
+          const { feedMode: committedMode } = await chrome.storage.local.get('feedMode');
+          if (normalizeFeedMode(committedMode) !== mode) return;
+          await saveFingerprintProbe(probe);
+        }))
+        .catch(e => console.warn('[AI HOT] deferred fingerprint save failed:', e));
+    }
+    return { stale: false };
   } catch (e) {
+    if (generation !== sourceSwitchGeneration) return { stale: true };
     if (e.backoff) throw e;
     console.error(`[AI HOT] resetAndPoll error:`, e);
-    await recordApiFailure(e.response || e.status || 0);
+    await runStateMutation(() => recordApiFailure(e.response || e.status || 0));
     throw e;
   }
 }
 
 function resetAndPoll(feedMode) {
-  return runStateMutation(() => resetAndPollInternal(feedMode));
+  const generation = ++sourceSwitchGeneration;
+  return ensureCanonicalHistoryMigration()
+    .then(() => resetAndPollInternal(feedMode, generation));
 }
 
-chrome.notifications.onClicked.addListener((notificationId) => runStateMutation(async () => {
+chrome.notifications.onClicked.addListener((notificationId) => runMigratedStateMutation(async () => {
   if (notificationId.startsWith('aihot-')) {
     const { lastItems = [], notificationUrlMap = {}, notificationStateKeyMap = {} } = await chrome.storage.local.get(['lastItems', 'notificationUrlMap', 'notificationStateKeyMap']);
     const url = notificationUrlMap[notificationId] || lastItems[0]?.url;
@@ -1419,10 +1476,10 @@ chrome.notifications.onClicked.addListener((notificationId) => runStateMutation(
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALL_CONTINUATION_ALARM_NAME) {
-    return runStateMutation(resumeAllFeedContinuation);
+    return runMigratedStateMutation(resumeAllFeedContinuation);
   }
   if (alarm.name === ALARM_NAME) {
-    return runStateMutation(async () => {
+    return runMigratedStateMutation(async () => {
       const result = await pollForUpdatesInternal();
       return checkWatchRemindersInternal(getCycleWatchNotificationBudget(result?.watchNotificationsSent || 0));
     });
@@ -1474,19 +1531,20 @@ async function handleInstalled(details) {
   await setupAlarm();
 }
 
-chrome.runtime.onInstalled.addListener((details) => runStateMutation(() => handleInstalled(details)));
+chrome.runtime.onInstalled.addListener((details) => runMigratedStateMutation(() => handleInstalled(details)));
 
-chrome.runtime.onStartup.addListener(() => runStateMutation(async () => {
+chrome.runtime.onStartup.addListener(() => runMigratedStateMutation(async () => {
   await recoverAllFeedContinuationStatus();
   await migrateReadAllBefore();
   await setupAlarm();
 }));
 
-void runStateMutation(recoverAllFeedContinuationStatus);
+void runMigratedStateMutation(recoverAllFeedContinuationStatus)
+  .catch(e => console.warn('[AI HOT] failed to initialize canonical history:', e));
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'configChanged') {
-    runStateMutation(setupAlarm)
+    runMigratedStateMutation(setupAlarm)
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
@@ -1504,13 +1562,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'markWatchViewed') {
-    runStateMutation(() => markWatchViewed(msg.urls || msg.url))
+    runMigratedStateMutation(() => markWatchViewed(msg.urls || msg.url))
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
   if (msg.type === 'markAllRead') {
-    runStateMutation(async () => {
+    runMigratedStateMutation(async () => {
       if (!msg.readAllBefore || !Number.isFinite(new Date(msg.readAllBefore).getTime())) throw new Error('Invalid readAllBefore');
       return advanceReadAllBefore(msg.readAllBefore, true);
     })
@@ -1523,7 +1581,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // 数据变化时自动更新 badge
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.history || changes.readIds || changes.readAllBefore || changes.readAllBeforeByMode || changes.feedMode) {
-    runStateMutation(updateBadge)
+    runMigratedStateMutation(updateBadge)
       .catch(e => console.warn('[AI HOT] failed to update badge:', e));
   }
 });
+
+if (typeof module === 'object' && module.exports) {
+  module.exports = { isCompleteSelectedSnapshot };
+}
