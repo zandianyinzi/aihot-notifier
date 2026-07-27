@@ -1690,6 +1690,118 @@ async function runTests() {
   await Promise.all([delayedAllSwitch, delayedSelectedSwitch]);
   assert(delayedAllResult.ok === false && delayedAllResult.stale === true && delayedSelectedResult.ok === true && storageData.feedMode === 'selected' && storageData.history.some(item => item.id === 'selected-delayed-commit-item'), '最终 storage await 期间出现更新切源意图时旧提交返回 stale，最终 durable 状态属于最新意图');
 
+  const authoritativeBeforeStaleCommit = {
+    feedMode: 'selected',
+    history: [{
+      id: 'authoritative-before-stale-commit',
+      url: 'https://example.com/authoritative-before-stale-commit',
+      time: new Date().toISOString(),
+      discoveredAt: new Date().toISOString(),
+      selected: true
+    }],
+    allFeedContinuation: { active: false }
+  };
+  resetState({ canonicalHistoryVersion: 1, ...authoritativeBeforeStaleCommit });
+  let releaseStaleAllCommit;
+  let staleAllCommitStarted = false;
+  let failingSelectedFetchStarted = false;
+  storageSetImpl = values => {
+    if (values.feedMode === 'all' && !staleAllCommitStarted) {
+      staleAllCommitStarted = true;
+      return new Promise(resolve => {
+        releaseStaleAllCommit = () => {
+          Object.assign(storageData, values);
+          resolve();
+        };
+      });
+    }
+    Object.assign(storageData, values);
+    return Promise.resolve();
+  };
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-failing-selected', 'fp-stale-all');
+    const mode = new URL(url).searchParams.get('mode');
+    if (mode === 'selected') {
+      failingSelectedFetchStarted = true;
+      return Promise.resolve({ ok: false, status: 503, headers: { get: () => '' } });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: 'must-rollback-stale-all' })], { hasMore: true, nextCursor: 'must-not-survive-stale-cursor' }))
+    });
+  };
+  const staleAllSwitch = sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  assert(await waitFor(() => staleAllCommitStarted), '旧 all 已进入延迟的最终 storage 提交');
+  const failingSelectedSwitch = sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  assert(await waitFor(() => failingSelectedFetchStarted), '新 selected 意图在旧 all storage await 期间到达且网络失败');
+  releaseStaleAllCommit();
+  const [staleAllResponse, failingSelectedResponse] = await Promise.all([staleAllSwitch, failingSelectedSwitch]);
+  assert(
+    staleAllResponse.ok === false && staleAllResponse.stale === true &&
+      failingSelectedResponse.ok === false && !failingSelectedResponse.stale &&
+      storageData.feedMode === authoritativeBeforeStaleCommit.feedMode &&
+      JSON.stringify(storageData.history) === JSON.stringify(authoritativeBeforeStaleCommit.history) &&
+      JSON.stringify(storageData.allFeedContinuation) === JSON.stringify(authoritativeBeforeStaleCommit.allFeedContinuation) &&
+      !activeAlarmNames.has('aihot-all-continuation'),
+    '旧 all 写入变 stale 且新 selected 拉取失败时补偿恢复写入前权威快照，不遗留 continuation 或 alarm'
+  );
+
+  const authoritativeBeforeCompensationRetry = {
+    feedMode: 'selected',
+    history: [{
+      id: 'authoritative-before-compensation-retry',
+      url: 'https://example.com/authoritative-before-compensation-retry',
+      time: new Date().toISOString(),
+      discoveredAt: new Date().toISOString(),
+      selected: true
+    }],
+    allFeedContinuation: { active: false }
+  };
+  resetState({ canonicalHistoryVersion: 1, ...authoritativeBeforeCompensationRetry });
+  let releaseRetryingStaleCommit;
+  let retryingStaleCommitStarted = false;
+  let compensationAttempts = 0;
+  storageSetImpl = values => {
+    if (values.feedMode === 'all' && !retryingStaleCommitStarted) {
+      retryingStaleCommitStarted = true;
+      return new Promise(resolve => {
+        releaseRetryingStaleCommit = () => {
+          Object.assign(storageData, values);
+          resolve();
+        };
+      });
+    }
+    if (values.feedMode === 'selected' && values.history?.[0]?.id === 'authoritative-before-compensation-retry') {
+      compensationAttempts++;
+      if (compensationAttempts === 1) return Promise.reject(new Error('mock transient compensation failure'));
+    }
+    Object.assign(storageData, values);
+    return Promise.resolve();
+  };
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-retry-failing-selected', 'fp-retrying-stale-all');
+    const mode = new URL(url).searchParams.get('mode');
+    if (mode === 'selected') return Promise.resolve({ ok: false, status: 503, headers: { get: () => '' } });
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: 'must-rollback-after-compensation-retry' })], { hasMore: true, nextCursor: 'retrying-stale-cursor' }))
+    });
+  };
+  const retryingStaleSwitch = sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  assert(await waitFor(() => retryingStaleCommitStarted), '旧 all 已进入需要补偿重试的延迟提交');
+  const failingSelectedDuringRetry = sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  releaseRetryingStaleCommit();
+  const [retryingStaleResponse, failingSelectedDuringRetryResponse] = await Promise.all([retryingStaleSwitch, failingSelectedDuringRetry]);
+  assert(
+    retryingStaleResponse.ok === false && retryingStaleResponse.stale === true &&
+      failingSelectedDuringRetryResponse.ok === false && compensationAttempts === 2 &&
+      storageData.feedMode === authoritativeBeforeCompensationRetry.feedMode &&
+      JSON.stringify(storageData.history) === JSON.stringify(authoritativeBeforeCompensationRetry.history) &&
+      JSON.stringify(storageData.allFeedContinuation) === JSON.stringify(authoritativeBeforeCompensationRetry.allFeedContinuation) &&
+      !activeAlarmNames.has('aihot-all-continuation'),
+    'stale source-switch 补偿写瞬时失败时在串行边界内重试并恢复权威快照'
+  );
+
   for (const postCommitFailure of ['alarm-clear', 'badge']) {
     resetState({ feedMode: 'selected', canonicalHistoryVersion: 1 });
     let postCommitCursorStarted = false;

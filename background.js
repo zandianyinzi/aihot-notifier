@@ -28,6 +28,18 @@ const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 const CANONICAL_HISTORY_VERSION = 1;
 const SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT = false;
+const SOURCE_SWITCH_STORAGE_KEYS = [
+  'history',
+  'readIds',
+  'lastItems',
+  'watchNotifyState',
+  'feedMode',
+  'allFeedContinuation',
+  'lastCheck',
+  'failCount',
+  'nextAllowedPollAt',
+  'lastItemsPollAt'
+];
 let notificationCounter = 0;
 let stateMutationQueue = Promise.resolve();
 let feedModeGeneration = 0;
@@ -1395,6 +1407,37 @@ async function resumeAllFeedContinuation() {
   });
 }
 
+function getSourceSwitchRollbackState(data) {
+  return {
+    history: data.history || [],
+    readIds: data.readIds || [],
+    lastItems: data.lastItems || [],
+    watchNotifyState: data.watchNotifyState || {},
+    feedMode: normalizeFeedMode(data.feedMode),
+    allFeedContinuation: data.allFeedContinuation || { active: false },
+    lastCheck: data.lastCheck || '',
+    failCount: Number(data.failCount || 0),
+    nextAllowedPollAt: data.nextAllowedPollAt || '',
+    lastItemsPollAt: data.lastItemsPollAt || ''
+  };
+}
+
+async function restoreStaleSourceSwitch(rollbackState) {
+  let cause;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await chrome.storage.local.set(rollbackState);
+      return;
+    } catch (e) {
+      cause = e;
+    }
+  }
+  const error = new Error('Failed to restore stale source switch');
+  error.cause = cause;
+  error.sourceSwitchCompensationFailed = true;
+  throw error;
+}
+
 async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
   await assertNotInBackoff();
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
@@ -1410,14 +1453,16 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
     const fingerprintProbe = startFingerprintProbe(mode);
     const committed = await runStateMutation(async () => {
       if (generation !== sourceSwitchGeneration) return { stale: true };
+      const stored = await chrome.storage.local.get([...SOURCE_SWITCH_STORAGE_KEYS, 'historyDays', 'watchRules']);
       const {
         history: previousHistory = [],
         historyDays: committedHistoryDays = DEFAULT_HISTORY_DAYS,
         readIds = [],
         watchRules = [],
         watchNotifyState = {}
-      } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'watchRules', 'watchNotifyState']);
+      } = stored;
       if (generation !== sourceSwitchGeneration) return { stale: true };
+      const rollbackState = getSourceSwitchRollbackState(stored);
 
       const canonical = upsertCanonicalItems({ history: previousHistory, readIds, watchRules, watchNotifyState }, allItems, {
         mode,
@@ -1452,7 +1497,10 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
         nextAllowedPollAt: '',
         ...(!allItems.truncated ? { lastItemsPollAt: new Date().toISOString() } : {})
       });
-      if (generation !== sourceSwitchGeneration) return { stale: true };
+      if (generation !== sourceSwitchGeneration) {
+        await restoreStaleSourceSwitch(rollbackState);
+        return { stale: true };
+      }
       feedModeGeneration = nextGeneration;
       return { continuation, nextHistory: canonical.history, nextGeneration };
     });
@@ -1478,6 +1526,7 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
     await runPostCommitSideEffect('source-switch badge update', updateBadge);
     return { stale: false };
   } catch (e) {
+    if (e.sourceSwitchCompensationFailed) throw e;
     if (generation !== sourceSwitchGeneration) return { stale: true };
     if (e.backoff) throw e;
     console.error(`[AI HOT] resetAndPoll error:`, e);
