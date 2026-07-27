@@ -263,6 +263,25 @@ async function runTests() {
   assert(storageData.history[0]?.titleEn === 'Original English title' && storageData.history[0]?.attribution?.name === '原作者' && storageData.history[0]?.attribution?.url === 'https://example.com/author', 'originalTitle 和 attribution 映射并持久化到 history');
   assert(storageData.history[0]?.url === 'https://aihot.virxact.com/items/v1-mapped' && storageData.history[0]?.permalink === 'https://aihot.virxact.com/items/v1-mapped', '非 HTTPS original 回退到 HTTPS aihot');
 
+  console.log('\n[首次安装发现时间]');
+  const oldInstallPublishedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const installFetchStartedAt = Date.now();
+  resetState();
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({
+      id: 'install-old-published',
+      publishedAt: oldInstallPublishedAt,
+      links: {
+        original: 'https://example.com/install-old-published',
+        aihot: 'https://aihot.virxact.com/items/install-old-published'
+      }
+    })]))
+  });
+  await onInstalledHandler({ reason: 'install' });
+  const installedItem = storageData.history.find(item => item.id === 'install-old-published');
+  assert(new Date(installedItem?.discoveredAt || 0).getTime() >= installFetchStartedAt && installedItem?.discoveredAt !== oldInstallPublishedAt, '首次安装的新身份使用当前抓取时间作为 discoveredAt');
+
   console.log('\n[API v1 非法分页安全失败]');
   const invalidPages = [
     { name: 'page 类型', value: { items: [], page: null } },
@@ -346,8 +365,8 @@ async function runTests() {
   const progressiveReset = sendMessage({ type: 'feedModeChanged', feedMode: 'all' }).then(response => { progressiveResponse = response; return response; });
   const firstPageResponded = await waitFor(() => Boolean(progressiveResponse));
   assert(firstPageResponded && progressiveResponse.ok === true, 'all 首屏成功后在后台续拉前立即响应消息');
-  assert(storageData.feedMode === 'all' && storageData.history.length === 1 && storageData.history[0]?.id === 'all-page-1', 'all 首屏成功后立即提交 feedMode 与首屏 history');
-  assert(Object.keys(storageData.allFeedContinuation?.discoveredAtByAlias || {}).length === 2000, '续拉发现时间索引使用强身份且受最大分页条目数约束');
+  assert(storageData.feedMode === 'all' && storageData.history.length === 2006 && storageData.history.some(item => item.id === 'all-page-1') && storageData.history.some(item => item.id === 'previous-progressive-2004'), 'all 首屏成功后立即提交 feedMode 并保留 canonical history');
+  assert(!Object.prototype.hasOwnProperty.call(storageData.allFeedContinuation || {}, 'discoveredAtByAlias'), '新续拉状态不再生成有上限的发现时间索引');
   const secondPageStarted = await waitFor(() => allSecondPageRequested);
   assert(secondPageStarted && requestedUrls.some(url => isV1ItemsUrl(url, 'all', 'all-page-2')), '后台续拉沿用首屏返回的 cursor 参数');
 
@@ -452,7 +471,7 @@ async function runTests() {
   assert(longRetryResponse.ok === true && longRetryScheduled && longRetryRequests === 1 && storageData.allFeedContinuation?.cursor === 'long-retry', '长 Retry-After 持久化同一 cursor 与 due time，而不依赖内存 sleep');
   storageData.allFeedContinuation.retryAt = new Date(Date.now() - 1).toISOString();
   await onAlarmHandler({ name: 'aihot-all-continuation' });
-  const longRetryCompleted = await waitFor(() => storageData.history.some(item => item.id === 'long-retry-page-2'));
+  const longRetryCompleted = await waitFor(() => longRetryRequests === 2 && storageData.allFeedContinuation?.active === false, 100);
   assert(longRetryCompleted && longRetryRequests === 2, 'continuation alarm 在 worker 后续事件中从持久化 cursor 恢复同页重试');
   assert(storageData.history.find(item => item.id === 'long-retry-page-2')?.discoveredAt === longRetryKnownDiscoveredAt, 'worker 恢复 continuation 后沿用持久化强身份索引保留发现时间');
 
@@ -698,6 +717,16 @@ async function runTests() {
   resetState({
     feedMode: 'all',
     allFeedContinuation: {
+      active: false,
+      discoveredAtByAlias: { settledLegacy: new Date().toISOString() }
+    }
+  });
+  await onStartupHandler();
+  assert(!Object.prototype.hasOwnProperty.call(storageData.allFeedContinuation || {}, 'discoveredAtByAlias'), 'worker 启动时清理已终止 legacy 续拉的发现索引字段');
+
+  resetState({
+    feedMode: 'all',
+    allFeedContinuation: {
       active: true,
       startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       discoveredAtByAlias: { stale: new Date().toISOString() }
@@ -746,7 +775,111 @@ async function runTests() {
   await onAlarmHandler({ name: 'aihot-all-continuation' });
   await waitFor(() => Boolean(unhandledResumeAlarmFailure) || storageData.allFeedContinuation?.active === false);
   process.removeListener('unhandledRejection', onUnhandledResumeAlarmFailure);
-  assert(!unhandledResumeAlarmFailure && storageData.allFeedContinuation?.active === false && Object.keys(storageData.allFeedContinuation?.discoveredAtByAlias || {}).length === 0, 'alarm 恢复未来续拉 Promise 拒绝时收敛状态并清理发现时间索引');
+  assert(!unhandledResumeAlarmFailure && storageData.allFeedContinuation?.active === false && !Object.prototype.hasOwnProperty.call(storageData.allFeedContinuation || {}, 'discoveredAtByAlias'), 'alarm 恢复未来续拉 Promise 拒绝时收敛状态并删除发现时间索引');
+
+  const legacyFallbackDiscoveredAt = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    allFeedContinuation: {
+      active: true,
+      id: 'legacy-fallback-continuation',
+      cursor: 'legacy-fallback-cursor',
+      retryAttempts: 0,
+      retryAt: '',
+      discoveredAtByAlias: { 'id:legacy-fallback-item': legacyFallbackDiscoveredAt }
+    }
+  });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({ id: 'legacy-fallback-item' })]))
+  });
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const legacyFallbackCompleted = await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
+  assert(legacyFallbackCompleted && storageData.history.find(item => item.id === 'legacy-fallback-item')?.discoveredAt === legacyFallbackDiscoveredAt, 'active legacy 续拉仅作为缺失 canonical 身份的一次性 discovery fallback');
+  assert(!Object.prototype.hasOwnProperty.call(storageData.allFeedContinuation || {}, 'discoveredAtByAlias'), 'legacy fallback 续拉完成后删除发现索引字段');
+
+  const canonicalDiscoveryWinsAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    history: [{
+      id: 'canonical-before-legacy-fallback',
+      title: '已有 canonical 身份',
+      url: 'https://example.com/canonical-before-legacy-fallback',
+      permalink: 'https://aihot.virxact.com/items/canonical-before-legacy-fallback',
+      time: canonicalDiscoveryWinsAt,
+      discoveredAt: canonicalDiscoveryWinsAt
+    }],
+    allFeedContinuation: {
+      active: true,
+      id: 'legacy-must-not-override-canonical',
+      cursor: 'legacy-must-not-override-canonical-cursor',
+      retryAttempts: 0,
+      retryAt: '',
+      discoveredAtByAlias: { 'id:canonical-before-legacy-fallback': legacyFallbackDiscoveredAt }
+    }
+  });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({
+      id: 'canonical-before-legacy-fallback',
+      links: {
+        original: 'https://example.com/canonical-before-legacy-fallback',
+        aihot: 'https://aihot.virxact.com/items/canonical-before-legacy-fallback'
+      }
+    })]))
+  });
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
+  assert(storageData.history.find(item => item.id === 'canonical-before-legacy-fallback')?.discoveredAt === canonicalDiscoveryWinsAt, 'legacy discovery fallback 不覆盖已存在的 canonical discovery');
+
+  const denseContinuationHistory = Array.from({ length: 2363 }, (_, index) => ({
+    id: `dense-continuation-${index + 1}`,
+    title: `续拉历史 ${index + 1}`,
+    source: index === 2362 ? '关注来源' : '其它来源',
+    url: `https://example.com/dense-continuation-${index + 1}`,
+    permalink: `https://aihot.virxact.com/items/dense-continuation-${index + 1}`,
+    time: new Date(Date.now() - index * 1000).toISOString(),
+    discoveredAt: new Date(Date.now() - (index + 1) * 60 * 1000).toISOString(),
+    selected: false,
+    ...(index === 2362 ? { watchMatched: true, watchRuleIds: ['wr_dense'] } : {})
+  }));
+  const denseLastDiscovery = denseContinuationHistory[2362].discoveredAt;
+  const denseViewedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    history: denseContinuationHistory,
+    readIds: ['dense-continuation-2363'],
+    watchRules: [{ id: 'wr_dense', source: '关注来源', author: '', keywords: [], enabled: true }],
+    watchNotifyState: {
+      'dense-continuation-2363': { ruleIds: ['wr_dense'], firstMatchedAt: denseLastDiscovery, lastNotifiedAt: denseLastDiscovery, notifyCount: 2, nextNotifyAt: '', viewedAt: denseViewedAt }
+    },
+    allFeedContinuation: {
+      active: true,
+      id: 'dense-continuation-id',
+      cursor: 'dense-continuation-cursor',
+      retryAttempts: 0,
+      retryAt: '',
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    }
+  });
+  fetchImpl = (url) => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({
+      id: 'dense-continuation-2363',
+      title: '续拉历史 2363 更新',
+      source: { name: '关注来源' },
+      links: {
+        original: 'https://example.com/dense-continuation-2363',
+        aihot: 'https://aihot.virxact.com/items/dense-continuation-2363'
+      }
+    })]))
+  });
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const denseContinuationCompleted = await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
+  const denseLast = storageData.history.find(item => item.id === 'dense-continuation-2363');
+  assert(denseContinuationCompleted && storageData.history.length === 2363 && denseLast?.discoveredAt === denseLastDiscovery, '无发现索引的 worker 续拉仍保留第 2363 条 canonical discovery');
+  assert(storageData.readIds.includes('dense-continuation-2363') && storageData.watchNotifyState['dense-continuation-2363']?.viewedAt === denseViewedAt, '无发现索引的 worker 续拉仍保留深层已读和特关状态');
+  assert(!Object.prototype.hasOwnProperty.call(storageData.allFeedContinuation || {}, 'discoveredAtByAlias'), '无索引续拉完成状态保持精简');
 
   console.log('\n[全部已读水位全局迁移]');
   const latestReadAt = new Date().toISOString();
@@ -1192,10 +1325,10 @@ async function runTests() {
     });
   };
   await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
-  const continuedKnownPersisted = await waitFor(() => storageData.history.some(item => item.id === 'shared-on-continuation'));
+  const continuedKnownPersisted = await waitFor(() => Boolean(storageData.history.find(item => item.id === 'shared-on-continuation')?.watchMatchedAt), 100);
   const sharedOnContinuation = storageData.history.find(item => item.id === 'shared-on-continuation');
   assert(continuedKnownPersisted && sharedOnContinuation?.discoveredAt === continuedOriginalDiscoveredAt, 'all 后台续拉再次遇到同一条目时也保留原发现时间');
-  assert(new Date(sharedOnContinuation?.watchMatchedAt || 0) > new Date(globalReadAt) && new Date(storageData.watchNotifyState['shared-on-continuation']?.firstMatchedAt || 0) > new Date(globalReadAt), '后来新增的特关规则使用本次匹配时间，不回填旧发现时间');
+  assert(new Date(sharedOnContinuation?.watchMatchedAt || 0) > new Date(globalReadAt) && !storageData.watchNotifyState['shared-on-continuation'], '后来新增的特关规则记录本次匹配时间，但不为已保留条目新建提醒状态');
 
   let releaseRecoveredCursor;
   fetchImpl = (url) => {
