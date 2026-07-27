@@ -133,6 +133,11 @@ function getKnownDiscoveredAt(item, discoveredAtByAlias, fallback) {
   return known || fallback;
 }
 
+function getLegacyExactIdDiscoveredAt(item, discoveredAtByAlias, fallback) {
+  const known = item?.id ? discoveredAtByAlias?.[`id:${item.id}`] : '';
+  return known && Number.isFinite(new Date(known).getTime()) ? known : fallback;
+}
+
 function isSafetyItemsPollDue(lastItemsPollAt) {
   const last = new Date(lastItemsPollAt || 0).getTime();
   return !last || Date.now() - last >= ITEMS_SAFETY_POLL_MS;
@@ -918,14 +923,17 @@ async function persistFetchedItems(items, options = {}) {
     return { skipped: true, updated: history, newEntries: [], watchNotificationsSent: 0 };
   }
 
-  const canonicalDiscoveredAtByAlias = buildDiscoveredAtByAlias(history);
-  const resolveDiscoveredAt = item => getKnownDiscoveredAt(
-    item,
-    canonicalDiscoveredAtByAlias,
-    getKnownDiscoveredAt(item, options.discoveredAtByAlias, discoveredAt)
-  );
-  const retainUnmatchedWatchState = options.retainUnmatchedWatchState === true ||
-    (normalizeFeedMode(feedMode) === 'all' && allFeedContinuation.active === true);
+  const resolveDiscoveredAt = item => {
+    const match = findCanonicalMatch(history, item);
+    if (match.index >= 0) {
+      return earliestIso([match.index, ...match.legacyIndexes]
+        .map(index => history[index]?.discoveredAt)) || discoveredAt;
+    }
+    return getLegacyExactIdDiscoveredAt(item, options.discoveredAtByAlias, discoveredAt);
+  };
+  const retainUnmatchedWatchState = options.retainUnmatchedWatchState === undefined
+    ? normalizeFeedMode(feedMode) === 'all' && allFeedContinuation.active === true
+    : options.retainUnmatchedWatchState === true;
   const persisted = upsertCanonicalItems({ history, readIds, watchRules, watchNotifyState }, items, {
     mode: feedMode,
     discoveredAt: resolveDiscoveredAt,
@@ -936,7 +944,8 @@ async function persistFetchedItems(items, options = {}) {
   await chrome.storage.local.set({
     history: persisted.history,
     readIds: persisted.readIds,
-    watchNotifyState: persisted.watchNotifyState
+    watchNotifyState: persisted.watchNotifyState,
+    ...(options.storageUpdates || {})
   });
   const updated = persisted.history;
   const persistedWatchNotifyState = persisted.watchNotifyState;
@@ -1228,31 +1237,35 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
 
       const items = response.items.map(normalizeV1Item).filter(Boolean);
       const persisted = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
-        const result = await persistFetchedItems(items, {
+        const reachedPageLimit = response.hasMore && page === ALL_MAX_PAGES - 1;
+        const terminal = !response.hasMore || reachedPageLimit;
+        const continuationStatus = terminal
+          ? getSettledAllContinuationStatus(continuation, { active: false, retryAt: '' })
+          : { ...continuation, cursor: response.nextCursor, retryAttempts: 0, retryAt: '' };
+        return persistFetchedItems(items, {
           notify: false,
           updateLastItems: false,
           discoveredAtByAlias: continuation.discoveredAtByAlias,
-          retainUnmatchedWatchState: true,
-          isCurrent: () => getActiveAllContinuation(generation, continuationId, expected)
+          retainUnmatchedWatchState: false,
+          isCurrent: () => getActiveAllContinuation(generation, continuationId, expected),
+          storageUpdates: {
+            allFeedContinuation: continuationStatus,
+            ...(terminal ? {
+              lastCheck: new Date().toISOString(),
+              failCount: 0,
+              nextAllowedPollAt: '',
+              ...(!response.hasMore ? { lastItemsPollAt: new Date().toISOString() } : {})
+            } : {})
+          }
         });
-        if (!result.skipped && response.hasMore) {
-          await chrome.storage.local.set({
-            allFeedContinuation: { ...continuation, cursor: response.nextCursor, retryAttempts: 0, retryAt: '' }
-          });
-        }
-        return result;
       });
       if (persisted.skipped) return;
 
-      if (!response.hasMore) {
-        const completed = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
-          const watchNotifyState = await getPrunedStoredWatchNotifyState();
-          await commitSuccessfulItemsPoll({ allFeedContinuation: getSettledAllContinuationStatus(continuation, { active: false, retryAt: '' }), watchNotifyState });
-          await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
-          await updateBadge();
-          return { completed: true };
-        });
-        if (!completed.skipped && fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
+      const reachedPageLimit = response.hasMore && page === ALL_MAX_PAGES - 1;
+      if (!response.hasMore || reachedPageLimit) {
+        await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
+        await updateBadge();
+        if (!response.hasMore && fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
         return;
       }
       nextCursor = response.nextCursor;
@@ -1260,15 +1273,6 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
       retryAt = '';
     }
 
-    const expected = { cursor: nextCursor, retryAttempts, retryAt };
-    if (await getActiveAllContinuation(generation, continuationId, expected)) {
-      await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
-        const watchNotifyState = await getPrunedStoredWatchNotifyState();
-        await chrome.storage.local.set({ allFeedContinuation: getSettledAllContinuationStatus(continuation, { active: false, retryAt: '' }), watchNotifyState, lastCheck: new Date().toISOString(), failCount: 0, nextAllowedPollAt: '' });
-        await chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME);
-        await updateBadge();
-      });
-    }
   } catch (e) {
     const expected = { cursor: nextCursor, retryAttempts, retryAt };
     if (!await getActiveAllContinuation(generation, continuationId, expected)) return;

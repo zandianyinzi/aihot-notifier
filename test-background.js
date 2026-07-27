@@ -588,6 +588,39 @@ async function runTests() {
   await waitFor(() => storageData.history.some(item => item.id === 'stale-race-page') || storageData.allFeedContinuation?.cursor === 'stale-cursor');
   assert(cursorAdvanced && storageData.allFeedContinuation?.cursor === 'advanced-cursor' && !storageData.history.some(item => item.id === 'stale-race-page'), '重复 alarm 的旧 cursor 响应不能回退 continuation 或重复入库');
 
+  resetState({
+    feedMode: 'all',
+    allFeedContinuation: { active: true, id: 'atomic-continuation', cursor: 'atomic-cursor', retryAttempts: 0, retryAt: '' }
+  });
+  failSetWhen = values => values.allFeedContinuation?.cursor === 'atomic-next';
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({ id: 'atomic-page-item' })], { hasMore: true, nextCursor: 'atomic-next' }))
+  });
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
+  assert(!storageData.history.some(item => item.id === 'atomic-page-item'), '续拉 cursor 提交失败时不单独提交页面 history');
+
+  const expiredContinuationTime = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    historyDays: 2,
+    history: [{ id: 'expired-continuation-item', url: 'https://example.com/expired-continuation-item', time: expiredContinuationTime, discoveredAt: expiredContinuationTime }],
+    watchNotifyState: { 'expired-continuation-item': { ruleIds: ['expired-rule'], firstMatchedAt: expiredContinuationTime } },
+    allFeedContinuation: { active: true, id: 'prune-continuation', cursor: 'prune-cursor', retryAttempts: 0, retryAt: '' }
+  });
+  fetchImpl = (url) => {
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'prune-next') return new Promise(() => {});
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: 'prune-current-item' })], { hasMore: true, nextCursor: 'prune-next' }))
+    });
+  };
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  await waitFor(() => storageData.allFeedContinuation?.cursor === 'prune-next', 100);
+  assert(!storageData.history.some(item => item.id === 'expired-continuation-item') && !storageData.watchNotifyState['expired-continuation-item'], '续拉中间页同步清理过期 canonical history 与 orphan 特关状态');
+
   console.log('\n[全部内容源续拉终止与非阻塞]');
   resetState();
   let zeroRetryRequests = 0;
@@ -832,25 +865,61 @@ async function runTests() {
   await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
   assert(storageData.history.find(item => item.id === 'canonical-before-legacy-fallback')?.discoveredAt === canonicalDiscoveryWinsAt, 'legacy discovery fallback 不覆盖已存在的 canonical discovery');
 
+  const canonicalAliasDiscovery = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const staleLegacyAliasDiscovery = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+  resetState({
+    feedMode: 'all',
+    history: [{
+      title: '无 ID canonical 记录',
+      url: 'https://example.com/canonical-alias',
+      permalink: 'https://aihot.virxact.com/items/original-canonical-alias',
+      time: canonicalAliasDiscovery,
+      discoveredAt: canonicalAliasDiscovery
+    }],
+    allFeedContinuation: {
+      active: true,
+      id: 'legacy-alias-continuation',
+      cursor: 'legacy-alias-cursor',
+      retryAttempts: 0,
+      retryAt: '',
+      discoveredAtByAlias: { 'permalink:https://aihot.virxact.com/items/incoming-alias': staleLegacyAliasDiscovery }
+    }
+  });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({
+      id: 'canonical-alias-id',
+      links: {
+        original: 'https://example.com/canonical-alias',
+        aihot: 'https://aihot.virxact.com/items/incoming-alias'
+      }
+    })]))
+  });
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
+  assert(storageData.history.find(item => item.id === 'canonical-alias-id')?.discoveredAt === canonicalAliasDiscovery, '次级别名命中 canonical 记录时旧 discovery 索引不能覆盖 canonical 时间');
+
   const denseContinuationHistory = Array.from({ length: 2363 }, (_, index) => ({
     id: `dense-continuation-${index + 1}`,
     title: `续拉历史 ${index + 1}`,
-    source: index === 2362 ? '关注来源' : '其它来源',
+    source: index === 2000 || index === 2362 ? '关注来源' : '其它来源',
     url: `https://example.com/dense-continuation-${index + 1}`,
     permalink: `https://aihot.virxact.com/items/dense-continuation-${index + 1}`,
     time: new Date(Date.now() - index * 1000).toISOString(),
     discoveredAt: new Date(Date.now() - (index + 1) * 60 * 1000).toISOString(),
     selected: false,
-    ...(index === 2362 ? { watchMatched: true, watchRuleIds: ['wr_dense'] } : {})
+    ...(index === 2000 || index === 2362 ? { watchMatched: true, watchRuleIds: ['wr_dense'] } : {})
   }));
+  const dense2001Discovery = denseContinuationHistory[2000].discoveredAt;
   const denseLastDiscovery = denseContinuationHistory[2362].discoveredAt;
   const denseViewedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   resetState({
     feedMode: 'all',
     history: denseContinuationHistory,
-    readIds: ['dense-continuation-2363'],
+    readIds: ['dense-continuation-2001', 'dense-continuation-2363'],
     watchRules: [{ id: 'wr_dense', source: '关注来源', author: '', keywords: [], enabled: true }],
     watchNotifyState: {
+      'dense-continuation-2001': { ruleIds: ['wr_dense'], firstMatchedAt: dense2001Discovery, lastNotifiedAt: dense2001Discovery, notifyCount: 1, nextNotifyAt: '', viewedAt: denseViewedAt },
       'dense-continuation-2363': { ruleIds: ['wr_dense'], firstMatchedAt: denseLastDiscovery, lastNotifiedAt: denseLastDiscovery, notifyCount: 2, nextNotifyAt: '', viewedAt: denseViewedAt }
     },
     allFeedContinuation: {
@@ -876,9 +945,10 @@ async function runTests() {
   });
   await onAlarmHandler({ name: 'aihot-all-continuation' });
   const denseContinuationCompleted = await waitFor(() => storageData.allFeedContinuation?.active === false, 100);
+  const dense2001 = storageData.history.find(item => item.id === 'dense-continuation-2001');
   const denseLast = storageData.history.find(item => item.id === 'dense-continuation-2363');
-  assert(denseContinuationCompleted && storageData.history.length === 2363 && denseLast?.discoveredAt === denseLastDiscovery, '无发现索引的 worker 续拉仍保留第 2363 条 canonical discovery');
-  assert(storageData.readIds.includes('dense-continuation-2363') && storageData.watchNotifyState['dense-continuation-2363']?.viewedAt === denseViewedAt, '无发现索引的 worker 续拉仍保留深层已读和特关状态');
+  assert(denseContinuationCompleted && storageData.history.length === 2363 && dense2001?.discoveredAt === dense2001Discovery && denseLast?.discoveredAt === denseLastDiscovery, '无发现索引的 worker 续拉仍保留第 2001 与 2363 条 canonical discovery');
+  assert(storageData.readIds.includes('dense-continuation-2001') && storageData.readIds.includes('dense-continuation-2363') && storageData.watchNotifyState['dense-continuation-2001']?.viewedAt === denseViewedAt && storageData.watchNotifyState['dense-continuation-2363']?.viewedAt === denseViewedAt, '无发现索引的 worker 续拉仍保留第 2001 与 2363 条已读和特关状态');
   assert(!Object.prototype.hasOwnProperty.call(storageData.allFeedContinuation || {}, 'discoveredAtByAlias'), '无索引续拉完成状态保持精简');
 
   console.log('\n[全部已读水位全局迁移]');
