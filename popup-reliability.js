@@ -33,6 +33,104 @@
     return { ok: true, url };
   }
 
+  function captureScrollAnchor(scroller, itemSelector = '.item') {
+    if (!scroller) return null;
+    const listTop = scroller.getBoundingClientRect().top;
+    const items = Array.from(scroller.querySelectorAll(itemSelector));
+    const anchorItem = items.find(item => item.getBoundingClientRect().bottom >= listTop);
+    if (!anchorItem) return null;
+    return {
+      scrollTop: scroller.scrollTop,
+      anchorKey: anchorItem.dataset?.key || '',
+      anchorUrl: anchorItem.dataset?.url || '',
+      offsetTop: anchorItem.getBoundingClientRect().top - listTop
+    };
+  }
+
+  function restoreScrollAnchor(scroller, anchor, options = {}) {
+    if (!scroller || !anchor) return false;
+    const fallbackScrollTop = Number.isFinite(anchor.scrollTop) ? Math.max(anchor.scrollTop, 0) : 0;
+    const maxJump = Number.isFinite(options.maxJump) ? Math.max(options.maxJump, 0) : Infinity;
+    const items = Array.from(scroller.querySelectorAll(options.itemSelector || '.item'));
+    const anchorItem = anchor.anchorKey
+      ? items.find(item => item.dataset?.key === anchor.anchorKey)
+      : items.find(item => item.dataset?.url === anchor.anchorUrl);
+    if (!anchorItem || (!anchor.anchorKey && !anchor.anchorUrl)) {
+      scroller.scrollTop = fallbackScrollTop;
+      return false;
+    }
+
+    const listTop = scroller.getBoundingClientRect().top;
+    const currentOffset = anchorItem.getBoundingClientRect().top - listTop;
+    const targetScrollTop = Math.max(scroller.scrollTop + currentOffset - anchor.offsetTop, 0);
+    if (Math.abs(targetScrollTop - fallbackScrollTop) > maxJump) {
+      scroller.scrollTop = fallbackScrollTop;
+      return false;
+    }
+
+    scroller.scrollTop = targetScrollTop;
+    return true;
+  }
+
+  function applyOptimisticReadState(items, markAllButton) {
+    const changedItems = Array.from(items || []).filter(item => item.classList.contains('unread'));
+    changedItems.forEach(item => {
+      item.classList.remove('unread');
+      item.classList.add('read');
+    });
+    markAllButton?.classList.remove('visible');
+
+    return function rollbackOptimisticReadState() {
+      changedItems.forEach(item => {
+        item.classList.remove('read');
+        item.classList.add('unread');
+      });
+      if (changedItems.length > 0) markAllButton?.classList.add('visible');
+    };
+  }
+
+  async function runMarkAllReadMutation(deps) {
+    let committed = false;
+    try {
+      const response = await deps.send();
+      if (!response?.ok) throw new Error(response?.error || 'Failed to mark all read');
+      committed = true;
+      if (deps.onCommitted) deps.onCommitted(response);
+      await deps.reload();
+    } catch (error) {
+      if (!committed && deps.rollback) deps.rollback();
+      let recovered = false;
+      try {
+        await deps.reload();
+        recovered = true;
+      } catch (_reloadError) {
+        // Keep the original operation error as the user-facing failure.
+      }
+      if (deps.onFailure) deps.onFailure({ committed, error, recovered });
+    }
+    return { committed };
+  }
+
+  function createSessionWatchPinTracker() {
+    const pinnedKeys = new Set();
+
+    function getPinnedItems(history, isUnread, getKey, options = {}) {
+      return (history || []).filter(item => {
+        const key = getKey(item);
+        if (!key) return false;
+        if (!item.watchMatched) {
+          pinnedKeys.delete(key);
+          return false;
+        }
+        const unread = isUnread(item);
+        if (unread && options.persistUnread !== false) pinnedKeys.add(key);
+        return unread || pinnedKeys.has(key);
+      });
+    }
+
+    return { getPinnedItems };
+  }
+
   function createFeedModeSwitchController(deps) {
     const normalizeMode = deps.normalizeFeedMode || (mode => mode === 'all' ? 'all' : 'selected');
     let committedMode = normalizeMode(deps.initialMode);
@@ -119,6 +217,7 @@
     const debounceMs = Number.isFinite(deps.debounceMs) ? deps.debounceMs : 40;
     let timerId = null;
     let loadVersion = 0;
+    let pendingRenderIntent = null;
 
     function cancelTimer() {
       if (timerId === null) return;
@@ -130,6 +229,27 @@
       return version === loadVersion && requestId === deps.getSwitchRequestId();
     }
 
+    function getRenderIntent(mode, requestId, options) {
+      const hasExplicitIntent = options.forceRender === true || Boolean(options.scrollAnchor);
+      if (hasExplicitIntent) {
+        pendingRenderIntent = {
+          mode,
+          requestId,
+          forceRender: options.forceRender === true,
+          scrollAnchor: options.scrollAnchor || null
+        };
+      } else if (pendingRenderIntent && (
+        pendingRenderIntent.mode !== mode || pendingRenderIntent.requestId !== requestId
+      )) {
+        pendingRenderIntent = null;
+      }
+
+      if (pendingRenderIntent?.mode === mode && pendingRenderIntent.requestId === requestId) {
+        return pendingRenderIntent;
+      }
+      return { forceRender: false, scrollAnchor: null };
+    }
+
     async function loadProjection(mode, options = {}) {
       if (options.immediate) cancelTimer();
       const version = ++loadVersion;
@@ -137,7 +257,14 @@
         ? deps.getSwitchRequestId()
         : options.switchRequestId;
       const normalizedMode = normalizeMode(mode);
-      const data = await deps.read(normalizedMode);
+      const renderIntent = getRenderIntent(normalizedMode, requestId, options);
+      let data;
+      try {
+        data = await deps.read(normalizedMode);
+      } catch (error) {
+        if (pendingRenderIntent === renderIntent) pendingRenderIntent = null;
+        throw error;
+      }
       if (!isCurrent(version, requestId)) return { stale: true };
       const projected = {
         ...data,
@@ -145,11 +272,21 @@
         history: deps.projectHistory(data?.history || [], normalizedMode)
       };
       if (!isCurrent(version, requestId)) return { stale: true };
+      let scrollAnchor = renderIntent.scrollAnchor;
+      let applyInitialPosition = false;
+      if (!scrollAnchor && deps.captureScrollAnchor) {
+        scrollAnchor = deps.captureScrollAnchor();
+        applyInitialPosition = !scrollAnchor;
+      }
       deps.commit(projected, {
+        applyInitialPosition,
+        forceRender: renderIntent.forceRender,
         immediate: options.immediate === true,
         loadVersion: version,
+        scrollAnchor,
         switchRequestId: requestId
       });
+      if (pendingRenderIntent === renderIntent) pendingRenderIntent = null;
       return { stale: false, data: projected };
     }
 
@@ -277,6 +414,11 @@
     createPopupStorageChangeHandler,
     getAllFeedContinuationStatusMessage,
     createAllFeedContinuationStatusController,
+    captureScrollAnchor,
+    restoreScrollAnchor,
+    applyOptimisticReadState,
+    runMarkAllReadMutation,
+    createSessionWatchPinTracker,
     getSafeHttpsUrl,
     openHttpsUrl
   };

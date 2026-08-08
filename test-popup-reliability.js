@@ -11,6 +11,11 @@ const {
   createPopupInitializationController,
   createAllFeedContinuationStatusController,
   createPopupStorageChangeHandler,
+  createSessionWatchPinTracker,
+  captureScrollAnchor,
+  restoreScrollAnchor,
+  applyOptimisticReadState,
+  runMarkAllReadMutation,
   getSafeHttpsUrl,
   openHttpsUrl
 } = require('./popup-reliability.js');
@@ -233,6 +238,11 @@ async function testLatestWinsLoadCoalescing() {
   assert.strictEqual(fakeTimers.timers.size, 1, 'ordinary change schedules a timer');
   await controller.loadProjection('all', { immediate: true, switchRequestId: 0 });
   assert.strictEqual(fakeTimers.timers.size, 0, 'immediate source projection cancels the pending debounce');
+
+  const scrollAnchor = { scrollTop: 80, anchorUrl: 'first-visible', offsetTop: 18 };
+  await controller.loadProjection('selected', { immediate: true, forceRender: true, scrollAnchor, switchRequestId: 0 });
+  assert.strictEqual(commits.at(-1).context.forceRender, true, 'forced reload preserves the explicit forceRender intent for rollback commits');
+  assert.deepStrictEqual(commits.at(-1).context.scrollAnchor, scrollAnchor, 'load commits preserve the scroll anchor for rerender restoration');
 }
 
 async function testLatestWinsLoadDropsStaleReads() {
@@ -264,6 +274,115 @@ async function testLatestWinsLoadDropsStaleReads() {
   reads[2].resolve({ history: [{ id: 'wrong-switch' }] });
   await fenced;
   assert.deepStrictEqual(commits.map(entry => entry.data.history[0].id), ['newer'], 'load captured by a stale switch request performs zero callbacks');
+}
+
+async function testOrdinaryLoadCapturesLatestScrollAnchor() {
+  const deferred = createDeferred();
+  const commits = [];
+  let currentAnchor = { scrollTop: 80, anchorUrl: 'before-read', offsetTop: 18 };
+  const controller = createLatestWinsLoadController({
+    read: () => deferred.promise,
+    commit: (data, context) => commits.push({ data, context }),
+    projectHistory: history => history,
+    normalizeFeedMode: mode => mode === 'all' ? 'all' : 'selected',
+    getSwitchRequestId: () => 0,
+    captureScrollAnchor: () => currentAnchor
+  });
+
+  const loading = controller.loadProjection('selected', { switchRequestId: 0 });
+  currentAnchor = { scrollTop: 120, anchorUrl: 'latest-visible', offsetTop: 7 };
+  deferred.resolve({ history: [{ id: 'authoritative' }] });
+  await loading;
+
+  assert.deepStrictEqual(
+    commits[0].context.scrollAnchor,
+    currentAnchor,
+    'ordinary commits capture the latest visible scroll anchor immediately before rendering'
+  );
+}
+
+async function testOrdinaryLoadWithoutAnchorAppliesInitialPosition() {
+  const commits = [];
+  const controller = createLatestWinsLoadController({
+    read: async () => ({ history: [{ id: 'authoritative' }] }),
+    commit: (data, context) => commits.push({ data, context }),
+    projectHistory: history => history,
+    normalizeFeedMode: mode => mode === 'all' ? 'all' : 'selected',
+    getSwitchRequestId: () => 0,
+    captureScrollAnchor: () => null
+  });
+
+  await controller.loadProjection('selected', { switchRequestId: 0 });
+
+  assert.strictEqual(commits[0].context.scrollAnchor, null, 'cold skeleton does not create an empty scroll anchor');
+  assert.strictEqual(commits[0].context.applyInitialPosition, true, 'first real render applies the configured initial position when no item anchor exists');
+}
+
+async function testForcedRenderSurvivesCoalescedStorageLoad() {
+  const fakeTimers = createFakeTimers();
+  const reads = [];
+  const commits = [];
+  const scrollAnchor = { scrollTop: 80, anchorUrl: 'first-visible', offsetTop: 18 };
+  const controller = createLatestWinsLoadController({
+    read: () => {
+      const deferred = createDeferred();
+      reads.push(deferred);
+      return deferred.promise;
+    },
+    commit: (data, context) => commits.push({ data, context }),
+    projectHistory: history => history,
+    normalizeFeedMode: mode => mode === 'all' ? 'all' : 'selected',
+    getSwitchRequestId: () => 0,
+    setTimer: fakeTimers.setTimer,
+    clearTimer: fakeTimers.clearTimer,
+    debounceMs: 25
+  });
+
+  const forcedLoad = controller.loadProjection('selected', {
+    forceRender: true,
+    scrollAnchor,
+    switchRequestId: 0
+  });
+  await waitFor(() => reads.length === 1);
+  controller.scheduleLoad({ readAllBefore: {} }, 'selected', 0);
+  reads[0].resolve({ history: [{ id: 'same-authoritative-state' }] });
+  assert.deepStrictEqual(await forcedLoad, { stale: true }, 'storage scheduling supersedes the in-flight forced read');
+  assert.strictEqual(commits.length, 0, 'superseded forced reads do not commit stale data');
+
+  fakeTimers.runOnly();
+  await waitFor(() => reads.length === 2);
+  reads[1].resolve({ history: [{ id: 'same-authoritative-state' }] });
+  await waitFor(() => commits.length === 1);
+  assert.strictEqual(commits[0].context.forceRender, true, 'the latest coalesced storage load retains the pending forced render');
+  assert.deepStrictEqual(commits[0].context.scrollAnchor, scrollAnchor, 'the latest coalesced storage load retains the pending scroll anchor');
+}
+
+async function testForcedRenderIntentClearsAfterReadFailure() {
+  const commits = [];
+  let reads = 0;
+  const controller = createLatestWinsLoadController({
+    read: async () => {
+      reads++;
+      if (reads === 1) throw new Error('storage unavailable');
+      return { history: [{ id: 'authoritative' }] };
+    },
+    commit: (data, context) => commits.push({ data, context }),
+    projectHistory: history => history,
+    normalizeFeedMode: mode => mode === 'all' ? 'all' : 'selected',
+    getSwitchRequestId: () => 0
+  });
+
+  await assert.rejects(
+    controller.loadProjection('selected', {
+      forceRender: true,
+      scrollAnchor: { scrollTop: 80, anchorUrl: 'old', offsetTop: 18 },
+      switchRequestId: 0
+    }),
+    /storage unavailable/
+  );
+  await controller.loadProjection('selected', { switchRequestId: 0 });
+  assert.strictEqual(commits[0].context.forceRender, false, 'a failed forced read does not poison the next ordinary load');
+  assert.strictEqual(commits[0].context.scrollAnchor, null, 'a failed forced read does not reuse an expired scroll anchor');
 }
 
 async function testStaleInitializationCannotOverwriteCommittedMode() {
@@ -461,6 +580,147 @@ async function testContinuationStatusExpiryTimer() {
   assert.deepStrictEqual(statuses, ['正在补充更多内容…', '正在补充更多内容…', ''], 'expiresAt 到期时无需 storage 事件即可清除提示');
 }
 
+function createFakeScrollItem(url, top, bottom, key = url) {
+  return {
+    dataset: { key, url },
+    getBoundingClientRect: () => ({ top, bottom })
+  };
+}
+
+function testScrollAnchorCaptureAndRestore() {
+  const firstHidden = createFakeScrollItem('first-hidden', 40, 90);
+  const firstVisible = createFakeScrollItem('first-visible', 118, 160);
+  const scroller = {
+    scrollTop: 80,
+    getBoundingClientRect: () => ({ top: 100 }),
+    querySelectorAll: () => [firstHidden, firstVisible]
+  };
+
+  const anchor = captureScrollAnchor(scroller);
+  assert.deepStrictEqual(anchor, {
+    scrollTop: 80,
+    anchorKey: 'first-visible',
+    anchorUrl: 'first-visible',
+    offsetTop: 18
+  }, 'captures the first visible item and its relative offset before optimistic list updates');
+
+  const movedVisible = createFakeScrollItem('first-visible', 155, 197);
+  scroller.querySelectorAll = () => [movedVisible];
+  assert.strictEqual(restoreScrollAnchor(scroller, anchor), true, 'restores the same item after the list is rerendered');
+  assert.strictEqual(scroller.scrollTop, 117, 'restoring preserves the captured relative offset');
+
+  scroller.scrollTop = 80;
+  assert.strictEqual(restoreScrollAnchor(scroller, anchor, { maxJump: 20 }), false, 'falls back when anchor restoration would jump too far');
+  assert.strictEqual(scroller.scrollTop, 80, 'large anchor jumps preserve the original scrollTop');
+
+  const duplicateHidden = createFakeScrollItem('duplicate-url', 40, 90, 'duplicate-first');
+  const duplicateVisible = createFakeScrollItem('duplicate-url', 118, 160, 'duplicate-second');
+  scroller.scrollTop = 80;
+  scroller.querySelectorAll = () => [duplicateHidden, duplicateVisible];
+  const duplicateAnchor = captureScrollAnchor(scroller);
+  const duplicateFirstAfterRender = createFakeScrollItem('duplicate-url', 110, 152, 'duplicate-first');
+  const duplicateSecondAfterRender = createFakeScrollItem('duplicate-url', 155, 197, 'duplicate-second');
+  scroller.querySelectorAll = () => [duplicateFirstAfterRender, duplicateSecondAfterRender];
+  assert.strictEqual(restoreScrollAnchor(scroller, duplicateAnchor), true, 'stable item key disambiguates duplicate URLs');
+  assert.strictEqual(scroller.scrollTop, 117, 'duplicate URL restoration follows the originally visible item');
+
+  scroller.querySelectorAll = () => [];
+  assert.strictEqual(captureScrollAnchor(scroller), null, 'a skeleton or empty state does not produce a truthy empty anchor');
+}
+
+function createFakeClassList(initialClasses) {
+  const classes = new Set(initialClasses);
+  return {
+    add: value => classes.add(value),
+    contains: value => classes.has(value),
+    remove: value => classes.delete(value)
+  };
+}
+
+function testOptimisticReadStateRollback() {
+  const unreadItem = { classList: createFakeClassList(['item', 'unread']) };
+  const alreadyReadItem = { classList: createFakeClassList(['item', 'read']) };
+  const markAllButton = { classList: createFakeClassList(['visible']) };
+  const rollback = applyOptimisticReadState([unreadItem, alreadyReadItem], markAllButton);
+
+  assert(unreadItem.classList.contains('read') && !unreadItem.classList.contains('unread'), 'optimistic state immediately marks unread items as read');
+  assert(alreadyReadItem.classList.contains('read'), 'optimistic state leaves already-read items unchanged');
+  assert(!markAllButton.classList.contains('visible'), 'optimistic state immediately hides the mark-all button');
+
+  rollback();
+  assert(unreadItem.classList.contains('unread') && !unreadItem.classList.contains('read'), 'rollback restores only items changed by the optimistic state');
+  assert(alreadyReadItem.classList.contains('read') && !alreadyReadItem.classList.contains('unread'), 'rollback does not turn previously read items unread');
+  assert(markAllButton.classList.contains('visible'), 'rollback restores the mark-all button when unread items were reverted');
+}
+
+function testSessionWatchPinsStayStableAcrossReadTransitions() {
+  assert.strictEqual(typeof createSessionWatchPinTracker, 'function', 'session watch pin tracker is exported');
+  const history = [
+    { id: 'watch-old', watchMatched: true },
+    { id: 'ordinary', watchMatched: false }
+  ];
+  const getKey = item => item.id;
+  const tracker = createSessionWatchPinTracker();
+
+  assert.deepStrictEqual(
+    tracker.getPinnedItems(history, item => item.id === 'watch-old', getKey).map(getKey),
+    ['watch-old'],
+    'unread watch items become pinned in the current popup session'
+  );
+  assert.deepStrictEqual(
+    tracker.getPinnedItems(history, () => false, getKey).map(getKey),
+    ['watch-old'],
+    'items pinned while unread stay pinned after becoming read in the same popup session'
+  );
+
+  const freshTracker = createSessionWatchPinTracker();
+  assert.deepStrictEqual(
+    freshTracker.getPinnedItems(history, () => false, getKey),
+    [],
+    'already-read watch items are not pinned in a new popup session'
+  );
+  const previewTracker = createSessionWatchPinTracker();
+  assert.deepStrictEqual(
+    previewTracker.getPinnedItems(history, item => item.id === 'watch-old', getKey, { persistUnread: false }).map(getKey),
+    ['watch-old'],
+    'warm cache can preview unread watch items in the pinned group'
+  );
+  assert.deepStrictEqual(
+    previewTracker.getPinnedItems(history, () => false, getKey),
+    [],
+    'warm cache preview does not persist stale unread state into the popup session'
+  );
+  assert.deepStrictEqual(
+    tracker.getPinnedItems([{ ...history[0], watchMatched: false }], () => false, getKey),
+    [],
+    'items stop being pinned when they are no longer watch matches'
+  );
+}
+
+async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
+  const failedEvents = [];
+  await runMarkAllReadMutation({
+    send: async () => ({ ok: false, error: 'rejected' }),
+    reload: async () => failedEvents.push('reload'),
+    rollback: () => failedEvents.push('rollback'),
+    onFailure: ({ committed }) => failedEvents.push(`failure:${committed}`)
+  });
+  assert.deepStrictEqual(failedEvents, ['rollback', 'reload', 'failure:false'], 'mutation failure rolls back before authoritative reload');
+
+  const refreshEvents = [];
+  await runMarkAllReadMutation({
+    send: async () => ({ ok: true }),
+    onCommitted: () => refreshEvents.push('committed'),
+    reload: async () => {
+      refreshEvents.push('reload');
+      throw new Error('read failed');
+    },
+    rollback: () => refreshEvents.push('rollback'),
+    onFailure: ({ committed }) => refreshEvents.push(`failure:${committed}`)
+  });
+  assert.deepStrictEqual(refreshEvents, ['committed', 'reload', 'reload', 'failure:true'], 'post-commit reload failure never rolls back the durable success');
+}
+
 (async () => {
   await testMutationQueue();
   await testFeedModeOptimisticProjectionAndLatestWins();
@@ -468,13 +728,21 @@ async function testContinuationStatusExpiryTimer() {
   await testPendingModeStorageChanges();
   await testLatestWinsLoadCoalescing();
   await testLatestWinsLoadDropsStaleReads();
+  await testOrdinaryLoadCapturesLatestScrollAnchor();
+  await testOrdinaryLoadWithoutAnchorAppliesInitialPosition();
+  await testForcedRenderSurvivesCoalescedStorageLoad();
+  await testForcedRenderIntentClearsAfterReadFailure();
   await testStaleInitializationCannotOverwriteCommittedMode();
   await testWarmCacheRendersBeforeFullStorage();
   await testSafeOpenReadOrdering();
   await testPopupHistoryRenderOwnership();
   await testActiveContinuationDefersIntermediateHistoryRenders();
   await testContinuationStatusExpiryTimer();
-  console.log('结果: 11 passed, 0 failed');
+  testScrollAnchorCaptureAndRestore();
+  testOptimisticReadStateRollback();
+  testSessionWatchPinsStayStableAcrossReadTransitions();
+  await testMarkAllReadMutationSeparatesCommitAndReloadFailure();
+  console.log('结果: 19 passed, 0 failed');
 })().catch(error => {
   console.error(error);
   process.exit(1);

@@ -524,7 +524,22 @@ assert(!hasDeclaration(dateLabelRule, 'display', 'block'), '日期浮标不退�
 assert(!hasDeclaration(dateLabelRule, 'box-sizing', 'border-box'), '日期浮标不使用分隔行盒模型');
 assert(/Object\.entries\(groups\)\.forEach\(\(\[dateLabel,\s*items\]\)\s*=>\s*\{\s*html\s*\+=\s*`<div class="date-label">\$\{dateLabel\}<\/div>`/.test(popupJs), '每个日期组都渲染悬浮日期标签，包括首组');
 const itemRule = popupHtml.match(/\.item\s*{([\s\S]*?)}/i)?.[1] || '';
+const itemTitleRule = popupHtml.match(/\n\s*\.item-title\s*{([\s\S]*?)}/i)?.[1] || '';
+const unreadTitleRule = popupHtml.match(/\.item\.unread\s+\.item-title\s*{([\s\S]*?)}/i)?.[1] || '';
 const skeletonItemRule = popupHtml.match(/\.skeleton-item\s*{([\s\S]*?)}/i)?.[1] || '';
+const skeletonTitleRule = popupHtml.match(/\.skeleton-title\s*{([\s\S]*?)}/i)?.[1] || '';
+const skeletonSummaryRule = popupHtml.match(/\.skeleton-summary\s*{([\s\S]*?)}/i)?.[1] || '';
+const skeletonMetaRule = popupHtml.match(/\.skeleton-meta\s*{([\s\S]*?)}/i)?.[1] || '';
+const sizeRules = [...popupHtml.matchAll(/\[data-size="([^"]+)"\]\s*{([^}]*)}/g)];
+const expectedSkeletonMetaHeights = {
+  small: '10px',
+  medium: '10px',
+  large: '11px',
+  xlarge: '12px',
+  xxlarge: '13px'
+};
+assert(hasDeclaration(itemTitleRule, 'font-weight', '500'), '标题字重恒定 500，已读未读切换不改字重以避免行盒重排位移');
+assert(!/font-weight\s*:/.test(unreadTitleRule), '未读标题不覆写字重，仅靠颜色区分，防止 unread→read 时标题重排');
 assert(hasDeclaration(itemRule, 'user-select', 'none'), '列表条目整体不可选，避免标题摘要出现文本光标');
 assert(hasDeclaration(itemRule, 'border-bottom', /1px\s+solid\s+var\(--border\)/), '列表条目分割线使用 1px 且与主题主边框色保持一致');
 assert(!/--item-divider-shadow\s*:/.test(itemRule), '列表条目不使用 inset shadow 分割线变量');
@@ -532,11 +547,19 @@ assert(!/box-shadow\s*:\s*var\(--item-divider-shadow\)/i.test(itemRule), '列表
 assert(hasDeclaration(skeletonItemRule, 'border-bottom', /1px\s+solid\s+var\(--border\)/), '加载态条目分割线使用 1px 且与主题主边框色保持一致');
 assert(!/box-shadow\s*:/.test(skeletonItemRule), '加载态条目不使用 inset shadow 分割线');
 assert(!/\.skeleton-item:last-child\s*{[^}]*box-shadow:\s*none/i.test(popupHtml), '加载态不额外覆盖末项分割线，保持回滚版本');
+assert(sizeRules.length === 5 && sizeRules.every(([, , body]) => /--skeleton-title-h\s*:/.test(body) && /--skeleton-summary-h\s*:/.test(body) && /--skeleton-meta-h\s*:/.test(body)), '五档字号都定义随字号缩放的骨架高度');
+assert(sizeRules.every(([, size, body]) => hasDeclaration(body, '--skeleton-meta-h', expectedSkeletonMetaHeights[size])), '五档骨架元信息高度使用随字号缩放的 cap-height 细条');
+assert(hasDeclaration(skeletonTitleRule, 'height', /var\(--skeleton-title-h\)/), '骨架标题使用字号对应高度');
+assert(hasDeclaration(skeletonSummaryRule, 'height', /var\(--skeleton-summary-h\)/) && hasDeclaration(skeletonSummaryRule, 'margin-top', '6px'), '骨架摘要匹配真实摘要行高与间距');
+assert(hasDeclaration(skeletonMetaRule, 'height', /var\(--skeleton-meta-h\)/) && hasDeclaration(skeletonMetaRule, 'margin-top', '6px'), '骨架元信息匹配真实元信息行高与间距');
 assert(/\.settings-inner\s*{[\s\S]*?max-height:[\s\S]*?overflow-y:\s*auto/.test(popupHtml), '设置面板内容可滚动');
 console.log('\n[popup首帧初始化顺序]');
 assert(/function\s+waitForNextPaint\(\)/.test(popupJs), '存在首帧让步 helper');
 assert(/waitForPaint:\s*waitForNextPaint/.test(popupJs) && /await\s+deps\.waitForPaint\(\);[\s\S]*?deps\.renderStorage/.test(popupReliabilityJs), 'storage 渲染前先等待下一帧');
 assert(/await\s+deps\.waitForPaint\(\);[\s\S]*?deps\.renderCache/.test(popupReliabilityJs), '缓存渲染前先等待下一帧');
+assert(/captureScrollAnchor:\s*\(\)\s*=>\s*captureScrollAnchor\(historyList\)/.test(popupJs), '普通 history load 在提交前捕获当前阅读锚点');
+assert(/renderCache:\s*data\s*=>\s*\{[\s\S]*?renderHistory\(data,\s*\{\s*applyInitialPosition:\s*true,\s*persistWatchPins:\s*false\s*}\)/.test(popupJs), 'warm cache 只预览未读特关置顶，不污染会话置顶集合');
+assert(/renderStorage:\s*data\s*=>\s*\{[\s\S]*?const\s+scrollAnchor\s*=\s*captureScrollAnchor\(historyList\)[\s\S]*?scrollAnchor\?\.anchorUrl\s*\?[\s\S]*?scrollAnchor[\s\S]*?:[\s\S]*?applyInitialPosition:\s*true/.test(popupJs), 'warm cache 到权威 storage 的二次渲染优先保留现有内容锚点');
 assert(/<script\s+src="popup-log\.js"><\/script>/i.test(popupHtml), 'popup 首屏接入统一性能日志脚本');
 assert(/window\.__popupPerfLog/.test(popupLogJs), '统一性能日志脚本导出全局 helper');
 assert(/String\(a\[0\]\)\.startsWith\('\[POPUP\]\[perf\]'\)/.test(popupJs), '只复制标准化性能日志');
@@ -608,7 +631,14 @@ assert(/applyStorage:[\s\S]*?observeCommittedMode\(data\.feedMode\)/.test(popupJ
 assert(/chrome\.runtime\.sendMessage\(\{\s*type:\s*'markAllRead',\s*readAllBefore:\s*now\s*}\)/.test(markAllReadHandler), '全部已读通过 background 串行推进全局水位');
 assert(!/chrome\.storage\.local\.set\(\{[\s\S]*?readAllBefore/.test(markAllReadHandler), 'popup 不独立覆写全部已读水位');
 assert(!/watchAliases|markWatchItemsViewed\(/.test(markAllReadHandler), '全部已读由 background 原子提交全局水位与全部特关已查看状态');
-assert(/try\s*{[\s\S]*?catch\s*\([^)]+\)\s*{[\s\S]*?await\s+loadHistory\(\)[\s\S]*?showPopupStatus\(/.test(markAllReadHandler), '全部已读失败时先恢复持久化列表再显示错误状态');
+assert(/const\s+scrollAnchor\s*=\s*captureScrollAnchor\(historyList\)/.test(markAllReadHandler), '全部已读前捕获当前列表滚动锚点');
+assert(/const\s+rollbackOptimisticReadState\s*=\s*applyOptimisticReadState\(historyList\.querySelectorAll\('\.item'\),\s*markAllReadBtn\)/.test(markAllReadHandler), '全部已读乐观状态保留可同步执行的 DOM 回滚');
+assert(/applyOptimisticReadState\(historyList\.querySelectorAll\('\.item'\),\s*markAllReadBtn\);\s*restoreScrollAnchor\(historyList,\s*scrollAnchor\);\s*const\s+now/.test(markAllReadHandler), '全部已读乐观 class 切换后立即恢复滚动锚点');
+assert(!/HISTORY_SCROLL_ANCHOR_MAX_JUMP/.test(popupJs), '全部已读滚动锚点恢复不设置距离上限');
+assert(/await\s+runMarkAllReadMutation\(\{[\s\S]*?rollback:\s*\(\)\s*=>\s*\{\s*rollbackOptimisticReadState\(\);\s*restoreScrollAnchor\(historyList,\s*scrollAnchor\);\s*}[\s\S]*?reload:\s*\(\)\s*=>\s*loadHistory\(undefined,\s*\{\s*immediate:\s*true,\s*forceRender:\s*true,\s*scrollAnchor\s*}\)/.test(markAllReadHandler), '全部已读失败回滚 class 后立即恢复滚动锚点，再执行权威刷新');
+assert(/onFailure:\s*\(\{\s*committed,\s*recovered\s*}\)\s*=>\s*\{[\s\S]*?if\s*\(committed\s*&&\s*recovered\)\s*return[;\s]*[\s\S]*?committed\s*\?[\s\S]*?列表刷新失败[\s\S]*?:\s*'全部已读失败，请重试。'/.test(markAllReadHandler), '后台已提交且刷新重试成功时才静默，mutation 失败仍提示');
+assert(/commit:\s*\(data,\s*context\)\s*=>\s*\{[\s\S]*?renderHistory\(data,\s*\{[\s\S]*?skipUnchanged:\s*!context\.forceRender[\s\S]*?scrollAnchor:\s*context\.scrollAnchor[\s\S]*?}\)/.test(popupJs), 'history load commit 将强制重绘和滚动锚点传给列表渲染');
+assert(/renderHistory\(data,\s*\{[\s\S]*?applyInitialPosition:\s*context\.applyInitialPosition/.test(popupJs), '冷骨架被普通 load 抢占时仍应用配置的初始定位');
 assert(/const\s+response\s*=\s*await\s+chrome\.runtime\.sendMessage\([\s\S]*?if\s*\(!response\?\.ok\)\s*throw/.test(markWatchUrlsViewedHelper), '特关已查看消息显式检查 background 失败响应');
 assert(!/chrome\.storage\.local\.(?:get|set)/.test(markWatchUrlsViewedHelper), '特关已查看失败只提示，不回退写 durable state');
 assert(/openHttpsUrl\(item\.dataset\.url,\s*chrome\.tabs\.create\.bind\(chrome\.tabs\)/.test(popupJs), '条目打开通过可执行 HTTPS helper');

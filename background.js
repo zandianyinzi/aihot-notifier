@@ -966,7 +966,7 @@ async function pollForUpdatesInternal() {
     if (!fingerprintProbe.changed && !safetyPollDue) {
       await saveFingerprintProbe(fingerprintProbe);
       await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
-      await updateBadge();
+      await runPostCommitSideEffect('poll skip badge update', updateBadge);
       console.log('[AI HOT] fingerprint unchanged, skip items');
       return;
     }
@@ -1086,7 +1086,7 @@ async function persistFetchedItems(items, options = {}) {
     await chrome.storage.local.set(updates);
   }
 
-  if (options.updateBadge !== false) await updateBadge();
+  if (options.updateBadge !== false) await runPostCommitSideEffect('persist badge update', updateBadge);
   return {
     updated,
     newEntries: persisted.inserted,
@@ -1148,7 +1148,7 @@ async function manualPollInternal() {
     if (!fingerprintProbe.changed) {
       await saveFingerprintProbe(fingerprintProbe);
       await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
-      await updateBadge();
+      await runPostCommitSideEffect('manual poll skip badge update', updateBadge);
       console.log('[AI HOT] manual fingerprint unchanged, skip items');
       return;
     }
@@ -1178,7 +1178,7 @@ async function manualPollInternal() {
       await saveFingerprintProbe(fingerprintProbe);
       await commitSuccessfulItemsPoll();
     }
-    await updateBadge();
+    await runPostCommitSideEffect('manual poll badge update', updateBadge);
     console.log(`[AI HOT] manual poll done, ${merged.length} total items (fetched ${allItems.length})`);
   } catch (e) {
     if (e.backoff) throw e;
@@ -1695,7 +1695,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     runMigratedStateMutation(async () => {
       if (!msg.readAllBefore || !Number.isFinite(new Date(msg.readAllBefore).getTime())) throw new Error('Invalid readAllBefore');
       const readAllBefore = await advanceReadAllBefore(msg.readAllBefore, true);
-      await updateBadge();
+      await runPostCommitSideEffect('mark-all-read badge update', updateBadge);
       return readAllBefore;
     })
       .then(readAllBefore => sendResponse({ ok: true, readAllBefore }))

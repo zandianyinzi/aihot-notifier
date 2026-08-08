@@ -256,7 +256,7 @@ async function runTests() {
           v1Item({
             id: 'v1-second',
             title: 'v1 第二页条目',
-            publishedAt: '2026-07-26T00:00:00.000Z',
+            publishedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
             source: { name: 'v1 第二来源' },
             links: {
               original: 'https://example.com/v1-second-original',
@@ -268,7 +268,7 @@ async function runTests() {
     }
     return Promise.resolve({
       ok: true,
-      json: () => Promise.resolve(v1Page([v1Item({ publishedAt: '2026-07-26T01:00:00.000Z' })], { hasMore: true, nextCursor: 'v1-next' }))
+      json: () => Promise.resolve(v1Page([v1Item({ publishedAt: new Date(Date.now() - 60 * 1000).toISOString() })], { hasMore: true, nextCursor: 'v1-next' }))
     });
   };
 
@@ -1155,6 +1155,18 @@ async function runTests() {
   });
   assert(atomicReadResponse.ok === true && storageData.readAllBefore === atomicReadAt && Boolean(storageData.watchNotifyState['atomic-watch']?.viewedAt), '全部已读在同一后台提交中同步推进水位与特关已查看状态');
   assert(storageData.watchNotifyState['future-watch']?.viewedAt === '', '全部已读不抑制水位生成后才匹配的新特关状态');
+
+  const badgeFailureReadAt = new Date(Date.now() + 45 * 1000).toISOString();
+  resetState();
+  badgeTextImpl = () => Promise.reject(new Error('mock mark-all-read badge failed'));
+  const badgeFailureResponse = await sendMessageWithTimeout({
+    type: 'markAllRead',
+    readAllBefore: badgeFailureReadAt
+  });
+  assert(
+    badgeFailureResponse.ok === true && storageData.readAllBefore === badgeFailureReadAt,
+    '全部已读持久化后 badge 更新失败仍报告 durable success'
+  );
 
   const concurrentReadAt = new Date(Date.now() + 60 * 1000).toISOString();
   resetState({ readAllBeforeByMode: { selected: selectedReadAt } });

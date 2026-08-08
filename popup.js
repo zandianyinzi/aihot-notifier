@@ -41,7 +41,8 @@ const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
 const { normalizeFeedMode, projectHistory } = window.FeedState;
-const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController } = popupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, captureScrollAnchor, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
+const sessionWatchPinTracker = createSessionWatchPinTracker();
 
 const CATEGORY_MAP = {
   'ai-models': { cls: 'cat-model', label: '模型' },
@@ -632,9 +633,16 @@ function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) 
   });
 }
 
+function applyRenderPosition(data, options = {}) {
+  if (options.scrollAnchor) {
+    restoreScrollAnchor(historyList, options.scrollAnchor);
+    return;
+  }
+  if (options.applyInitialPosition === true) applyInitialPosition(data);
+}
+
 function renderHistory(data, options = {}) {
   const skipUnchanged = options.skipUnchanged !== false;
-  const shouldApplyInitialPosition = options.applyInitialPosition === true;
   const rawHistory = projectHistory(data.history || [], data.feedMode);
   const readIds = data.readIds || [];
   const readAllBefore = getReadAllBefore(data);
@@ -649,8 +657,21 @@ function renderHistory(data, options = {}) {
   const signature = getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays);
   logPerf('render-start', { items: history.length, cached: signature === lastRenderSignature });
 
+  // Seed the session watch-pin tracker before the skip-unchanged guard. When the
+  // warm cache and authoritative storage produce an identical signature, the guard
+  // below returns early; if seeding lived after it, currently-unread watch keys
+  // would never enter the session set and would drop out of 特关 once read.
+  const pinnedWatch = sessionWatchPinTracker
+    .getPinnedItems(
+      history,
+      item => !isReadFast(item, readIdSet, readAllBeforeTime),
+      getItemStateKey,
+      { persistUnread: options.persistWatchPins !== false }
+    )
+    .sort((a, b) => getItemTime(b) - getItemTime(a));
+
   if (skipUnchanged && signature === lastRenderSignature) {
-    if (shouldApplyInitialPosition) applyInitialPosition(data);
+    applyRenderPosition(data, options);
     logPerf('render-skip', { items: history.length });
     return;
   }
@@ -661,6 +682,7 @@ function renderHistory(data, options = {}) {
       : '暂无内容，等待下一次推送';
     historyList.innerHTML = `<div class="empty-state">${tip}</div>`;
     markAllReadBtn.classList.remove('visible');
+    applyRenderPosition(data, options);
     lastRenderSignature = signature;
     logPerf('render-end', { items: 0, empty: true });
     return;
@@ -673,9 +695,6 @@ function renderHistory(data, options = {}) {
     markAllReadBtn.classList.remove('visible');
   }
 
-  const pinnedWatch = history
-    .filter(item => item.watchMatched && !isReadFast(item, readIdSet, readAllBeforeTime))
-    .sort((a, b) => getItemTime(b) - getItemTime(a));
   const pinnedKeys = new Set(pinnedWatch.map(item => getItemStateKey(item)));
   const displayHistory = [...pinnedWatch, ...history.filter(item => !pinnedKeys.has(getItemStateKey(item)))];
 
@@ -683,7 +702,7 @@ function renderHistory(data, options = {}) {
   if (pinnedWatch.length > 0) {
     html += `<div class="date-label date-label--watch">特关</div>`;
     pinnedWatch.forEach(item => {
-      html += renderItemHtml(item, true);
+      html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime));
     });
   }
 
@@ -703,7 +722,7 @@ function renderHistory(data, options = {}) {
   });
 
   historyList.innerHTML = html;
-  if (shouldApplyInitialPosition) applyInitialPosition(data);
+  applyRenderPosition(data, options);
   lastRenderSignature = signature;
   logPerf('render-end', { items: history.length, unread });
 }
@@ -792,12 +811,17 @@ const historyLoadController = createLatestWinsLoadController({
   projectHistory,
   normalizeFeedMode,
   getSwitchRequestId: () => feedModeSwitchController?.getState().switchRequestId || 0,
-  commit: data => {
+  captureScrollAnchor: () => captureScrollAnchor(historyList),
+  commit: (data, context) => {
     if (feedModeSwitchController) {
       feedModeSwitchController.observeCommittedMode(data.committedFeedMode);
       if (feedModeSwitchController.getState().pendingMode === null) feedModeEl.value = data.feedMode;
     }
-    renderHistory(data);
+    renderHistory(data, {
+      applyInitialPosition: context.applyInitialPosition,
+      skipUnchanged: !context.forceRender,
+      scrollAnchor: context.scrollAnchor
+    });
     allFeedContinuationStatusController.update(data.allFeedContinuation);
     cacheLoadedPopupData(data);
   },
@@ -883,22 +907,29 @@ historyList.addEventListener('keydown', async (e) => {
 
 markAllReadBtn.addEventListener('click', async () => {
   markAllReadBtn.disabled = true;
+  const scrollAnchor = captureScrollAnchor(historyList);
+  const rollbackOptimisticReadState = applyOptimisticReadState(historyList.querySelectorAll('.item'), markAllReadBtn);
+  restoreScrollAnchor(historyList, scrollAnchor);
+  const now = new Date().toISOString();
   try {
-    historyList.querySelectorAll('.item.unread').forEach(el => {
-      el.classList.remove('unread');
-      el.classList.add('read');
+    await runMarkAllReadMutation({
+      send: () => chrome.runtime.sendMessage({ type: 'markAllRead', readAllBefore: now }),
+      rollback: () => {
+        rollbackOptimisticReadState();
+        restoreScrollAnchor(historyList, scrollAnchor);
+      },
+      reload: () => loadHistory(undefined, { immediate: true, forceRender: true, scrollAnchor }),
+      onCommitted: () => {
+        showButtonConfirm(markAllReadBtn);
+        clearScrollPosition();
+      },
+      onFailure: ({ committed, recovered }) => {
+        if (committed && recovered) return;
+        showPopupStatus(committed
+          ? '全部已读已生效，但列表刷新失败，请重试。'
+          : '全部已读失败，请重试。');
+      }
     });
-    markAllReadBtn.classList.remove('visible');
-
-    const now = new Date().toISOString();
-    const response = await chrome.runtime.sendMessage({ type: 'markAllRead', readAllBefore: now });
-    if (!response?.ok) throw new Error(response?.error || 'Failed to mark all read');
-    showButtonConfirm(markAllReadBtn);
-    clearScrollPosition();
-    await loadHistory();
-  } catch (_e) {
-    await loadHistory().catch(() => {});
-    showPopupStatus('全部已读失败，请重试。');
   } finally {
     markAllReadBtn.disabled = false;
   }
@@ -1088,7 +1119,7 @@ const popupInitializationController = createPopupInitializationController({
   },
   waitForPaint: waitForNextPaint,
   renderCache: data => {
-    renderHistory(data, { applyInitialPosition: true });
+    renderHistory(data, { applyInitialPosition: true, persistWatchPins: false });
     logPerf('render-cache');
   },
   onStorageResolved: () => logPerf('storage-ready'),
@@ -1111,7 +1142,10 @@ const popupInitializationController = createPopupInitializationController({
     }
   },
   renderStorage: data => {
-    renderHistory(data, { applyInitialPosition: true });
+    const scrollAnchor = captureScrollAnchor(historyList);
+    renderHistory(data, scrollAnchor?.anchorUrl
+      ? { scrollAnchor }
+      : { applyInitialPosition: true });
     logPerf('render-storage');
     cacheLoadedPopupData(data);
     markPopupSessionWarm();

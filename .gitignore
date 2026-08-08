@@ -4,7 +4,9 @@ node_modules/
 package-lock.json
 _wrapper_*.html
 *-preview.html
+preview/
 .superpowers/
+.claude/
 store/chrome-web-store-notes.md
 
 .worktrees/

@@ -180,11 +180,11 @@
       --brand-hot-dot: #e40012;
       --brand-hot-glow: rgba(228,0,18,0.45);
     }
-    [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --item-pad: 12px; }
-    [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --item-pad: 14px; }
-    [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --item-pad: 16px; }
-    [data-size="xlarge"] { --fs-base: 17px; --fs-title: 17px; --fs-meta: 14px; --item-pad: 18px; }
-    [data-size="xxlarge"] { --fs-base: 19px; --fs-title: 19px; --fs-meta: 15px; --item-pad: 20px; }
+    [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --item-pad: 12px; --skeleton-title-h: 13px; --skeleton-summary-h: 12px; --skeleton-meta-h: 10px; }
+    [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --item-pad: 14px; --skeleton-title-h: 14px; --skeleton-summary-h: 13px; --skeleton-meta-h: 10px; }
+    [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --item-pad: 16px; --skeleton-title-h: 15px; --skeleton-summary-h: 14px; --skeleton-meta-h: 11px; }
+    [data-size="xlarge"] { --fs-base: 17px; --fs-title: 17px; --fs-meta: 14px; --item-pad: 18px; --skeleton-title-h: 17px; --skeleton-summary-h: 15px; --skeleton-meta-h: 12px; }
+    [data-size="xxlarge"] { --fs-base: 19px; --fs-title: 19px; --fs-meta: 15px; --item-pad: 20px; --skeleton-title-h: 19px; --skeleton-summary-h: 16px; --skeleton-meta-h: 13px; }
 
     :root {
       --hairline: 1.25px;
@@ -960,9 +960,9 @@
       animation: skeleton-pulse 1.2s ease-in-out infinite;
     }
 
-    .skeleton-title { width: 78%; }
-    .skeleton-summary { width: 94%; margin-top: 12px; }
-    .skeleton-meta { width: 36%; margin-top: 12px; height: 8px; }
+    .skeleton-title { width: 78%; height: var(--skeleton-title-h); }
+    .skeleton-summary { width: 94%; height: var(--skeleton-summary-h); margin-top: 6px; }
+    .skeleton-meta { width: 36%; height: var(--skeleton-meta-h); margin-top: 6px; }
 
     .skeleton-item:nth-child(2) .skeleton-title { width: 66%; }
     .skeleton-item:nth-child(2) .skeleton-summary { width: 88%; }
@@ -1073,7 +1073,7 @@
 
     .item-title {
       font-size: var(--fs-title, 13px);
-      font-weight: 400;
+      font-weight: 500;
       line-height: 1.55;
       color: var(--text);
       display: -webkit-box;
@@ -1084,7 +1084,6 @@
 
     .item.unread .item-title {
       color: var(--text-unread, var(--text));
-      font-weight: 500;
     }
 
     .item.unread .item-summary {
