@@ -2,13 +2,6 @@ const enabledEl = document.getElementById('enabled');
 const perfLog = window.__popupPerfLog || function () {};
 perfLog('js-start');
 
-const _dbuf = [];
-const _origLog = console.log;
-console.log = function(...a) {
-  _origLog.apply(console, a);
-  if (String(a[0]).startsWith('[POPUP][perf]')) _dbuf.push(a.join(' '));
-};
-
 new ResizeObserver(entries => {
   const r = entries[0].contentRect;
   perfLog('resize', { width: Math.round(r.width), height: Math.round(r.height) });
@@ -966,7 +959,7 @@ if (settingsInnerEl) {
 }
 
 document.getElementById('copyLogs').addEventListener('click', function() {
-  const log = window.__popupPerf && window.__popupPerf.snapshot ? window.__popupPerf.snapshot().join('\n') : _dbuf.join('\n');
+  const log = window.__popupPerf && window.__popupPerf.snapshot ? window.__popupPerf.snapshot().join('\n') : '';
   navigator.clipboard.writeText(log).then(() => {
     this.textContent = '成功';
     setTimeout(() => { this.textContent = '拷贝'; }, 1500);

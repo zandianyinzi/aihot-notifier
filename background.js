@@ -27,6 +27,11 @@ const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 const CANONICAL_HISTORY_VERSION = 1;
+// Gated off until the API guarantees a consistent, un-paginated selected snapshot.
+// While false, isCompleteSelectedSnapshot() always returns false in production, so the
+// completeSelectedSnapshot de-selection branch in upsertCanonicalItems is unreachable
+// outside tests (which pass capabilities explicitly). Do not enable without that guarantee:
+// a truncated snapshot would wrongly de-select items missing from the partial page.
 const SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT = false;
 const SOURCE_SWITCH_STORAGE_KEYS = [
   'history',
@@ -482,7 +487,7 @@ function advanceWatchNotifyState(state, now) {
   };
 }
 
-function getWatchNotificationTitle(item, state) {
+function getWatchNotificationTitle(item) {
   const ruleLabel = parseSourceParts(item.source || '').authorText || item.source || '特关';
   return `特关：${ruleLabel}`;
 }
@@ -562,7 +567,7 @@ async function sendWatchNotifications(items, watchNotifyState, now, limit = MAX_
     await createNotification(getNotificationId('aihot-watch'), {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
-      title: getWatchNotificationTitle(item, state),
+      title: getWatchNotificationTitle(item),
       message: item.title,
       contextMessage: item.source || ''
     }, url, key);

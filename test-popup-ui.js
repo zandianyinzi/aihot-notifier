@@ -562,7 +562,8 @@ assert(/renderCache:\s*data\s*=>\s*\{[\s\S]*?renderHistory\(data,\s*\{\s*applyIn
 assert(/renderStorage:\s*data\s*=>\s*\{[\s\S]*?const\s+scrollAnchor\s*=\s*captureScrollAnchor\(historyList\)[\s\S]*?scrollAnchor\?\.anchorUrl\s*\?[\s\S]*?scrollAnchor[\s\S]*?:[\s\S]*?applyInitialPosition:\s*true/.test(popupJs), 'warm cache 到权威 storage 的二次渲染优先保留现有内容锚点');
 assert(/<script\s+src="popup-log\.js"><\/script>/i.test(popupHtml), 'popup 首屏接入统一性能日志脚本');
 assert(/window\.__popupPerfLog/.test(popupLogJs), '统一性能日志脚本导出全局 helper');
-assert(/String\(a\[0\]\)\.startsWith\('\[POPUP\]\[perf\]'\)/.test(popupJs), '只复制标准化性能日志');
+assert(/window\.__popupPerf\.snapshot\(\)/.test(popupJs), '拷贝日志只取统一性能日志快照');
+assert(!/console\.log\s*=/.test(popupJs), '不再重写 console.log，避免生产环境常驻插桩');
 
 console.log('\n[打包清单]');
 const localScripts = [...popupHtml.matchAll(/<script\s+src="([^"]+\.js)"><\/script>/ig)].map(match => match[1]);
