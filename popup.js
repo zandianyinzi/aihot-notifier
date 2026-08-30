@@ -853,6 +853,8 @@ async function handleItemClick(e) {
 async function openHistoryItem(item) {
   const result = await openHttpsUrl(item.dataset.url, chrome.tabs.create.bind(chrome.tabs), async url => {
     const key = item.dataset.key || url;
+    const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+    writeScrollPosition({ feedMode, historyDays });
 
     if (!cachedReadIds.has(key)) {
       cachedReadIds.add(key);
