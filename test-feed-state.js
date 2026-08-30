@@ -9,10 +9,11 @@ const history = [
 ];
 
 assert.strictEqual(normalizeFeedMode('all'), 'all');
-assert.strictEqual(normalizeFeedMode('unexpected'), 'selected');
+assert.strictEqual(normalizeFeedMode(undefined), 'all');
+assert.strictEqual(normalizeFeedMode('unexpected'), 'all');
 assert.strictEqual(isVisibleInFeedMode(history[0], 'selected'), true);
 assert.strictEqual(isVisibleInFeedMode(history[1], 'selected'), false);
 assert.strictEqual(isVisibleInFeedMode(history[2], 'selected'), false);
 assert.deepStrictEqual(projectHistory(history, 'selected').map(item => item.id), ['selected']);
 assert.deepStrictEqual(projectHistory(history, 'all').map(item => item.id), ['selected', 'all-only', 'truthy-non-boolean', 'legacy']);
-console.log('结果: 7 passed, 0 failed');
+console.log('结果: 8 passed, 0 failed');

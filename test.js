@@ -369,14 +369,14 @@ console.log('\n[feedMode默认值]');
 (function() {
   // 模拟 storage 中无 feedMode（首次安装）
   const data1 = {};
-  assert((data1.feedMode || 'selected') === 'selected', '未设置时默认selected');
+  assert((data1.feedMode || 'all') === 'all', '未设置时默认all');
 
   // 模拟 storage 中有 feedMode
   const data2 = { feedMode: 'selected' };
-  assert((data2.feedMode || 'selected') === 'selected', '已设置selected时使用selected');
+  assert((data2.feedMode || 'all') === 'selected', '已设置selected时使用selected');
 
   const data3 = { feedMode: 'all' };
-  assert((data3.feedMode || 'selected') === 'all', '已设置all时使用all');
+  assert((data3.feedMode || 'all') === 'all', '已设置all时使用all');
 })();
 
 console.log('\n[feedMode切换-数据隔离]');

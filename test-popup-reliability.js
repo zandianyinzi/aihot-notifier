@@ -13,6 +13,7 @@ const {
   createPopupStorageChangeHandler,
   createSessionWatchPinTracker,
   captureScrollAnchor,
+  buildScrollPosition,
   restoreScrollAnchor,
   applyOptimisticReadState,
   runMarkAllReadMutation,
@@ -628,6 +629,26 @@ function testScrollAnchorCaptureAndRestore() {
   assert.strictEqual(captureScrollAnchor(scroller), null, 'a skeleton or empty state does not produce a truthy empty anchor');
 }
 
+function testPersistedScrollPositionKeepsStableAnchorKey() {
+  const visible = createFakeScrollItem('duplicate-url', 118, 160, 'stable-item-id');
+  const scroller = {
+    scrollTop: 80,
+    getBoundingClientRect: () => ({ top: 100 }),
+    querySelectorAll: () => [visible]
+  };
+
+  const position = buildScrollPosition(scroller, { feedMode: 'all', historyDays: 2 }, 1234);
+  assert.deepStrictEqual(position, {
+    feedMode: 'all',
+    historyDays: 2,
+    scrollTop: 80,
+    anchorKey: 'stable-item-id',
+    anchorUrl: 'duplicate-url',
+    offsetTop: 18,
+    savedAt: 1234
+  }, 'persisted scroll position stores the stable anchor key and viewport offset');
+}
+
 function createFakeClassList(initialClasses) {
   const classes = new Set(initialClasses);
   return {
@@ -645,7 +666,7 @@ function testOptimisticReadStateRollback() {
 
   assert(unreadItem.classList.contains('read') && !unreadItem.classList.contains('unread'), 'optimistic state immediately marks unread items as read');
   assert(alreadyReadItem.classList.contains('read'), 'optimistic state leaves already-read items unchanged');
-  assert(!markAllButton.classList.contains('visible'), 'optimistic state immediately hides the mark-all button');
+  assert(markAllButton.classList.contains('visible'), 'optimistic state keeps the mark-all button visible during confirmation');
 
   rollback();
   assert(unreadItem.classList.contains('unread') && !unreadItem.classList.contains('read'), 'rollback restores only items changed by the optimistic state');
@@ -739,6 +760,7 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   await testActiveContinuationDefersIntermediateHistoryRenders();
   await testContinuationStatusExpiryTimer();
   testScrollAnchorCaptureAndRestore();
+  testPersistedScrollPositionKeepsStableAnchorKey();
   testOptimisticReadStateRollback();
   testSessionWatchPinsStayStableAcrossReadTransitions();
   await testMarkAllReadMutationSeparatesCommitAndReloadFailure();

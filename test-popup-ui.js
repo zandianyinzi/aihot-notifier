@@ -558,6 +558,10 @@ assert(/function\s+waitForNextPaint\(\)/.test(popupJs), '存在首帧让步 help
 assert(/waitForPaint:\s*waitForNextPaint/.test(popupJs) && /await\s+deps\.waitForPaint\(\);[\s\S]*?deps\.renderStorage/.test(popupReliabilityJs), 'storage 渲染前先等待下一帧');
 assert(/await\s+deps\.waitForPaint\(\);[\s\S]*?deps\.renderCache/.test(popupReliabilityJs), '缓存渲染前先等待下一帧');
 assert(/captureScrollAnchor:\s*\(\)\s*=>\s*captureScrollAnchor\(historyList\)/.test(popupJs), '普通 history load 在提交前捕获当前阅读锚点');
+assert(/buildScrollPosition\(historyList,\s*context\)/.test(popupJs), '持久化滚动位置使用统一锚点快照 helper');
+assert(/Number\.isFinite\(position\.offsetTop\)[\s\S]*?anchorKey:\s*position\.anchorKey/.test(popupJs), '持久化滚动位置按稳定锚点和相对偏移恢复并兼容旧数据回退');
+assert(/function\s+buildScrollPosition\([\s\S]*?anchorKey:\s*anchor\?\.anchorKey/.test(popupReliabilityJs), '滚动位置快照保存稳定 anchorKey');
+assert(/writeScrollPosition\(\{\s*feedMode:\s*normalizeFeedMode\(feedMode\)/.test(popupJs), '打开条目保存滚动位置时使用归一化内容源');
 assert(/renderCache:\s*data\s*=>\s*\{[\s\S]*?renderHistory\(data,\s*\{\s*applyInitialPosition:\s*true,\s*persistWatchPins:\s*false\s*}\)/.test(popupJs), 'warm cache 只预览未读特关置顶，不污染会话置顶集合');
 assert(/renderStorage:\s*data\s*=>\s*\{[\s\S]*?const\s+scrollAnchor\s*=\s*captureScrollAnchor\(historyList\)[\s\S]*?scrollAnchor\?\.anchorUrl\s*\?[\s\S]*?scrollAnchor[\s\S]*?:[\s\S]*?applyInitialPosition:\s*true/.test(popupJs), 'warm cache 到权威 storage 的二次渲染优先保留现有内容锚点');
 assert(/<script\s+src="popup-log\.js"><\/script>/i.test(popupHtml), 'popup 首屏接入统一性能日志脚本');
@@ -673,7 +677,7 @@ assert(/settingsPanel\.classList\.contains\('open'\)[\s\S]*collapseSettingsGroup
 assert(/设置面板按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，打开设置时默认不展开任何分组/.test(claudeMd), 'CLAUDE 描述设置面板默认不展开');
 assert(/主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧 hover 颜色条/.test(claudeMd), 'CLAUDE 描述主列表 hover 不使用颜色条');
 assert(/Windows\/PowerShell 无 bash 时使用 Compress-Archive/.test(claudeMd), 'CLAUDE 记录 PowerShell 打包替代命令');
-assert(/设置面板按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，默认不展开任何分组/.test(agentsMd), 'AGENTS 描述设置面板默认不展开');
+assert(/设置面板(?:使用原生折叠分组，打开设置时|按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，)默认不展开任何分组/.test(agentsMd), 'AGENTS 描述设置面板默认不展开');
 assert(!/默认只展开 `常规`/.test(agentsMd), 'AGENTS 不再描述默认展开常规');
 
 console.log(`\n${'='.repeat(40)}`);

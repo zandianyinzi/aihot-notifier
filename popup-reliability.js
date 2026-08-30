@@ -47,6 +47,18 @@
     };
   }
 
+  function buildScrollPosition(scroller, context = {}, savedAt = Date.now()) {
+    const anchor = captureScrollAnchor(scroller);
+    return {
+      ...context,
+      scrollTop: Number.isFinite(anchor?.scrollTop) ? anchor.scrollTop : Math.max(Number(scroller?.scrollTop) || 0, 0),
+      anchorKey: anchor?.anchorKey || '',
+      anchorUrl: anchor?.anchorUrl || '',
+      ...(Number.isFinite(anchor?.offsetTop) ? { offsetTop: anchor.offsetTop } : {}),
+      savedAt
+    };
+  }
+
   function restoreScrollAnchor(scroller, anchor, options = {}) {
     if (!scroller || !anchor) return false;
     const fallbackScrollTop = Number.isFinite(anchor.scrollTop) ? Math.max(anchor.scrollTop, 0) : 0;
@@ -419,6 +431,7 @@
     getAllFeedContinuationStatusMessage,
     createAllFeedContinuationStatusController,
     captureScrollAnchor,
+    buildScrollPosition,
     restoreScrollAnchor,
     applyOptimisticReadState,
     runMarkAllReadMutation,

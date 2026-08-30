@@ -34,7 +34,7 @@ const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
 const { normalizeFeedMode, projectHistory } = window.FeedState;
-const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, captureScrollAnchor, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
 const sessionWatchPinTracker = createSessionWatchPinTracker();
 
 const CATEGORY_MAP = {
@@ -441,14 +441,10 @@ function readScrollPosition() {
 
 function writeScrollPosition(data = {}) {
   if (normalizeOpenPositionMode(openPositionModeEl.value) !== 'free') return;
-  const firstVisible = getFirstVisibleItem();
   const context = getScrollContext(data);
   try {
     localStorage.setItem(POPUP_SCROLL_KEY, JSON.stringify({
-      ...context,
-      scrollTop: historyList.scrollTop,
-      anchorUrl: firstVisible ? firstVisible.dataset.url : '',
-      savedAt: Date.now()
+      ...buildScrollPosition(historyList, context)
     }));
   } catch (_e) {
     // Scroll position is a convenience only.
@@ -488,14 +484,13 @@ function restoreScrollPosition(data) {
   const context = getScrollContext(data);
   if (position.feedMode !== context.feedMode || position.historyDays !== context.historyDays) return false;
 
-  if (position.anchorUrl) {
-    const anchor = historyList.querySelector(`.item[data-url="${CSS.escape(position.anchorUrl)}"]`);
-    if (anchor) {
-      const listTop = historyList.getBoundingClientRect().top;
-      const anchorTop = anchor.getBoundingClientRect().top;
-      historyList.scrollTop = Math.max(historyList.scrollTop + (anchorTop - listTop), 0);
-      return true;
-    }
+  if ((position.anchorKey || position.anchorUrl) && Number.isFinite(position.offsetTop)) {
+    if (restoreScrollAnchor(historyList, {
+      scrollTop: position.scrollTop,
+      anchorKey: position.anchorKey || '',
+      anchorUrl: position.anchorUrl,
+      offsetTop: position.offsetTop
+    })) return true;
   }
 
   if (Number.isFinite(position.scrollTop)) {
@@ -855,8 +850,8 @@ async function handleItemClick(e) {
 async function openHistoryItem(item) {
   const result = await openHttpsUrl(item.dataset.url, chrome.tabs.create.bind(chrome.tabs), async url => {
     const key = item.dataset.key || url;
-    const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
-    writeScrollPosition({ feedMode, historyDays });
+    const { feedMode, historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+    writeScrollPosition({ feedMode: normalizeFeedMode(feedMode), historyDays });
 
     if (!cachedReadIds.has(key)) {
       cachedReadIds.add(key);
