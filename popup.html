@@ -299,8 +299,7 @@
       .btn-icon.is-loading svg,
       .btn-icon.is-result-ok,
       #pollNow.is-result-accent,
-      .btn-icon.is-result-danger,
-      .btn-mark-read.is-confirmed {
+      .btn-icon.is-result-danger {
         animation: none;
       }
     }
@@ -385,33 +384,6 @@
       transform: scale(var(--control-active-scale));
     }
 
-    .btn-mark-read.is-confirmed {
-      color: var(--accent);
-      animation: control-confirm 0.75s ease-out forwards;
-    }
-
-    @keyframes control-confirm {
-      0% {
-        background: var(--accent-soft);
-        color: var(--accent);
-        transform: scale(1.03);
-      }
-      30% {
-        background: var(--accent-soft);
-        color: var(--accent);
-        transform: scale(1);
-      }
-      70% {
-        background: color-mix(in srgb, var(--accent-soft) 40%, transparent);
-        color: color-mix(in srgb, var(--accent) 60%, var(--text-3));
-        transform: scale(1);
-      }
-      100% {
-        background: transparent;
-        color: var(--text-3);
-        transform: scale(1);
-      }
-    }
 
     .btn-icon svg {
       width: var(--control-icon-size);
@@ -1214,7 +1186,7 @@
           <div class="setting-row">
             <label>检查频率</label>
             <select class="select-mini" id="interval" aria-label="检查频率">
-              <option value="2">2 分钟</option>
+              <option value="2" selected>2 分钟</option>
               <option value="5">5 分钟</option>
               <option value="15">15 分钟</option>
               <option value="30">30 分钟</option>
@@ -1240,7 +1212,7 @@
           <div class="setting-row">
             <label>定位</label>
             <select class="select-mini" id="openPositionMode" aria-label="定位">
-              <option value="free">自由浏览</option>
+              <option value="free" selected>自由浏览</option>
               <option value="unread">未读优先</option>
             </select>
           </div>

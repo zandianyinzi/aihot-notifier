@@ -347,8 +347,11 @@
       const preparedData = deps.prepareStorage(storageData, cachedData);
       if (!isCurrent()) return { stale: true };
       deps.applyStorage(preparedData, committedMode);
-      await deps.waitForPaint();
-      if (!isCurrent()) return { stale: true };
+      // Cache-miss: let browser paint skeleton before rendering heavy content
+      if (!cachedData) {
+        await deps.waitForPaint();
+        if (!isCurrent()) return { stale: true };
+      }
       deps.renderStorage(preparedData, committedMode);
       return { stale: false, data: preparedData };
     }

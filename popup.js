@@ -120,22 +120,16 @@ function showButtonResult(button, className, elapsedMs) {
   button.classList.add(className);
   removeClassAfterAnimation(button, className, () => {
     button.style.removeProperty('--control-result-duration');
-  });
-}
-
-function showButtonConfirm(button) {
-  button.classList.remove('is-confirmed');
-  // Restart the short confirmation pulse if this state is applied again quickly.
-  void button.offsetWidth;
-  button.classList.add('is-confirmed');
-  removeClassAfterAnimation(button, 'is-confirmed', () => {
-    // Only hide the button after animation completes if there are truly no unread items
-    const unreadItems = document.querySelectorAll('.item.unread');
-    if (unreadItems.length === 0) {
-      button.classList.remove('visible');
+    // Only hide mark-all-read button after animation if there are no unread items
+    if (button.id === 'markAllRead') {
+      const unreadItems = document.querySelectorAll('.item.unread');
+      if (unreadItems.length === 0) {
+        button.classList.remove('visible');
+      }
     }
   });
 }
+
 
 function readPopupCache(expectedMode) {
   try {
@@ -419,7 +413,7 @@ function normalizeFontFamily(font) {
 }
 
 function normalizeOpenPositionMode(mode) {
-  return VALID_OPEN_POSITION_MODES.has(mode) ? mode : 'unread';
+  return VALID_OPEN_POSITION_MODES.has(mode) ? mode : 'free';
 }
 
 function getScrollContext(data) {
@@ -592,7 +586,7 @@ function applyFontFamily(font) {
 
 function applyConfig(data, options = {}) {
   enabledEl.checked = data.enabled !== false;
-  let interval = data.interval || 5;
+  let interval = data.interval || 2;
   if (interval < 2) interval = 2;
   intervalEl.value = String(interval);
   if (options.preserveFeedMode !== true) feedModeEl.value = normalizeFeedMode(data.feedMode);
@@ -859,8 +853,6 @@ async function handleItemClick(e) {
 async function openHistoryItem(item) {
   const result = await openHttpsUrl(item.dataset.url, chrome.tabs.create.bind(chrome.tabs), async url => {
     const key = item.dataset.key || url;
-    const { feedMode = 'selected', historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
-    writeScrollPosition({ feedMode, historyDays });
 
     if (!cachedReadIds.has(key)) {
       cachedReadIds.add(key);
@@ -910,6 +902,7 @@ historyList.addEventListener('keydown', async (e) => {
 
 markAllReadBtn.addEventListener('click', async () => {
   markAllReadBtn.disabled = true;
+  const feedbackStartedAt = Date.now();
   const scrollAnchor = captureScrollAnchor(historyList);
   const rollbackOptimisticReadState = applyOptimisticReadState(historyList.querySelectorAll('.item'), markAllReadBtn);
   restoreScrollAnchor(historyList, scrollAnchor);
@@ -923,11 +916,12 @@ markAllReadBtn.addEventListener('click', async () => {
       },
       reload: () => loadHistory(undefined, { immediate: true, forceRender: true, scrollAnchor }),
       onCommitted: () => {
-        showButtonConfirm(markAllReadBtn);
+        showButtonResult(markAllReadBtn, 'is-result-accent', Date.now() - feedbackStartedAt);
         clearScrollPosition();
       },
       onFailure: ({ committed, recovered }) => {
         if (committed && recovered) return;
+        showButtonResult(markAllReadBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
         showPopupStatus(committed
           ? '全部已读已生效，但列表刷新失败，请重试。'
           : '全部已读失败，请重试。');
