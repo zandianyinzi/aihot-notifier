@@ -491,7 +491,9 @@ function restoreScrollPosition(data) {
   if (position.anchorUrl) {
     const anchor = historyList.querySelector(`.item[data-url="${CSS.escape(position.anchorUrl)}"]`);
     if (anchor) {
-      historyList.scrollTop = Math.max(anchor.offsetTop - historyList.offsetTop, 0);
+      const listTop = historyList.getBoundingClientRect().top;
+      const anchorTop = anchor.getBoundingClientRect().top;
+      historyList.scrollTop = Math.max(historyList.scrollTop + (anchorTop - listTop), 0);
       return true;
     }
   }
