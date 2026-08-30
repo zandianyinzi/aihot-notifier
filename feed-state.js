@@ -4,7 +4,7 @@
   root.FeedState = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
   function normalizeFeedMode(mode) {
-    return mode === 'all' ? 'all' : 'selected';
+    return mode === 'selected' ? 'selected' : 'all';
   }
 
   function isVisibleInFeedMode(item, mode) {

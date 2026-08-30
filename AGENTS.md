@@ -1,27 +1,35 @@
-# Repository Guidelines
+# CLAUDE.md
 
-## 项目结构与模块组织
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-本仓库是一个无构建依赖的 Chrome/Edge Manifest V3 扩展。核心文件位于仓库根目录：
+## 项目概述
 
-- `manifest.json`：声明权限、图标、弹窗入口和后台 Service Worker。
-- `background.js`：负责轮询 AI HOT API、分页、去重、通知、badge 和 `chrome.storage.local` 存储。
-- `popup.html` / `popup.js`：实现弹窗界面、列表渲染、已读状态和设置交互。
-- `icons/`：扩展图标，包含 16、32、48、128px 等尺寸。
-- `store/`：Chrome Web Store 文案、隐私政策和截图素材。
-- `test*.js`：独立 Node 测试脚本，目前没有单独的 `tests/` 目录。
-- 设置面板按 `常规 / 外观 / 特关 / 调试` 分组，默认不展开任何分组；主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧颜色条；特关规则首行保持 `来源 / 作者 / 停用 / 删除` 同行，来源完整显示，作者在操作按钮前省略，关键词只在存在时另起一行；除输入框外，弹窗内其它区域不应出现文本插入光标。
+Chrome 扩展（Manifest V3），监控 aihot.virxact.com AI 资讯并推送桌面通知。纯前端，无构建步骤，无依赖。
 
-## 构建、测试与开发命令
+## 命令
 
-- `node test.js`：运行纯逻辑测试，覆盖去重、排序、时间窗口和 API URL。
-- `node test-notification.js`：使用 mock 的 Chrome API 验证通知和 badge 逻辑。
-- `node test-background.js`：直接加载真实 `background.js`，验证消息通道、fingerprint、分页和失败语义。
-- `node test-e2e.js`：请求 `https://aihot.virxact.com`，验证线上 API 数据假设。
-- `bash pack.sh`：生成用于分发的 `aihot-notifier.zip`；Windows 无 bash 时使用 PowerShell `Compress-Archive`，保持包内只含清单、JS、HTML、`fonts/`、`icons/`。
-- `node screenshot.mjs`：重新生成商店截图；首次使用前执行 `npm install --no-save puppeteer`。
+```bash
+# 打包为 zip（排除无关文件）
+./pack.sh
+# Windows/PowerShell 无 bash 时使用 Compress-Archive，保持包内只含 manifest、JS、HTML、fonts/、icons/
 
-仓库没有 `package.json`。除非明确切换到 Node 包管理流程，否则不要新增依赖清单。
+# 单元测试（纯逻辑验证，不需要浏览器）
+node test.js
+node test-notification.js
+node test-popup-ui.js
+
+# 端到端测试（直接请求 API 验证数据逻辑）
+node test-e2e.js
+
+# 重新生成 Chrome Web Store 截图和宣传图
+node screenshot.mjs
+```
+
+## 架构
+
+- **background.js** — Service Worker。定时轮询 API、去重、存储 history、发通知、管理 badge 计数。核心函数：`pollForUpdates()`（定时触发）、`manualPoll()`（用户手动刷新）、`resetAndPoll()`（切换 feedMode 时全量重拉）、`updateBadge()`（badge 未读数）。
+- **popup.html + popup.js** — 弹窗 UI。读取 storage 渲染资讯列表，管理已读状态和设置面板。通知开关/轮询间隔变更通过 `chrome.runtime.sendMessage` 通知 background；外观类设置仅本地保存和重渲染。设置面板按 `常规 / 外观 / 特关 / 调试` 分组，打开设置时默认不展开任何分组。
+- **manifest.json** — 权限：alarms、notifications、storage。host_permissions 限制为 aihot.virxact.com。
 
 ## 代码风格与命名约定
 
@@ -32,6 +40,30 @@
 ## 测试指南
 
 修改逻辑前后至少运行 `node test.js`、`node test-notification.js` 和相关 UI/API 测试。涉及 background 消息、fingerprint、分页或失败语义时运行 `node test-background.js`；涉及线上 feed 假设时运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。
+
+## UI 约定
+
+- 设置面板使用原生折叠分组，打开设置时默认不展开任何分组。
+- 主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧 hover 颜色条；未读/特关未读只用未读底色和标题颜色作为状态信号。标题字重恒定 500，不随已读状态切换——字重会改变字宽，在 2 行 line-clamp 边界触发重排，导致标题位移。已读靠标题颜色变暗后退区分。
+- 分组标题、按钮和标签沿用主题色与低对比度层级，不把说明性文字做成高亮主视觉。
+- 特关规则项首行保持 `来源 / 作者 / 停用 / 删除` 同行：来源完整显示，作者在操作按钮前省略；关键词只在存在时另起一行并横向展开，不为空关键词预留位置。
+- 除输入框外，弹窗内其它交互区域不应出现文本插入光标。
+- 全部已读按钮确认动效：750ms ease-out，轻微缩放(1.03)，渐进淡出。动效期间保持可见，结束后检查未读数再决定是否隐藏。
+
+## 关键设计决策
+
+- **已读状态**：`readIds` 保存单条稳定 key（优先 `id`，再 `permalink`，再 `url`，并兼容旧 URL）+ `readAllBefore` 时间戳（批量清除）。两者共同决定是否已读。
+- **存储 vs 显示**：storage 保留 `Math.max(historyDays, 5)` 天数据避免切换天数时丢失；UI 和 badge 按用户设置的 `historyDays` 过滤显示。
+- **API 轮询缓冲**：自动轮询和手动刷新都先请求临时保留的 legacy `/api/public/fingerprint`；fingerprint 变化或自动 6 小时兜底到期才拉 v1 items。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
+- **feedMode 切换**：调用 `resetAndPoll()` 全量重拉并替换 history，成功后才提交新的 feedMode；失败时保留旧 history 和旧 feedMode，避免状态不一致。
+- **内容源默认值**：`normalizeFeedMode()` 默认返回 `all`（全部），未明确设置时显示全部内容。
+
+## API
+
+- `GET https://aihot.virxact.com/api/public/fingerprint`：当前仍临时保留的 legacy 变更探测端点；若本地缺当前 `feedMode` 的 fingerprint，不发送 `If-None-Match`，避免 304 无法补齐当前模式指纹。该依赖已标记为弃用追踪，items 数据不再使用 legacy API。
+- `GET https://aihot.virxact.com/api/v1/items?mode={selected|all}&window=7d&limit=100&cursor={nextCursor}`：v1 items 端点。响应为 `{ items: [...], page: { hasMore: bool, nextCursor: string|null } }`；以 `page.hasMore` 和 `page.nextCursor` 驱动分页，`cursor` 视为 opaque，原样传回。条目来源使用 `source.name`，链接使用 `links.original`（优先打开）和 `links.aihot`（permalink / HTTPS 回退）。
+
+只有 items 分页未截断且 history 持久化成功后，才提交新的 fingerprint / `lastItemsPollAt`。
 
 ## 发布流程
 
@@ -51,3 +83,9 @@ PR 需包含变更摘要、已运行的测试命令。涉及界面变化时附�
 ## 安全与配置提示
 
 保持 `host_permissions` 限定为 `https://aihot.virxact.com/*`。不要提交 `node_modules/`、生成的 zip、密钥或本地浏览器 profile。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。
+
+## 发布
+
+- GitHub: https://github.com/zandianyinzi/aihot-notifier
+- 隐私政策: https://zandianyinzi.github.io/aihot-notifier/privacy-policy.html
+- Chrome Web Store 素材在 `store/` 目录

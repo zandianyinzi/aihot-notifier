@@ -128,7 +128,13 @@ function showButtonConfirm(button) {
   // Restart the short confirmation pulse if this state is applied again quickly.
   void button.offsetWidth;
   button.classList.add('is-confirmed');
-  removeClassAfterAnimation(button, 'is-confirmed');
+  removeClassAfterAnimation(button, 'is-confirmed', () => {
+    // Only hide the button after animation completes if there are truly no unread items
+    const unreadItems = document.querySelectorAll('.item.unread');
+    if (unreadItems.length === 0) {
+      button.classList.remove('visible');
+    }
+  });
 }
 
 function readPopupCache(expectedMode) {
@@ -674,7 +680,9 @@ function renderHistory(data, options = {}) {
       ? `当前${historyDays}天内无记录，记录会随轮询逐步积累`
       : '暂无内容，等待下一次推送';
     historyList.innerHTML = `<div class="empty-state">${tip}</div>`;
-    markAllReadBtn.classList.remove('visible');
+    if (!markAllReadBtn.classList.contains('is-confirmed')) {
+      markAllReadBtn.classList.remove('visible');
+    }
     applyRenderPosition(data, options);
     lastRenderSignature = signature;
     logPerf('render-end', { items: 0, empty: true });
@@ -684,7 +692,8 @@ function renderHistory(data, options = {}) {
   const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
   if (unread > 0) {
     markAllReadBtn.classList.add('visible');
-  } else {
+  } else if (!markAllReadBtn.classList.contains('is-confirmed')) {
+    // Only hide if not currently showing confirmation animation
     markAllReadBtn.classList.remove('visible');
   }
 
@@ -871,7 +880,8 @@ async function openHistoryItem(item) {
     const unreadCount = unreadEls.length;
     if (unreadCount > 0) {
       markAllReadBtn.classList.add('visible');
-    } else {
+    } else if (!markAllReadBtn.classList.contains('is-confirmed')) {
+      // Only hide if not currently showing confirmation animation
       markAllReadBtn.classList.remove('visible');
     }
     try {

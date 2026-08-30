@@ -386,15 +386,31 @@
     }
 
     .btn-mark-read.is-confirmed {
-      display: flex;
       color: var(--accent);
-      animation: control-confirm var(--motion-confirm) ease-out forwards;
+      animation: control-confirm 0.75s ease-out forwards;
     }
 
     @keyframes control-confirm {
-      0% { background: var(--accent-soft); color: var(--accent); transform: scale(1.08); }
-      45% { background: var(--accent-soft); color: var(--accent); transform: scale(1); }
-      100% { background: transparent; color: var(--text-3); transform: scale(1); }
+      0% {
+        background: var(--accent-soft);
+        color: var(--accent);
+        transform: scale(1.03);
+      }
+      30% {
+        background: var(--accent-soft);
+        color: var(--accent);
+        transform: scale(1);
+      }
+      70% {
+        background: color-mix(in srgb, var(--accent-soft) 40%, transparent);
+        color: color-mix(in srgb, var(--accent) 60%, var(--text-3));
+        transform: scale(1);
+      }
+      100% {
+        background: transparent;
+        color: var(--text-3);
+        transform: scale(1);
+      }
     }
 
     .btn-icon svg {
@@ -1209,7 +1225,7 @@
             <label>内容源</label>
             <select class="select-mini" id="feedMode" aria-label="内容源">
               <option value="selected">精选</option>
-              <option value="all">全部</option>
+              <option value="all" selected>全部</option>
             </select>
           </div>
           <div class="setting-row">

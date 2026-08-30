@@ -31,6 +31,16 @@ node screenshot.mjs
 - **popup.html + popup.js** — 弹窗 UI。读取 storage 渲染资讯列表，管理已读状态和设置面板。通知开关/轮询间隔变更通过 `chrome.runtime.sendMessage` 通知 background；外观类设置仅本地保存和重渲染。设置面板按 `常规 / 外观 / 特关 / 调试` 分组，打开设置时默认不展开任何分组。
 - **manifest.json** — 权限：alarms、notifications、storage。host_permissions 限制为 aihot.virxact.com。
 
+## 代码风格与命名约定
+
+使用原生 JavaScript、HTML 和 CSS。保持 2 空格缩进、语句分号、变量和函数使用 `camelCase`。固定配置可使用大写常量，例如 API 基础地址或时间限制。优先保持逻辑直观，必要时拆成小型 helper 函数。
+
+修改 UI 时，将结构和样式留在 `popup.html`，状态管理和事件处理放在 `popup.js`。注意 Manifest V3 限制：`background.js` 是 Service Worker，不是持久后台页。
+
+## 测试指南
+
+修改逻辑前后至少运行 `node test.js`、`node test-notification.js` 和相关 UI/API 测试。涉及 background 消息、fingerprint、分页或失败语义时运行 `node test-background.js`；涉及线上 feed 假设时运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。
+
 ## UI 约定
 
 - 设置面板使用原生折叠分组，打开设置时默认不展开任何分组。
@@ -38,6 +48,7 @@ node screenshot.mjs
 - 分组标题、按钮和标签沿用主题色与低对比度层级，不把说明性文字做成高亮主视觉。
 - 特关规则项首行保持 `来源 / 作者 / 停用 / 删除` 同行：来源完整显示，作者在操作按钮前省略；关键词只在存在时另起一行并横向展开，不为空关键词预留位置。
 - 除输入框外，弹窗内其它交互区域不应出现文本插入光标。
+- 全部已读按钮确认动效：750ms ease-out，轻微缩放(1.03)，渐进淡出。动效期间保持可见，结束后检查未读数再决定是否隐藏。
 
 ## 关键设计决策
 
@@ -45,6 +56,7 @@ node screenshot.mjs
 - **存储 vs 显示**：storage 保留 `Math.max(historyDays, 5)` 天数据避免切换天数时丢失；UI 和 badge 按用户设置的 `historyDays` 过滤显示。
 - **API 轮询缓冲**：自动轮询和手动刷新都先请求临时保留的 legacy `/api/public/fingerprint`；fingerprint 变化或自动 6 小时兜底到期才拉 v1 items。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
 - **feedMode 切换**：调用 `resetAndPoll()` 全量重拉并替换 history，成功后才提交新的 feedMode；失败时保留旧 history 和旧 feedMode，避免状态不一致。
+- **内容源默认值**：`normalizeFeedMode()` 默认返回 `all`（全部），未明确设置时显示全部内容。
 
 ## API
 
@@ -59,8 +71,18 @@ node screenshot.mjs
 
 发布时按顺序执行：
 1. 按发布语义升级 `manifest.json` 中的版本号
-2. 打包（`./pack.sh` 或 PowerShell `Compress-Archive`）
+2. 打包（`bash pack.sh` 或 PowerShell `Compress-Archive`）
 3. commit + push
+
+## 提交与 Pull Request 规范
+
+近期提交多为简短祈使句，部分使用 Conventional Commit 前缀，例如 `perf: eliminate theme FOUC`、`fix polling miss due to insufficient API delay buffer`。提交标题应说明具体行为变化。
+
+PR 需包含变更摘要、已运行的测试命令。涉及界面变化时附截图或更新 `store/` 素材；涉及权限、存储结构或 API 行为变化时需单独说明。
+
+## 安全与配置提示
+
+保持 `host_permissions` 限定为 `https://aihot.virxact.com/*`。不要提交 `node_modules/`、生成的 zip、密钥或本地浏览器 profile。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。
 
 ## 发布
 
