@@ -848,43 +848,51 @@ async function handleItemClick(e) {
 }
 
 async function openHistoryItem(item) {
-  const result = await openHttpsUrl(item.dataset.url, chrome.tabs.create.bind(chrome.tabs), async url => {
-    const key = item.dataset.key || url;
-    const { feedMode, historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
-    writeScrollPosition({ feedMode: normalizeFeedMode(feedMode), historyDays });
+  const url = getSafeHttpsUrl(item.dataset.url);
+  if (!url) {
+    showPopupStatus('无法打开此条目：链接必须使用 HTTPS。');
+    return;
+  }
+  const key = item.dataset.key || url;
 
-    if (!cachedReadIds.has(key)) {
-      cachedReadIds.add(key);
-      if (url !== key) cachedReadIds.add(url);
-      const arr = [...cachedReadIds];
-      if (arr.length > 100) arr.splice(0, arr.length - 100);
-      writePopupCache({ readIds: arr });
-      lastRenderSignature = '';
-    }
+  // Mark read BEFORE opening the tab — on mobile, chrome.tabs.create
+  // destroys the popup immediately, so anything after it won't execute.
+  if (!cachedReadIds.has(key)) {
+    cachedReadIds.add(key);
+    if (url !== key) cachedReadIds.add(url);
+    const arr = [...cachedReadIds];
+    if (arr.length > 100) arr.splice(0, arr.length - 100);
+    writePopupCache({ readIds: arr });
+    lastRenderSignature = '';
+  }
 
-    document.querySelectorAll(`.item[data-key="${CSS.escape(key)}"], .item[data-url="${CSS.escape(url)}"]`).forEach(el => {
-      el.classList.remove('unread');
-      el.classList.add('read');
-    });
-
-    const unreadEls = document.querySelectorAll('.item.unread');
-    const unreadCount = unreadEls.length;
-    if (unreadCount > 0) {
-      markAllReadBtn.classList.add('visible');
-    } else if (!markAllReadBtn.classList.contains('is-confirmed')) {
-      // Only hide if not currently showing confirmation animation
-      markAllReadBtn.classList.remove('visible');
-    }
-    try {
-      const readResponse = await chrome.runtime.sendMessage({ type: 'markItemsRead', ids: [key, url] });
-      if (!readResponse?.ok) throw new Error(readResponse?.error || 'Failed to mark item read');
-    } catch (_e) {
-      showPopupStatus('已读状态更新失败，请重试。');
-    }
-    await markWatchUrlsViewed([key, url]);
+  document.querySelectorAll(`.item[data-key="${CSS.escape(key)}"], .item[data-url="${CSS.escape(url)}"]`).forEach(el => {
+    el.classList.remove('unread');
+    el.classList.add('read');
   });
+
+  const unreadEls = document.querySelectorAll('.item.unread');
+  if (unreadEls.length > 0) {
+    markAllReadBtn.classList.add('visible');
+  } else if (!markAllReadBtn.classList.contains('is-confirmed')) {
+    markAllReadBtn.classList.remove('visible');
+  }
+
+  try {
+    const readResponse = await chrome.runtime.sendMessage({ type: 'markItemsRead', ids: [key, url] });
+    if (!readResponse?.ok) throw new Error(readResponse?.error || 'Failed to mark item read');
+  } catch (_e) {
+    showPopupStatus('已读状态更新失败，请重试。');
+  }
+  markWatchUrlsViewed([key, url]).catch(() => {});
+
+  const { feedMode, historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
+  writeScrollPosition({ feedMode: normalizeFeedMode(feedMode), historyDays });
+
+  // Open the tab last — popup may be destroyed after this on mobile.
+  const result = await openHttpsUrl(url, chrome.tabs.create.bind(chrome.tabs), () => {});
   if (!result.ok) {
-    showPopupStatus(result.reason === 'unsafe-url' ? '无法打开此条目：链接必须使用 HTTPS。' : '打开条目失败，请重试。');
+    showPopupStatus('打开条目失败，请重试。');
   }
 }
 
