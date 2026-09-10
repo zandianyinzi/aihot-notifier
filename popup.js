@@ -878,20 +878,18 @@ async function openHistoryItem(item) {
     markAllReadBtn.classList.remove('visible');
   }
 
-  try {
-    const readResponse = await chrome.runtime.sendMessage({ type: 'markItemsRead', ids: [key, url] });
-    if (!readResponse?.ok) throw new Error(readResponse?.error || 'Failed to mark item read');
-  } catch (_e) {
-    showPopupStatus('已读状态更新失败，请重试。');
-  }
+  const [readResult, scrollCtx] = await Promise.all([
+    chrome.runtime.sendMessage({ type: 'markItemsRead', ids: [key, url] }).catch(() => null),
+    chrome.storage.local.get(['feedMode', 'historyDays'])
+  ]);
+  if (!readResult?.ok) showPopupStatus('已读状态更新失败，请重试。');
   markWatchUrlsViewed([key, url]).catch(() => {});
-
-  const { feedMode, historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get(['feedMode', 'historyDays']);
-  writeScrollPosition({ feedMode: normalizeFeedMode(feedMode), historyDays });
+  writeScrollPosition({ feedMode: normalizeFeedMode(scrollCtx.feedMode), historyDays: scrollCtx.historyDays || DEFAULT_HISTORY_DAYS });
 
   // Open the tab last — popup may be destroyed after this on mobile.
-  const result = await openHttpsUrl(url, chrome.tabs.create.bind(chrome.tabs), () => {});
-  if (!result.ok) {
+  try {
+    await chrome.tabs.create({ url });
+  } catch (_e) {
     showPopupStatus('打开条目失败，请重试。');
   }
 }

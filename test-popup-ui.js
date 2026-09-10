@@ -646,9 +646,9 @@ assert(/commit:\s*\(data,\s*context\)\s*=>\s*\{[\s\S]*?renderHistory\(data,\s*\{
 assert(/renderHistory\(data,\s*\{[\s\S]*?applyInitialPosition:\s*context\.applyInitialPosition/.test(popupJs), '冷骨架被普通 load 抢占时仍应用配置的初始定位');
 assert(/const\s+response\s*=\s*await\s+chrome\.runtime\.sendMessage\([\s\S]*?if\s*\(!response\?\.ok\)\s*throw/.test(markWatchUrlsViewedHelper), '特关已查看消息显式检查 background 失败响应');
 assert(!/chrome\.storage\.local\.(?:get|set)/.test(markWatchUrlsViewedHelper), '特关已查看失败只提示，不回退写 durable state');
-assert(/openHttpsUrl\(item\.dataset\.url,\s*chrome\.tabs\.create\.bind\(chrome\.tabs\)/.test(popupJs), '条目打开通过可执行 HTTPS helper');
+assert(/getSafeHttpsUrl\(item\.dataset\.url\)/.test(popupJs) && /chrome\.tabs\.create\(\{\s*url\s*}\)/.test(popupJs), '条目打开校验 HTTPS 后直接创建标签页');
 assert(/getSafeHttpsUrl\(value\)[\s\S]*?parsed\.protocol\s*===\s*'https:'/s.test(popupReliabilityJs), '条目打开拒绝非 HTTPS URL');
-assert(/await\s+createTab\(\{\s*url\s*}\);[\s\S]*?await\s+afterOpen\(url\);/s.test(popupReliabilityJs), '仅在成功创建标签页后才提交已读状态');
+assert(/await\s+createTab\(\{\s*url\s*}\);[\s\S]*?await\s+afterOpen\(url\);/s.test(popupReliabilityJs), 'openHttpsUrl 在创建标签页后执行 afterOpen 回调');
 assert(/id="popupStatus"[^>]*role="status"[^>]*aria-live="polite"/.test(popupHtml), '失败状态使用 aria-live status 区域提示');
 assert(/function\s+showPopupStatus\(message\)/.test(popupJs), 'popup 可向 status 区域发布失败提示');
 assert(/allFeedContinuation/.test(popupJs) && /getAllFeedContinuationStatusMessage/.test(popupReliabilityJs) && /正在补充更多内容/.test(popupReliabilityJs), 'all 首屏返回后可在不改变布局的状态区提示后台续拉');
