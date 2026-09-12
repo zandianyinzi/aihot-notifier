@@ -42,3 +42,10 @@ The work is split into three independently testable batches:
 ## Testing
 
 Every behavior change starts with a failing Node test. Regression coverage must include unordered pages, automatic all continuation and recovery, request timeout behavior, invalid timestamps, storage trimming, closed-panel focus/inert state, visible failure feedback, failed tab creation rollback, failed config persistence rollback, and accessible rule controls. Existing suites and `node test-e2e.js` must remain green.
+
+## Implementation refinements after code inspection
+
+- A per-request 15 second deadline includes body decoding. Queue restructuring is deferred; deadlines bound a stalled individual request.
+- Opening is owned by the background: validate HTTPS, create the tab, then commit read/watch state. Popup applies only optimistic visual/cache feedback before receiving this result. This satisfies failed-open rollback without undoing another concurrent reader's durable state and survives popup closure on mobile.
+- Storage is bounded by 2500 records and a 6 MiB UTF-8 managed-data budget. Trimming applies to old and new entries, prunes orphan state, and excludes discarded entries from new notifications. One smaller retry on quota failure is allowed; failed retries do not commit fingerprint metadata.
+- Status row is fixed at 28px; changes in its message do not change the list viewport.

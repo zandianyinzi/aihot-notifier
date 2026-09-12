@@ -96,3 +96,56 @@
 - [ ] **Step 2: Run every required test command and inspect exit codes/output.
 - [ ] **Step 3: Run a final diff and static audit for permissions, version, and generated artifacts.
 - [ ] **Step 4: Commit only if verification is clean; otherwise fix through the task review loop.
+
+## Concrete regression scenarios and implementation contracts
+
+Task 1 uses literal pages and the real background message/alarm handlers. Its regression sequence is:
+```js
+// First page has an old tail; second page remains reachable.
+page1 = { items: [recentItem, oldItem], page: { hasMore: true, nextCursor: 'later' } };
+page2 = { items: [otherRecentItem], page: { hasMore: false, nextCursor: null } };
+// Assert both recent IDs exist after pollNow; old tail must not suppress page2.
+// For all: run initial alarm with 20 pages; trigger continuation alarm with 19
+// more pages; assert cursor stays active; trigger again until hasMore=false.
+```
+Task 2 uses the real fetch boundary with controlled timers:
+```js
+fetchImpl = (_url, { signal }) => new Promise((resolve, reject) => {
+  signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+});
+// Advance controlled time 15000ms and assert poll failure plus queued read
+// mutation completion. Repeat with headers resolved and response.json hanging.
+// publishedAt='bad', indexedAt='2026-09-12T01:00:00.000Z' must normalize
+// to the indexed timestamp; both invalid must increment skippedItems.
+```
+Task 3 tests real controller/handlers with focusable element fixtures, then validates browser rendering:
+```js
+settingsBtn.click();
+// aria-expanded true; inert false; activeElement is first summary.
+settingsBtn.click();
+// aria-expanded false; inert true; activeElement is settingsBtn.
+// Error region uses fixed height 28px and role=status; refresh failure
+// produces readable text while history viewport remains same size.
+```
+Task 4 resolves navigation ownership in the background rather than persisting read state before navigation:
+```js
+// Message: { type: 'openItem', url, key }
+// 1. Validate url is HTTPS.
+// 2. await chrome.tabs.create({ url });
+// 3. Queue markItemsRead and markWatchViewed together after success.
+// Failure of step 2 must leave durable read/watch state untouched.
+// Popup failure path restores only its optimistic DOM/cache projection.
+// Concurrent markAllRead remains authoritative.
+```
+Task 5 uses deterministic count and UTF-8 budget:
+```js
+// 2501 entries -> 2500 newest retained; oldest excluded from notification.
+// Chinese summaries exercise actual UTF-8 budget, not JS string length.
+const encodedBytes = new TextEncoder().encode(JSON.stringify(managedData)).length;
+// encodedBytes <= 6 * 1024 * 1024 after trimming.
+// First quota rejection retries once with smaller history; second failure
+// leaves original durable history/fingerprint metadata untouched.
+```
+
+The task briefs in the ignored work ledger provide exact execution details;
+this plan and the design are the durable review record. Reports are local only.
