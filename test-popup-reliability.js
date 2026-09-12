@@ -581,9 +581,12 @@ async function testContinuationStatusExpiryTimer() {
   assert.deepStrictEqual(statuses, ['正在补充更多内容…', '正在补充更多内容…', ''], 'expiresAt 到期时无需 storage 事件即可清除提示');
 }
 
-function createFakeScrollItem(url, top, bottom, key = url) {
+function createFakeScrollItem(url, top, bottom, key = url, classes = ['item']) {
   return {
     dataset: { key, url },
+    classList: {
+      contains: value => classes.includes(value)
+    },
     getBoundingClientRect: () => ({ top, bottom })
   };
 }
@@ -627,6 +630,22 @@ function testScrollAnchorCaptureAndRestore() {
 
   scroller.querySelectorAll = () => [];
   assert.strictEqual(captureScrollAnchor(scroller), null, 'a skeleton or empty state does not produce a truthy empty anchor');
+}
+
+function testWatchAnchorFallsBackToViewportAfterReadTransition() {
+  const unreadWatch = createFakeScrollItem('watch-url', 118, 160, 'watch-id', ['item', 'watch-item', 'unread']);
+  const scroller = {
+    scrollTop: 80,
+    getBoundingClientRect: () => ({ top: 100 }),
+    querySelectorAll: () => [unreadWatch]
+  };
+  const anchor = captureScrollAnchor(scroller);
+  assert.strictEqual(anchor.anchorWasUnreadWatch, true, 'captures that the viewport anchor was an unread watch item');
+
+  const readWatch = createFakeScrollItem('watch-url', 500, 542, 'watch-id', ['item', 'watch-item', 'read']);
+  scroller.querySelectorAll = () => [readWatch];
+  assert.strictEqual(restoreScrollAnchor(scroller, anchor), false, 'does not follow a watch anchor after it leaves the unread pinned group');
+  assert.strictEqual(scroller.scrollTop, 80, 'watch anchor transition falls back to the saved viewport scrollTop');
 }
 
 function testPersistedScrollPositionKeepsStableAnchorKey() {
@@ -760,11 +779,12 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   await testActiveContinuationDefersIntermediateHistoryRenders();
   await testContinuationStatusExpiryTimer();
   testScrollAnchorCaptureAndRestore();
+  testWatchAnchorFallsBackToViewportAfterReadTransition();
   testPersistedScrollPositionKeepsStableAnchorKey();
   testOptimisticReadStateRollback();
   testSessionWatchPinsStayStableAcrossReadTransitions();
   await testMarkAllReadMutationSeparatesCommitAndReloadFailure();
-  console.log('结果: 19 passed, 0 failed');
+  console.log('结果: 20 passed, 0 failed');
 })().catch(error => {
   console.error(error);
   process.exit(1);

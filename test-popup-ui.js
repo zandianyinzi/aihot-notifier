@@ -561,7 +561,8 @@ assert(/captureScrollAnchor:\s*\(\)\s*=>\s*captureScrollAnchor\(historyList\)/.t
 assert(/buildScrollPosition\(historyList,\s*context\)/.test(popupJs), '持久化滚动位置使用统一锚点快照 helper');
 assert(/Number\.isFinite\(position\.offsetTop\)[\s\S]*?anchorKey:\s*position\.anchorKey/.test(popupJs), '持久化滚动位置按稳定锚点和相对偏移恢复并兼容旧数据回退');
 assert(/function\s+buildScrollPosition\([\s\S]*?anchorKey:\s*anchor\?\.anchorKey/.test(popupReliabilityJs), '滚动位置快照保存稳定 anchorKey');
-assert(/writeScrollPosition\(\{\s*feedMode:\s*normalizeFeedMode\(feedMode\)/.test(popupJs), '打开条目保存滚动位置时使用归一化内容源');
+assert(/writeScrollPosition\([\s\S]*?feedMode:\s*normalizeFeedMode\((?:feedMode|scrollCtx\.feedMode)\)/.test(popupJs), '打开条目保存滚动位置时使用归一化内容源');
+assert(/const\s+scrollAnchor\s*=\s*captureScrollAnchor\(historyList\);[\s\S]*?if\s*\(!cachedReadIds\.has\(key\)\)/.test(popupJs), '打开条目在已读状态变更前捕获滚动锚点');
 assert(/renderCache:\s*data\s*=>\s*\{[\s\S]*?renderHistory\(data,\s*\{\s*applyInitialPosition:\s*true,\s*persistWatchPins:\s*false\s*}\)/.test(popupJs), 'warm cache 只预览未读特关置顶，不污染会话置顶集合');
 assert(/renderStorage:\s*data\s*=>\s*\{[\s\S]*?const\s+scrollAnchor\s*=\s*captureScrollAnchor\(historyList\)[\s\S]*?scrollAnchor\?\.anchorUrl\s*\?[\s\S]*?scrollAnchor[\s\S]*?:[\s\S]*?applyInitialPosition:\s*true/.test(popupJs), 'warm cache 到权威 storage 的二次渲染优先保留现有内容锚点');
 assert(/<script\s+src="popup-log\.js"><\/script>/i.test(popupHtml), 'popup 首屏接入统一性能日志脚本');

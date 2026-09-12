@@ -439,12 +439,14 @@ function readScrollPosition() {
   }
 }
 
-function writeScrollPosition(data = {}) {
+function writeScrollPosition(data = {}, anchor = null) {
   if (normalizeOpenPositionMode(openPositionModeEl.value) !== 'free') return;
   const context = getScrollContext(data);
   try {
     localStorage.setItem(POPUP_SCROLL_KEY, JSON.stringify({
-      ...buildScrollPosition(historyList, context)
+      ...(anchor
+        ? { ...anchor, ...context, savedAt: Date.now() }
+        : buildScrollPosition(historyList, context))
     }));
   } catch (_e) {
     // Scroll position is a convenience only.
@@ -854,6 +856,7 @@ async function openHistoryItem(item) {
     return;
   }
   const key = item.dataset.key || url;
+  const scrollAnchor = captureScrollAnchor(historyList);
 
   // Mark read BEFORE opening the tab — on mobile, chrome.tabs.create
   // destroys the popup immediately, so anything after it won't execute.
@@ -884,7 +887,10 @@ async function openHistoryItem(item) {
   ]);
   if (!readResult?.ok) showPopupStatus('已读状态更新失败，请重试。');
   markWatchUrlsViewed([key, url]).catch(() => {});
-  writeScrollPosition({ feedMode: normalizeFeedMode(scrollCtx.feedMode), historyDays: scrollCtx.historyDays || DEFAULT_HISTORY_DAYS });
+  writeScrollPosition(
+    { feedMode: normalizeFeedMode(scrollCtx.feedMode), historyDays: scrollCtx.historyDays || DEFAULT_HISTORY_DAYS },
+    scrollAnchor
+  );
 
   // Open the tab last — popup may be destroyed after this on mobile.
   try {

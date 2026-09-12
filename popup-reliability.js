@@ -39,11 +39,14 @@
     const items = Array.from(scroller.querySelectorAll(itemSelector));
     const anchorItem = items.find(item => item.getBoundingClientRect().bottom >= listTop);
     if (!anchorItem) return null;
+    const anchorWasUnreadWatch = anchorItem.classList?.contains('unread') &&
+      anchorItem.classList?.contains('watch-item');
     return {
       scrollTop: scroller.scrollTop,
       anchorKey: anchorItem.dataset?.key || '',
       anchorUrl: anchorItem.dataset?.url || '',
-      offsetTop: anchorItem.getBoundingClientRect().top - listTop
+      offsetTop: anchorItem.getBoundingClientRect().top - listTop,
+      ...(anchorWasUnreadWatch ? { anchorWasUnreadWatch: true } : {})
     };
   }
 
@@ -68,6 +71,11 @@
       ? items.find(item => item.dataset?.key === anchor.anchorKey)
       : items.find(item => item.dataset?.url === anchor.anchorUrl);
     if (!anchorItem || (!anchor.anchorKey && !anchor.anchorUrl)) {
+      scroller.scrollTop = fallbackScrollTop;
+      return false;
+    }
+
+    if (anchor.anchorWasUnreadWatch && !anchorItem.classList?.contains('unread')) {
       scroller.scrollTop = fallbackScrollTop;
       return false;
     }
