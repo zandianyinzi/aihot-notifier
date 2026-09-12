@@ -56,6 +56,7 @@ node screenshot.mjs
 - **存储 vs 显示**：storage 保留 `Math.max(historyDays, 5)` 天数据避免切换天数时丢失；UI 和 badge 按用户设置的 `historyDays` 过滤显示。
 - **API 轮询缓冲**：自动轮询和手动刷新都先请求临时保留的 legacy `/api/public/fingerprint`；fingerprint 变化或自动 6 小时兜底到期才拉 v1 items。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
 - **feedMode 切换**：调用 `resetAndPoll()` 全量重拉并替换 history，成功后才提交新的 feedMode；失败时保留旧 history 和旧 feedMode，避免状态不一致。
+- **canonical history 限额**：内容源切换和轮询都合并既有 history，不因切换清空记录；持久化前最多保留 2500 条最新条目，标题/来源/摘要分别限制 500/300/3000 字符。history、readIds、watchNotifyState、lastItems 合计控制在 6 MiB UTF-8 JSON，quota 失败时只重试一次更小 history。
 - **内容源默认值**：`normalizeFeedMode()` 默认返回 `all`（全部），未明确设置时显示全部内容。
 
 ## API

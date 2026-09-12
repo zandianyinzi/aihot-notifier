@@ -8,13 +8,13 @@ Keep the extension working after the AI HOT legacy public API sunset while elimi
 
 Use a single background-owned adapter that maps API v1 responses into the extension's existing internal item shape. The popup continues to render only that internal shape. This limits the migration boundary to the service worker and preserves stored-history compatibility.
 
-The adapter will request `/api/v1/items` with `mode`, `window`, and `limit`; map `source.name`, `links.original`, `links.aihot`, and `page.{hasMore,nextCursor}`; and retain only a bounded local history window. Item links open `links.original` when it is an HTTPS URL and otherwise fall back to `links.aihot`.
+The adapter will request `/api/v1/items` with `mode`, `window`, and `limit`; map `source.name`, `links.original`, `links.aihot`, and `page.{hasMore,nextCursor}`; and retain only a bounded local history window. Canonical history is merged across source modes rather than replaced on a mode switch. Item links open `links.original` when it is an HTTPS URL and otherwise fall back to `links.aihot`.
 
 ## Polling and persistence
 
-Every mutating refresh path (alarm, manual refresh, content-source reset, and initial load) will use one background queue. The queue prevents duplicate notifications and lost storage updates. V1 ETags are held per complete request URL and reused only for that same URL. Legacy fingerprints, cursors, and ETags will not be reused.
+Every mutating refresh path (alarm, manual refresh, content-source reset, and initial load) will use one background queue. The queue prevents duplicate notifications and lost storage updates. V1 ETags are held per complete request URL and reused only for that same URL. The legacy fingerprint endpoint remains a temporary change probe; items data always comes from the paginated v1 endpoint.
 
-Network input is normalized before persistence: response containers, item objects, text length, timestamps, cursors, and URLs are validated. Invalid individual items are skipped; invalid page containers fail the request without modifying history. Persisting history also removes orphaned `watchNotifyState` entries.
+Network input is normalized before persistence: response containers, item objects, text length, timestamps, cursors, and URLs are validated. Invalid individual items are skipped; invalid page containers fail the request without modifying history. Persisting history removes orphaned `watchNotifyState` entries, enforces a 2500-entry cap and 500/300/3000 title/source/summary limits, and keeps managed JSON below a 6 MiB UTF-8 budget with one smaller-history quota retry.
 
 ## Popup behavior
 
