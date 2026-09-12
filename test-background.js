@@ -331,6 +331,33 @@ async function runTests() {
   const autoContinuationScheduled = alarmCreateCalls.some(call => call.name === 'aihot-all-continuation');
   assert(automaticAllPages === 20 && storageData.history.length === 20 && storageData.allFeedContinuation?.active === true && storageData.allFeedContinuation?.cursor === 'auto-all-page-21' && autoContinuationScheduled, '自动 all 拉满分页预算后持久化 cursor 并调度续拉 alarm');
 
+  console.log('\n[自动 all 轮询保留活动续拉]');
+  resetState({
+    feedMode: 'all',
+    apiFingerprints: { all: 'fp-auto-preserve-old' },
+    allFeedContinuation: {
+      active: true,
+      id: 'preserve-active-continuation',
+      cursor: 'deep-active-cursor',
+      retryAttempts: 0,
+      retryAt: ''
+    }
+  });
+  let preserveContinuationPages = 0;
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-selected', 'fp-auto-preserve-new');
+    preserveContinuationPages++;
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: `preserve-active-item-${preserveContinuationPages}` })], {
+        hasMore: true,
+        nextCursor: `preserve-active-page-${preserveContinuationPages + 1}`
+      }))
+    });
+  };
+  await onAlarmHandler({ name: 'aihot-poll' });
+  assert(preserveContinuationPages === 20 && storageData.allFeedContinuation?.active === true && storageData.allFeedContinuation?.id === 'preserve-active-continuation' && storageData.allFeedContinuation?.cursor === 'deep-active-cursor', '自动 all 轮询达到分页预算时不覆盖活动续拉的深层 cursor');
+
   console.log('\n[自动 all 续拉预算继续分页]');
   resetState({
     feedMode: 'all',

@@ -952,7 +952,7 @@ async function pollForUpdatesInternal() {
   const config = await getConfig();
   if (!config.enabled) return;
 
-  const { nextAllowedPollAt = '', lastItemsPollAt = '' } = await chrome.storage.local.get(['nextAllowedPollAt', 'lastItemsPollAt']);
+  const { nextAllowedPollAt = '', lastItemsPollAt = '', allFeedContinuation = {} } = await chrome.storage.local.get(['nextAllowedPollAt', 'lastItemsPollAt', 'allFeedContinuation']);
   if (nextAllowedPollAt && new Date(nextAllowedPollAt).getTime() > Date.now()) {
     console.log(`[AI HOT] polling paused until ${nextAllowedPollAt}`);
     return;
@@ -980,7 +980,7 @@ async function pollForUpdatesInternal() {
 
     const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff });
-    const continuation = config.feedMode === 'all' && allItems.truncated && allItems.nextCursor
+    const continuation = config.feedMode === 'all' && allFeedContinuation.active !== true && allItems.truncated && allItems.nextCursor
       ? { continuationId: getContinuationId(), cursor: allItems.nextCursor }
       : null;
     const newWatchNotifications = await persistFetchedItems(allItems, {
