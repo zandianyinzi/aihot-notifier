@@ -635,7 +635,7 @@ assert(!/chrome\.storage\.local\.set\(\{\s*readIds\b/.test(popupJs), 'popup 不�
 assert(!/chrome\.storage\.local\.set\(\{\s*watchNotifyState\b/.test(popupJs), 'popup 不直接写入 watchNotifyState');
 assert(!/chrome\.storage\.local\.set\(\{\s*watchRules\b/.test(popupJs), 'popup 不直接写入 watchRules');
 assert(!/chrome\.action\.setBadgeText/.test(popupJs), 'popup 不直接更新 badge text');
-assert(/type:\s*'markItemsRead'/.test(popupJs), '条目打开后通过 background 合并 readIds');
+assert(/type:\s*'openItem'/.test(popupJs) && /ids:\s*\[key,\s*url\]/.test(popupJs), '条目打开后通过 background 合并 readIds');
 assert(/type:\s*'saveWatchRules'/.test(popupJs), '特关规则通过 background 串行保存');
 assert(/createLatestWinsLoadController/.test(popupJs), 'popup 使用 coalesced latest-wins load controller');
 assert(/cached\.data\.feedMode[\s\S]*?expectedMode/.test(popupJs), 'popup cache 拒绝与请求内容源不匹配的数据');
@@ -657,7 +657,9 @@ assert(/commit:\s*\(data,\s*context\)\s*=>\s*\{[\s\S]*?renderHistory\(data,\s*\{
 assert(/renderHistory\(data,\s*\{[\s\S]*?applyInitialPosition:\s*context\.applyInitialPosition/.test(popupJs), '冷骨架被普通 load 抢占时仍应用配置的初始定位');
 assert(/const\s+response\s*=\s*await\s+chrome\.runtime\.sendMessage\([\s\S]*?if\s*\(!response\?\.ok\)\s*throw/.test(markWatchUrlsViewedHelper), '特关已查看消息显式检查 background 失败响应');
 assert(!/chrome\.storage\.local\.(?:get|set)/.test(markWatchUrlsViewedHelper), '特关已查看失败只提示，不回退写 durable state');
-assert(/getSafeHttpsUrl\(item\.dataset\.url\)/.test(popupJs) && /chrome\.tabs\.create\(\{\s*url\s*}\)/.test(popupJs), '条目打开校验 HTTPS 后直接创建标签页');
+assert(/getSafeHttpsUrl\(item\.dataset\.url\)/.test(popupJs) && /type:\s*'openItem'/.test(popupJs), '条目打开校验 HTTPS 后交由 background 创建标签页');
+assert(/async function openItem[\s\S]*?await\s+chrome\.tabs\.create\(\{\s*url\s*}\)[\s\S]*?markItemsRead/s.test(backgroundJs) && /msg\.type\s*===\s*'openItem'/.test(backgroundJs), 'background 在已验证标签页创建后提交已读状态');
+assert(/createConfigMutationController/.test(popupJs) && /await\s+configMutationController\.save/.test(popupJs), '设置保存使用可等待且可回滚的串行控制器');
 assert(/getSafeHttpsUrl\(value\)[\s\S]*?parsed\.protocol\s*===\s*'https:'/s.test(popupReliabilityJs), '条目打开拒绝非 HTTPS URL');
 assert(/await\s+createTab\(\{\s*url\s*}\);[\s\S]*?await\s+afterOpen\(url\);/s.test(popupReliabilityJs), 'openHttpsUrl 在创建标签页后执行 afterOpen 回调');
 assert(/id="popupStatus"[^>]*role="status"[^>]*aria-live="polite"/.test(popupHtml), '失败状态使用 aria-live status 区域提示');

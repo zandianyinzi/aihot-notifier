@@ -19,6 +19,8 @@ const {
   restoreScrollAnchor,
   applyOptimisticReadState,
   runMarkAllReadMutation,
+  runOpenItemMutation,
+  createConfigMutationController,
   getSafeHttpsUrl,
   openHttpsUrl
 } = require('./popup-reliability.js');
@@ -543,6 +545,49 @@ async function testSafeOpenReadOrdering() {
   assert(!events.includes('unexpected-read'), 'tab creation failure does not submit read state');
 }
 
+async function testOpenItemMutationRollsBackOnlyTabFailure() {
+  const events = [];
+  const result = await runOpenItemMutation({
+    open: async () => ({ ok: false, reason: 'tab-create-failed' }),
+    applyOptimistic: () => events.push('optimistic'),
+    rollback: () => events.push('rollback'),
+    onFailure: reason => events.push(`failure:${reason}`)
+  });
+  assert.deepStrictEqual(events, ['optimistic', 'rollback', 'failure:tab-create-failed'], 'tab creation failure restores optimistic item state');
+  assert.strictEqual(result.ok, false);
+
+  const persistenceEvents = [];
+  const persistenceResult = await runOpenItemMutation({
+    open: async () => ({ ok: true, opened: true, readCommitted: false, error: 'storage down' }),
+    applyOptimistic: () => persistenceEvents.push('optimistic'),
+    rollback: () => persistenceEvents.push('rollback'),
+    onPersistenceFailure: () => persistenceEvents.push('persistence-failure')
+  });
+  assert.deepStrictEqual(persistenceEvents, ['optimistic', 'persistence-failure'], 'opened tab with read persistence failure keeps optimistic state');
+  assert.strictEqual(persistenceResult.opened, true);
+}
+
+async function testConfigMutationControllerLatestSafeRollback() {
+  let committed = { theme: 'dark' };
+  const applied = [];
+  let failPersist = false;
+  let notifyResult = { ok: true };
+  const controller = createConfigMutationController({
+    getCommitted: () => committed,
+    setCommitted: value => { committed = value; },
+    apply: value => applied.push({ ...value }),
+    persist: async value => { if (failPersist) throw new Error('write failed'); return value; },
+    notify: async () => notifyResult
+  });
+  failPersist = true;
+  await assert.rejects(controller.save({ theme: 'green-dark' }), /write failed/);
+  assert.deepStrictEqual(applied.at(-1), { theme: 'dark' }, 'failed config write restores the last committed controls');
+  failPersist = false;
+  notifyResult = { ok: false, error: 'alarm failed' };
+  await assert.rejects(controller.save({ theme: 'chrome-dark' }), /alarm failed/);
+  assert.deepStrictEqual(committed, { theme: 'chrome-dark' }, 'configChanged failure does not roll back a durable config commit');
+}
+
 async function testPopupHistoryRenderOwnership() {
   const scheduled = [];
   const handleStorageChange = createPopupStorageChangeHandler({
@@ -822,6 +867,8 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   await testStaleInitializationCannotOverwriteCommittedMode();
   await testWarmCacheRendersBeforeFullStorage();
   await testSafeOpenReadOrdering();
+  await testOpenItemMutationRollsBackOnlyTabFailure();
+  await testConfigMutationControllerLatestSafeRollback();
   await testPopupHistoryRenderOwnership();
   await testActiveContinuationDefersIntermediateHistoryRenders();
   await testContinuationStatusExpiryTimer();
@@ -831,7 +878,7 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   testOptimisticReadStateRollback();
   testSessionWatchPinsStayStableAcrossReadTransitions();
   await testMarkAllReadMutationSeparatesCommitAndReloadFailure();
-  console.log('结果: 20 passed, 0 failed');
+  console.log('结果: popup reliability tests passed');
 })().catch(error => {
   console.error(error);
   process.exit(1);

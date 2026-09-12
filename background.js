@@ -143,6 +143,15 @@ function getItemOpenUrl(item) {
   return item && (item.url || item.permalink || '');
 }
 
+function getSafeHttpsUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' ? parsed.href : '';
+  } catch (_e) {
+    return '';
+  }
+}
+
 function getItemStateKey(item) {
   return item && (item.id || item.permalink || item.url || '');
 }
@@ -630,14 +639,36 @@ async function markWatchViewed(urls) {
   await updateBadge();
 }
 
-async function markItemsRead(ids) {
+async function markItemsRead(ids, options = {}) {
   const aliases = [...new Set((Array.isArray(ids) ? ids : [ids]).flatMap(getItemAliases).filter(Boolean))];
   const { readIds = [] } = await chrome.storage.local.get('readIds');
   const merged = [...new Set([...readIds, ...aliases])];
   const bounded = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
   await chrome.storage.local.set({ readIds: bounded });
-  await updateBadge();
+  if (options.skipBadge !== true) await updateBadge();
   return bounded;
+}
+
+async function openItem(urlValue, ids) {
+  const url = getSafeHttpsUrl(urlValue);
+  if (!url) return { ok: false, reason: 'unsafe-url' };
+  try {
+    await chrome.tabs.create({ url });
+  } catch (_e) {
+    return { ok: false, reason: 'tab-create-failed' };
+  }
+
+  const aliases = [...new Set([...(Array.isArray(ids) ? ids : [ids]), url].flatMap(getItemAliases).filter(Boolean))];
+  try {
+    await runMigratedStateMutation(async () => {
+      await markItemsRead(aliases, { skipBadge: true });
+      await markWatchViewed(aliases);
+      await updateBadge();
+    });
+    return { ok: true, opened: true, readCommitted: true };
+  } catch (error) {
+    return { ok: true, opened: true, readCommitted: false, error: error.message || 'read persistence failed' };
+  }
 }
 
 function normalizeStoredWatchRules(rules) {
@@ -1710,6 +1741,12 @@ void runMigratedStateMutation(recoverAllFeedContinuationStatus)
   .catch(e => console.warn('[AI HOT] failed to initialize canonical history:', e));
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'openItem') {
+    openItem(msg.url, msg.ids || msg.urls || msg.id)
+      .then(result => sendResponse(result))
+      .catch((e) => sendResponse({ ok: false, reason: 'tab-create-failed', error: e.message }));
+    return true;
+  }
   if (msg.type === 'configChanged') {
     runMigratedStateMutation(setupAlarm)
       .then(() => sendResponse({ ok: true }))

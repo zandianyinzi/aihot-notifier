@@ -36,7 +36,7 @@ const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
 const { normalizeFeedMode, projectHistory } = window.FeedState;
-const { getSafeHttpsUrl, openHttpsUrl, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, runOpenItemMutation, createConfigMutationController, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
 const sessionWatchPinTracker = createSessionWatchPinTracker();
 
 const CATEGORY_MAP = {
@@ -70,6 +70,7 @@ let cachedReadIds = new Set();
 let lastRenderSignature = '';
 let scrollSaveTimer = 0;
 let feedModeSwitchController = null;
+let lastCommittedConfig = null;
 const enqueuePopupMutation = popupReliability.createMutationQueue();
 
 const popupStatusController = popupReliability.createPopupStatusController((message, kind) => {
@@ -779,38 +780,66 @@ function isReadFast(item, readIdSet, readAllBeforeTime) {
   return false;
 }
 
-async function saveConfig(options = {}) {
-  const shouldNotifyBackground = options.notifyBackground !== false;
-  const theme = themeEl.value;
-  const fontFamily = normalizeFontFamily(fontFamilyEl.value);
-  const fontSize = fontSizeEl.value;
-  const openPositionMode = normalizeOpenPositionMode(openPositionModeEl.value);
-  const historyDays = Number(historyDaysEl.value);
-  const config = {
-    enabled: enabledEl.checked,
-    interval: Number(intervalEl.value),
-    theme,
-    fontFamily,
-    fontSize,
-    openPositionMode,
-    historyDays
+function normalizeConfigSnapshot(data = {}) {
+  return {
+    enabled: data.enabled !== false,
+    interval: Math.max(Number(data.interval) || 2, 2),
+    theme: normalizeTheme(data.theme),
+    fontFamily: normalizeFontFamily(data.fontFamily),
+    fontSize: data.fontSize || 'medium',
+    openPositionMode: normalizeOpenPositionMode(data.openPositionMode),
+    historyDays: Math.min(Math.max(Number(data.historyDays) || DEFAULT_HISTORY_DAYS, 1), 5)
   };
-  applyTheme(theme);
-  applyFontFamily(fontFamily);
-  applyFontSize(fontSize);
-  if (openPositionMode === 'unread') clearScrollPosition();
+}
+
+function readConfigControls() {
+  return normalizeConfigSnapshot({
+    enabled: enabledEl.checked,
+    interval: intervalEl.value,
+    theme: themeEl.value,
+    fontFamily: fontFamilyEl.value,
+    fontSize: fontSizeEl.value,
+    openPositionMode: openPositionModeEl.value,
+    historyDays: historyDaysEl.value
+  });
+}
+
+function applyConfigSnapshot(config) {
+  enabledEl.checked = config.enabled;
+  intervalEl.value = String(config.interval);
+  themeEl.value = config.theme;
+  fontFamilyEl.value = config.fontFamily;
+  fontSizeEl.value = config.fontSize;
+  openPositionModeEl.value = config.openPositionMode;
+  historyDaysEl.value = String(config.historyDays);
+  applyTheme(config.theme);
+  applyFontFamily(config.fontFamily);
+  applyFontSize(config.fontSize);
   writePopupCache(config);
-  await chrome.storage.local.set(config);
+}
+
+const configMutationController = createConfigMutationController({
+  getCommitted: () => lastCommittedConfig,
+  setCommitted: config => { lastCommittedConfig = { ...config }; },
+  apply: applyConfigSnapshot,
+  persist: config => chrome.storage.local.set(config),
+  notify: () => chrome.runtime.sendMessage({ type: 'configChanged' })
+});
+
+async function saveConfig(options = {}) {
+  const config = readConfigControls();
+  applyConfigSnapshot(config);
+  if (config.openPositionMode === 'unread') clearScrollPosition();
+  await configMutationController.save(config, options);
   showPopupStatus('');
-  if (shouldNotifyBackground) {
-    chrome.runtime.sendMessage({ type: 'configChanged' });
-  }
   loadHistory(undefined, { immediate: true }).catch(() => showPopupStatus('内容加载失败，请重试。'));
 }
 
 function saveConfigWithStatus(options = {}) {
   return saveConfig(options).catch(error => {
-    showPopupStatus('设置保存失败，请重试。');
+    showPopupStatus(error.committed
+      ? '设置已保存，但后台更新失败，请重试。'
+      : '设置保存失败，请重试。');
     throw error;
   });
 }
@@ -892,47 +921,56 @@ async function openHistoryItem(item) {
   }
   const key = item.dataset.key || url;
   const scrollAnchor = captureScrollAnchor(historyList);
+  const previousReadIds = new Set(cachedReadIds);
+  const elements = Array.from(document.querySelectorAll(`.item[data-key="${CSS.escape(key)}"], .item[data-url="${CSS.escape(url)}"]`));
+  const previousUnread = new Map(elements.map(el => [el, el.classList.contains('unread')]));
 
-  // Mark read BEFORE opening the tab — on mobile, chrome.tabs.create
-  // destroys the popup immediately, so anything after it won't execute.
-  if (!cachedReadIds.has(key)) {
-    cachedReadIds.add(key);
-    if (url !== key) cachedReadIds.add(url);
-    const arr = [...cachedReadIds];
-    if (arr.length > 100) arr.splice(0, arr.length - 100);
-    writePopupCache({ readIds: arr });
+  const applyOptimistic = () => {
+    if (!cachedReadIds.has(key)) {
+      cachedReadIds.add(key);
+      if (url !== key) cachedReadIds.add(url);
+      const arr = [...cachedReadIds];
+      if (arr.length > 100) arr.splice(0, arr.length - 100);
+      writePopupCache({ readIds: arr });
+      lastRenderSignature = '';
+    }
+    elements.forEach(el => {
+      el.classList.remove('unread');
+      el.classList.add('read');
+    });
+    const unreadEls = document.querySelectorAll('.item.unread');
+    if (unreadEls.length > 0) markAllReadBtn.classList.add('visible');
+    else if (!markAllReadBtn.classList.contains('is-confirmed')) markAllReadBtn.classList.remove('visible');
+  };
+  const rollback = () => {
+    cachedReadIds = new Set(previousReadIds);
+    writePopupCache({ readIds: [...cachedReadIds] });
     lastRenderSignature = '';
-  }
+    previousUnread.forEach((wasUnread, el) => {
+      if (wasUnread) {
+        el.classList.remove('read');
+        el.classList.add('unread');
+      }
+    });
+    if (previousUnread.size > 0) markAllReadBtn.classList.add('visible');
+  };
 
-  document.querySelectorAll(`.item[data-key="${CSS.escape(key)}"], .item[data-url="${CSS.escape(url)}"]`).forEach(el => {
-    el.classList.remove('unread');
-    el.classList.add('read');
+  const result = await runOpenItemMutation({
+    applyOptimistic,
+    rollback,
+    open: () => chrome.runtime.sendMessage({ type: 'openItem', url, ids: [key, url] }),
+    onFailure: reason => showPopupStatus(reason === 'unsafe-url'
+      ? '无法打开此条目：链接必须使用 HTTPS。'
+      : '打开条目失败，请重试。'),
+    onPersistenceFailure: () => showPopupStatus('条目已打开，但已读状态更新失败，请重试。')
   });
-
-  const unreadEls = document.querySelectorAll('.item.unread');
-  if (unreadEls.length > 0) {
-    markAllReadBtn.classList.add('visible');
-  } else if (!markAllReadBtn.classList.contains('is-confirmed')) {
-    markAllReadBtn.classList.remove('visible');
-  }
-
-  const [readResult, scrollCtx] = await Promise.all([
-    chrome.runtime.sendMessage({ type: 'markItemsRead', ids: [key, url] }).catch(() => null),
-    chrome.storage.local.get(['feedMode', 'historyDays'])
-  ]);
-  if (!readResult?.ok) showPopupStatus('已读状态更新失败，请重试。');
-  markWatchUrlsViewed([key, url]).catch(() => {});
+  const scrollCtx = await chrome.storage.local.get(['feedMode', 'historyDays']);
   writeScrollPosition(
     { feedMode: normalizeFeedMode(scrollCtx.feedMode), historyDays: scrollCtx.historyDays || DEFAULT_HISTORY_DAYS },
     scrollAnchor
   );
 
-  // Open the tab last — popup may be destroyed after this on mobile.
-  try {
-    await chrome.tabs.create({ url });
-  } catch (_e) {
-    showPopupStatus('打开条目失败，请重试。');
-  }
+  return result;
 }
 
 // Event delegation for item clicks
@@ -1078,8 +1116,8 @@ if (watchRulesList) {
   });
 }
 
-enabledEl.addEventListener('change', () => saveConfigWithStatus());
-intervalEl.addEventListener('change', () => saveConfigWithStatus());
+enabledEl.addEventListener('change', () => { void saveConfigWithStatus().catch(() => {}); });
+intervalEl.addEventListener('change', () => { void saveConfigWithStatus().catch(() => {}); });
 feedModeSwitchController = createFeedModeSwitchController({
   initialMode: normalizeFeedMode(readPopupCache()?.feedMode || feedModeEl.value),
   normalizeFeedMode,
@@ -1115,13 +1153,13 @@ feedModeEl.addEventListener('change', async () => {
   pollBtn.classList.add('is-loading');
   await feedModeSwitchController.switchFeedMode(nextFeedMode, feedbackStartedAt);
 });
-themeEl.addEventListener('change', () => saveConfigWithStatus({ notifyBackground: false }));
-fontFamilyEl.addEventListener('change', () => saveConfigWithStatus({ notifyBackground: false }));
-fontSizeEl.addEventListener('change', () => saveConfigWithStatus({ notifyBackground: false }));
-openPositionModeEl.addEventListener('change', () => saveConfigWithStatus({ notifyBackground: false }));
+themeEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
+fontFamilyEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
+fontSizeEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
+openPositionModeEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
 historyDaysEl.addEventListener('change', () => {
   clearScrollPosition();
-  saveConfigWithStatus({ notifyBackground: false });
+  void saveConfigWithStatus({ notifyBackground: false }).catch(() => {});
 });
 
 historyList.addEventListener('scroll', () => {
@@ -1189,6 +1227,7 @@ const popupInitializationController = createPopupInitializationController({
   applyStorage: data => {
     feedModeSwitchController.observeCommittedMode(data.feedMode);
     applyConfig(data);
+    configMutationController.observeCommitted(normalizeConfigSnapshot(data));
     if (data.theme && data.theme !== normalizeTheme(data.theme)) {
       chrome.storage.local.set({ theme: 'dark' });
     }

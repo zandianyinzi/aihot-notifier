@@ -24,6 +24,7 @@ let storageData = {
 let fetchImpl = null;
 let requestedUrls = [];
 let openedTabs = [];
+let failTabsCreate = false;
 let notificationCreateIds = [];
 let alarmCreateCalls = [];
 let alarmClearCalls = [];
@@ -73,6 +74,7 @@ function resetState(overrides = {}) {
   };
   requestedUrls = [];
   openedTabs = [];
+  failTabsCreate = false;
   notificationCreateIds = [];
   alarmCreateCalls = [];
   alarmClearCalls = [];
@@ -168,7 +170,11 @@ globalThis.chrome = {
       if (badgeBackgroundImpl) return badgeBackgroundImpl(color);
     }
   },
-  tabs: { create: (options) => { openedTabs.push(options.url); } },
+  tabs: { create: (options) => {
+    if (failTabsCreate) return Promise.reject(new Error('tab blocked'));
+    openedTabs.push(options.url);
+    return Promise.resolve({ id: openedTabs.length });
+  } },
   alarms: {
     create: (name, info) => {
       alarmCreateCalls.push({ name, info });
@@ -272,6 +278,7 @@ async function runTests() {
     process.exit(1);
     return;
   }
+
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
     ? legacyFingerprintResponse('cold-selected', 'cold-all')
     : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'cold-entry-item' })])) });
@@ -294,6 +301,16 @@ async function runTests() {
   assert(allModeMigration?.history[0]?.selected === true && allModeMigration?.history[1]?.selected === false && allModeMigration?.history[2]?.selected === false && allModeMigration?.canonicalHistoryVersion === 1, 'marker 缺失的 all-mode migration 仅规范化显式 membership');
   assert(backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 0, truncated: false }, 'selected', true) === true, '能力开启时仅正常完整 selected 快照允许按缺席降级');
   assert(backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 1, truncated: false }, 'selected', true) === false && backgroundApi.isCompleteSelectedSnapshot({ termination: 'page-bound', skippedItems: 0, truncated: true }, 'selected', true) === false && backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 0, truncated: false }, 'selected', false) === false, '无效条目、截断或生产能力关闭时禁止 selected 缺席降级');
+
+  resetState({ canonicalHistoryVersion: 1, readIds: [] });
+  const opened = await sendMessageWithTimeout({ type: 'openItem', url: 'https://example.com/open-item', ids: ['open-item'] });
+  assert(opened.ok === true && opened.opened === true && opened.readCommitted === true && openedTabs.includes('https://example.com/open-item') && storageData.readIds.includes('open-item'), 'openItem creates HTTPS tab before durable read commit');
+  const unsafe = await sendMessageWithTimeout({ type: 'openItem', url: 'http://example.com/open-item', ids: ['unsafe'] });
+  assert(unsafe.ok === false && openedTabs.length === 1 && !storageData.readIds.includes('unsafe'), 'openItem rejects non-HTTPS navigation before mutation');
+  failTabsCreate = true;
+  const blocked = await sendMessageWithTimeout({ type: 'openItem', url: 'https://example.com/blocked', ids: ['blocked'] });
+  failTabsCreate = false;
+  assert(blocked.ok === false && blocked.reason === 'tab-create-failed' && !storageData.readIds.includes('blocked'), 'openItem tab failure leaves read state unchanged');
 
   console.log('\n[API v1 请求、分页与字段映射]');
   resetState({ apiFingerprints: { selected: 'fp-old' } });

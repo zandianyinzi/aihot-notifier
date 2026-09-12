@@ -83,6 +83,72 @@
     return { ok: true, url };
   }
 
+  async function runOpenItemMutation(deps = {}) {
+    if (deps.applyOptimistic) deps.applyOptimistic();
+    let result;
+    try {
+      result = await deps.open();
+    } catch (_e) {
+      result = { ok: false, reason: 'tab-create-failed' };
+    }
+    if (result?.ok === false) {
+      if (deps.rollback) deps.rollback();
+      if (deps.onFailure) deps.onFailure(result.reason);
+    } else if (result?.opened && result.readCommitted === false) {
+      if (deps.onPersistenceFailure) deps.onPersistenceFailure(result.error || 'read-persist-failed');
+    }
+    return result || { ok: false, reason: 'tab-create-failed' };
+  }
+
+  function createConfigMutationController(deps = {}) {
+    let tail = Promise.resolve();
+    let generation = 0;
+    let committed = deps.getCommitted ? deps.getCommitted() : null;
+
+    function save(nextConfig, options = {}) {
+      const requestId = ++generation;
+      const operation = tail.then(async () => {
+        const previous = committed || (deps.getCommitted ? deps.getCommitted() : null);
+        try {
+          await deps.persist(nextConfig);
+        } catch (error) {
+          if (requestId === generation) {
+            if (deps.apply && previous) deps.apply(previous);
+          }
+          throw error;
+        }
+
+        committed = nextConfig;
+        if (deps.setCommitted) deps.setCommitted(nextConfig);
+        if (requestId === generation && deps.apply) deps.apply(nextConfig);
+
+        if (deps.notify && options.notifyBackground !== false) {
+          let response;
+          try {
+            response = await deps.notify(nextConfig, options);
+          } catch (error) {
+            throw Object.assign(error, { committed: true });
+          }
+          if (response?.ok === false) {
+            throw Object.assign(new Error(response.error || 'configChanged failed'), { committed: true });
+          }
+        }
+        return { ok: true, config: nextConfig };
+      });
+      tail = operation.catch(() => {});
+      return operation;
+    }
+
+    return {
+      save,
+      observeCommitted(config) {
+        committed = config;
+        if (deps.setCommitted) deps.setCommitted(config);
+      },
+      getCommitted: () => committed
+    };
+  }
+
   function captureScrollAnchor(scroller, itemSelector = '.item') {
     if (!scroller) return null;
     const listTop = scroller.getBoundingClientRect().top;
@@ -497,6 +563,8 @@
     runMarkAllReadMutation,
     createSessionWatchPinTracker,
     getSafeHttpsUrl,
-    openHttpsUrl
+    openHttpsUrl,
+    runOpenItemMutation,
+    createConfigMutationController
   };
 });
