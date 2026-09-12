@@ -1367,7 +1367,7 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
       const items = response.items.map(normalizeV1Item).filter(Boolean);
       const persisted = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
         const reachedPageLimit = response.hasMore && page === ALL_MAX_PAGES - 1;
-        const terminal = !response.hasMore || reachedPageLimit;
+        const terminal = !response.hasMore;
         const continuationStatus = terminal
           ? getSettledAllContinuationStatus(continuation, { active: false, retryAt: '' })
           : { ...continuation, cursor: response.nextCursor, retryAttempts: 0, retryAt: '' };
@@ -1396,9 +1396,13 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
       retryAttempts = 0;
       retryAt = '';
       await runPostCommitSideEffect('continuation badge update', updateBadge);
-      if (!response.hasMore || reachedPageLimit) {
+      if (!response.hasMore) {
         await runPostCommitSideEffect('continuation alarm cleanup', () => chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME));
-        if (!response.hasMore && fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
+        if (fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
+        return;
+      }
+      if (reachedPageLimit) {
+        await runPostCommitSideEffect('continuation page-budget alarm scheduling', () => chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: Date.now() + RETRY_AFTER_FALLBACK_MS }));
         return;
       }
     }

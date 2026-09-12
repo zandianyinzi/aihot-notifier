@@ -331,6 +331,34 @@ async function runTests() {
   const autoContinuationScheduled = alarmCreateCalls.some(call => call.name === 'aihot-all-continuation');
   assert(automaticAllPages === 20 && storageData.history.length === 20 && storageData.allFeedContinuation?.active === true && storageData.allFeedContinuation?.cursor === 'auto-all-page-21' && autoContinuationScheduled, '自动 all 拉满分页预算后持久化 cursor 并调度续拉 alarm');
 
+  console.log('\n[自动 all 续拉预算继续分页]');
+  resetState({
+    feedMode: 'all',
+    allFeedContinuation: {
+      active: true,
+      id: 'resume-budget-continuation',
+      cursor: 'resume-budget-page-1',
+      retryAttempts: 0,
+      retryAt: ''
+    }
+  });
+  let resumedContinuationPages = 0;
+  fetchImpl = (url) => {
+    const cursor = new URL(url).searchParams.get('cursor');
+    resumedContinuationPages++;
+    const pageNumber = Number(cursor.replace('resume-budget-page-', ''));
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({ id: `resume-budget-item-${pageNumber}` })], {
+        hasMore: true,
+        nextCursor: `resume-budget-page-${pageNumber + 1}`
+      }))
+    });
+  };
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
+  const resumedBudgetContinued = await waitFor(() => storageData.allFeedContinuation?.cursor === 'resume-budget-page-20' || storageData.allFeedContinuation?.active === false, 100);
+  assert(resumedBudgetContinued && resumedContinuationPages === 19 && storageData.allFeedContinuation?.active === true && storageData.allFeedContinuation?.cursor === 'resume-budget-page-20' && alarmCreateCalls.some(call => call.name === 'aihot-all-continuation'), '续拉达到单轮页数预算且仍有 nextCursor 时保持 active 并再次调度 continuation alarm');
+
   console.log('\n[API v1 aihot 链接回退]');
   resetState();
   fetchImpl = () => Promise.resolve({
@@ -1431,6 +1459,11 @@ async function runTests() {
     });
   };
   const allRegressionSwitch = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
+  const allRegressionFirstBudgetCompleted = await waitFor(() =>
+    storageData.allFeedContinuation?.active === true && storageData.allFeedContinuation?.cursor === 'source-regression-page-20',
+    200
+  );
+  await onAlarmHandler({ name: 'aihot-all-continuation' });
   const allRegressionCompleted = await waitFor(() =>
     storageData.allFeedContinuation?.active === false && storageData.history.length === 2364,
     200
@@ -1442,7 +1475,7 @@ async function runTests() {
   const unreadRegressionIds = storageData.history
     .filter(item => !storageData.readIds.includes(item.id) && new Date(item.discoveredAt || item.time || 0).getTime() > readWatermark)
     .map(item => item.id);
-  assert(allRegressionSwitch.ok === true && allRegressionCompleted && regressionAllPageRequests === 20, 'all 首页后按 100 条续拉到页数上限，canonical history 仍完整保留 2364 条');
+  assert(allRegressionSwitch.ok === true && allRegressionFirstBudgetCompleted && allRegressionCompleted && regressionAllPageRequests === 24, 'all 首页后跨 continuation alarm 拉取全部 24 页，canonical history 仍完整保留 2364 条');
   assert(regression2001?.discoveredAt === regressionHistory[2000].discoveredAt && regression2363?.discoveredAt === regressionHistory[2362].discoveredAt, '续拉保留第 2001 与 2363 条原始发现时间');
   assert(storageData.watchNotifyState['source-regression-2001']?.notifyCount === 1 && storageData.watchNotifyState['source-regression-2363']?.notifyCount === 2 && Boolean(storageData.watchNotifyState['source-regression-2001']?.viewedAt) && Boolean(storageData.watchNotifyState['source-regression-2363']?.viewedAt), '第 2001 与 2363 条的特关进度与已查看状态跨切源保留');
   assert(regressionNew && unreadRegressionIds.length === 1 && unreadRegressionIds[0] === 'source-regression-new', '只有续拉期间真正新发现的身份为未读');

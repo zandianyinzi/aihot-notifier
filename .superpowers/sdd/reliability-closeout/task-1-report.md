@@ -34,3 +34,27 @@ Complete. The implementation preserves pagination completeness for unordered API
 ## Review Finding
 
 Review round 1 found that a resumed continuation still treated its own page budget as terminal and could drop the next cursor after another 19 pages. The implementer is revising the implementation and adding a resumed-batch regression so the continuation remains active whenever `hasMore` and `nextCursor` remain true.
+
+## Review Fix Round 1
+
+### Status
+
+Complete. Resumed continuations now settle only on `hasMore: false`. At the per-run page budget, the updated cursor remains active and the existing continuation alarm is scheduled for the next batch.
+
+### Files Changed
+
+- `background.js`
+  - Preserves active continuation state for budget-limited resumed batches and schedules the next continuation alarm.
+- `test-background.js`
+  - Adds a 19-page resumed continuation regression and updates the 24-page integration regression to cross the continuation alarm boundary.
+
+### Test Results
+
+- Red: `node test-background.js` -> `结果: 165 passed, 1 failed`; the new resumed-budget assertion failed because the cursor was settled after 19 pages.
+- Green: `node test-background.js` -> `结果: 166 passed, 0 failed`.
+- `node test-notification.js` -> `结果: 46 passed, 0 failed`.
+- `git diff --check` -> passed with no output.
+
+### Concerns
+
+- The existing popup UI fixture remains absent from this worktree; this fix changes only background continuation handling and its tests.
