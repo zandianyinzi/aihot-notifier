@@ -54,16 +54,17 @@ node screenshot.mjs
 
 - **已读状态**：`readIds` 保存单条稳定 key（优先 `id`，再 `permalink`，再 `url`，并兼容旧 URL）+ `readAllBefore` 时间戳（批量清除）。两者共同决定是否已读。
 - **存储 vs 显示**：storage 保留 `Math.max(historyDays, 5)` 天数据避免切换天数时丢失；UI 和 badge 按用户设置的 `historyDays` 过滤显示。
-- **API 轮询缓冲**：自动轮询和手动刷新都先请求临时保留的 legacy `/api/public/fingerprint`；fingerprint 变化或自动 6 小时兜底到期才拉 v1 items。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
+- **API 轮询缓冲**：自动轮询和手动刷新对完整 v1 items URL 使用 URL 级 `ETag`/`If-None-Match`；304 跳过内容处理，200 成功持久化后保存该 URL 的 ETag。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
 - **feedMode 切换**：调用 `resetAndPoll()` 全量重拉并替换 history，成功后才提交新的 feedMode；失败时保留旧 history 和旧 feedMode，避免状态不一致。
+- **canonical history 限额**：内容源切换和轮询都合并既有 history，不因切换清空记录；持久化前最多保留 2500 条最新条目，标题/来源/摘要分别限制 500/300/3000 字符。history、readIds、watchNotifyState、lastItems 合计控制在 6 MiB UTF-8 JSON，quota 失败时只重试一次更小 history。
 - **内容源默认值**：`normalizeFeedMode()` 默认返回 `all`（全部），未明确设置时显示全部内容。
 
 ## API
 
-- `GET https://aihot.virxact.com/api/public/fingerprint`：当前仍临时保留的 legacy 变更探测端点；若本地缺当前 `feedMode` 的 fingerprint，不发送 `If-None-Match`，避免 304 无法补齐当前模式指纹。该依赖已标记为弃用追踪，items 数据不再使用 legacy API。
-- `GET https://aihot.virxact.com/api/v1/items?mode={selected|all}&window=7d&limit=100&cursor={nextCursor}`：v1 items 端点。响应为 `{ items: [...], page: { hasMore: bool, nextCursor: string|null } }`；以 `page.hasMore` 和 `page.nextCursor` 驱动分页，`cursor` 视为 opaque，原样传回。条目来源使用 `source.name`，链接使用 `links.original`（优先打开）和 `links.aihot`（permalink / HTTPS 回退）。
+- `GET https://aihot.news/api/v1/items?...`：使用完整 URL 的 `ETag` 条件请求；304 表示内容未变化。分页响应为 `{ items, page: { hasMore, nextCursor } }`。
+- `GET https://aihot.news/api/v1/items?mode={selected|all}&window=7d&limit=100&cursor={nextCursor}`：v1 items 端点。响应为 `{ items: [...], page: { hasMore: bool, nextCursor: string|null } }`；以 `page.hasMore` 和 `page.nextCursor` 驱动分页，`cursor` 视为 opaque，原样传回。条目来源使用 `source.name`，链接使用 `links.original`（优先打开）和 `links.aihot`（permalink / HTTPS 回退）。
 
-只有 items 分页未截断且 history 持久化成功后，才提交新的 fingerprint / `lastItemsPollAt`。
+只有 items 分页未截断且 history 持久化成功后，才提交新的 URL 级 ETag / `lastItemsPollAt`。
 
 ## 发布流程
 
@@ -82,10 +83,14 @@ PR 需包含变更摘要、已运行的测试命令。涉及界面变化时附�
 
 ## 安全与配置提示
 
-保持 `host_permissions` 限定为 `https://aihot.virxact.com/*`。不要提交 `node_modules/`、生成的 zip、密钥或本地浏览器 profile。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。
+保持 `host_permissions` 限定为 `https://aihot.news/*`。不要提交 `node_modules/`、生成的 zip、密钥或本地浏览器 profile。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。
 
 ## 发布
 
 - GitHub: https://github.com/zandianyinzi/aihot-notifier
 - 隐私政策: https://zandianyinzi.github.io/aihot-notifier/privacy-policy.html
 - Chrome Web Store 素材在 `store/` 目录
+
+### Reliability storage policy
+Canonical history is bounded to 2,500 newest entries; text fields are normalized and managed JSON stays within a 6 MiB UTF-8 budget. Quota failures retry once with a smaller history before state or fingerprint changes are committed.
+

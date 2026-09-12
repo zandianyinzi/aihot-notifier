@@ -13,13 +13,14 @@ function assert(condition, msg) {
 
 // API v1 的解析由 test-background.js 和 test-e2e.js 覆盖。这里仅把 v1 fixture
 // 准备为已归一化的条目，以测试与传输格式无关的去重、排序和窗口算法。
-function v1Item({ id, title, original, aihot, sourceName = '测试来源', ...rest }) {
+function v1Item({ id, title, original, aihot, sourceName = '测试来源', publishedAt = '2026-06-05T00:00:00Z', ...rest }) {
   return {
     id: id || title,
     title,
     source: { name: sourceName },
     links: { original, aihot: aihot || original },
     category: 'industry',
+    publishedAt,
     ...rest
   };
 }
@@ -29,14 +30,24 @@ function v1Page(items, { hasMore = false, nextCursor = null } = {}) {
 }
 
 function toNormalizedTestEntry(item) {
+  const publishedAt = normalizeTestTimestamp(item.publishedAt);
+  const indexedAt = normalizeTestTimestamp(item.indexedAt);
+  const time = publishedAt || indexedAt;
+  if (!time) return null;
   return {
     title: item.title,
     url: item.links.original || item.links.aihot,
     source: item.source.name,
     category: item.category,
     summary: item.summary || '',
-    time: item.publishedAt
+    time
   };
+}
+
+function normalizeTestTimestamp(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
 }
 
 function dedup(apiItems, history) {
@@ -231,6 +242,25 @@ console.log('\n[去重-全重复]');
   const apiPage = v1Page([v1Item({ title: 'A', original: 'https://a.com/1', publishedAt: '2026-06-04T10:00:00Z' })]);
   const result = dedup(apiPage.items.map(toNormalizedTestEntry), history);
   assert(result.length === 0, '全重复时返回空');
+})();
+
+console.log('\n[时间归一化]');
+(function() {
+  const indexedFallback = toNormalizedTestEntry(v1Item({
+    title: 'Indexed fallback',
+    original: 'https://a.com/indexed-fallback',
+    publishedAt: 'invalid',
+    indexedAt: '2026-06-05T10:00:00+08:00'
+  }));
+  const invalid = toNormalizedTestEntry(v1Item({
+    title: 'Invalid time',
+    original: 'https://a.com/invalid-time',
+    publishedAt: '',
+    indexedAt: 'invalid'
+  }));
+
+  assert(indexedFallback?.time === '2026-06-05T02:00:00.000Z', 'publishedAt 无效时使用 canonical indexedAt');
+  assert(invalid === null, 'publishedAt 与 indexedAt 都无效时跳过条目');
 })();
 
 console.log('\n[排序]');

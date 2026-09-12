@@ -3,11 +3,11 @@ const feedState = typeof importScripts === 'function'
   : require('./feed-state.js');
 const { normalizeFeedMode, projectHistory } = feedState;
 
-const API_BASE = 'https://aihot.virxact.com/api/v1/items';
+const API_BASE = 'https://aihot.news/api/v1/items';
 const API_WINDOW = '7d';
 const API_LIMIT = 100;
 const MAX_CURSOR_LENGTH = 1024;
-const FINGERPRINT_URL = 'https://aihot.virxact.com/api/public/fingerprint';
+const REQUEST_TIMEOUT_MS = 15000;
 const ALARM_NAME = 'aihot-poll';
 const ALL_CONTINUATION_ALARM_NAME = 'aihot-all-continuation';
 const DEFAULT_INTERVAL = 5;
@@ -27,6 +27,11 @@ const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 const CANONICAL_HISTORY_VERSION = 1;
+const MAX_HISTORY_ENTRIES = 2500;
+const MAX_MANAGED_STORAGE_BYTES = 6 * 1024 * 1024;
+const MAX_TITLE_LENGTH = 500;
+const MAX_SOURCE_LENGTH = 300;
+const MAX_SUMMARY_LENGTH = 3000;
 // Gated off until the API guarantees a consistent, un-paginated selected snapshot.
 // While false, isCompleteSelectedSnapshot() always returns false in production, so the
 // completeSelectedSnapshot de-selection branch in upsertCanonicalItems is unreachable
@@ -87,6 +92,105 @@ function runMigratedStateMutation(task) {
   return ensureCanonicalHistoryMigration().then(() => runStateMutation(task));
 }
 
+function truncatePersistedValue(value, key = '') {
+  if (typeof value === 'string') {
+    const limit = key === 'title' ? MAX_TITLE_LENGTH
+      : key === 'source' ? MAX_SOURCE_LENGTH
+      : key === 'summary' ? MAX_SUMMARY_LENGTH
+      : 4096;
+    return value.slice(0, limit);
+  }
+  if (Array.isArray(value)) return value.map(entry => truncatePersistedValue(entry, key));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, truncatePersistedValue(childValue, childKey)]));
+  }
+  return value;
+}
+
+function getManagedStorageBytes(state) {
+  const json = JSON.stringify({
+    history: state.history || [],
+    readIds: state.readIds || [],
+    watchNotifyState: state.watchNotifyState || {},
+    lastItems: state.lastItems || [],
+    allFeedContinuation: state.allFeedContinuation || null
+  });
+  return new TextEncoder().encode(json).length;
+}
+
+function boundCanonicalStorageState(state = {}) {
+  const originalHistoryLength = Array.isArray(state.history) ? state.history.length : 0;
+  let history = (state.history || [])
+    .map(item => truncatePersistedValue(item))
+    .sort((a, b) => getItemTime(b) - getItemTime(a))
+    .slice(0, MAX_HISTORY_ENTRIES);
+  const buildState = () => {
+    const retainedAliases = new Set(history.flatMap(item => getItemAliases(item)));
+    const pruneOrphanReadIds = originalHistoryLength > history.length;
+    const readIds = [...new Set((state.readIds || [])
+      .filter(value => typeof value === 'string' && (!pruneOrphanReadIds || retainedAliases.has(value))))].slice(-100);
+    const watchNotifyState = state.retainUnmatchedWatchState
+      ? { ...(state.watchNotifyState || {}) }
+      : Object.fromEntries(Object.entries(state.watchNotifyState || {})
+        .filter(([key]) => retainedAliases.has(key)));
+    const lastItems = (state.lastItems || []).filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias))).slice(0, 5);
+    const allFeedContinuation = state.allFeedContinuation == null
+      ? state.allFeedContinuation
+      : truncatePersistedValue(state.allFeedContinuation, 'allFeedContinuation');
+    return { history, readIds, watchNotifyState, lastItems, allFeedContinuation };
+  };
+  let bounded = buildState();
+  while (getManagedStorageBytes(bounded) > MAX_MANAGED_STORAGE_BYTES && history.length > 0) {
+    const bytes = getManagedStorageBytes(bounded);
+    const removeCount = Math.max(1, Math.ceil(history.length * (1 - (MAX_MANAGED_STORAGE_BYTES / bytes))));
+    history.splice(Math.max(0, history.length - removeCount), removeCount);
+    bounded = buildState();
+  }
+  if (getManagedStorageBytes(bounded) > MAX_MANAGED_STORAGE_BYTES) {
+    bounded.allFeedContinuation = null;
+    bounded.watchNotifyState = {};
+    bounded.lastItems = [];
+    bounded.readIds = [];
+  }
+  return bounded;
+}
+
+function isQuotaStorageError(error) {
+  return /quota|QUOTA_BYTES|bytes/i.test(String(error?.message || error || ''));
+}
+
+async function persistCanonicalState(updates = {}) {
+  const bounded = boundCanonicalStorageState(updates);
+  const payload = {
+    ...updates,
+    history: bounded.history,
+    readIds: bounded.readIds,
+    watchNotifyState: bounded.watchNotifyState,
+    ...(Object.prototype.hasOwnProperty.call(updates, 'allFeedContinuation') ? { allFeedContinuation: bounded.allFeedContinuation } : {}),
+    ...(Object.prototype.hasOwnProperty.call(updates, 'lastItems') ? { lastItems: bounded.lastItems } : {})
+  };
+  try {
+    await chrome.storage.local.set(payload);
+    return payload;
+  } catch (error) {
+    if (!isQuotaStorageError(error) || bounded.history.length <= 1) throw error;
+    const retryState = boundCanonicalStorageState({
+      ...bounded,
+      history: bounded.history.slice(0, Math.max(1, Math.floor(bounded.history.length / 2)))
+    });
+    const retryPayload = {
+      ...updates,
+      history: retryState.history,
+      readIds: retryState.readIds,
+      watchNotifyState: retryState.watchNotifyState,
+      ...(Object.prototype.hasOwnProperty.call(updates, 'allFeedContinuation') ? { allFeedContinuation: retryState.allFeedContinuation } : {}),
+      ...(Object.prototype.hasOwnProperty.call(updates, 'lastItems') ? { lastItems: retryState.lastItems } : {})
+    };
+    await chrome.storage.local.set(retryPayload);
+    return retryPayload;
+  }
+}
+
 async function getConfig() {
   const data = await chrome.storage.local.get(['enabled', 'interval', 'lastCheck', 'feedMode']);
   return {
@@ -140,6 +244,15 @@ async function recordApiFailure(responseOrStatus) {
 
 function getItemOpenUrl(item) {
   return item && (item.url || item.permalink || '');
+}
+
+function getSafeHttpsUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' ? parsed.href : '';
+  } catch (_e) {
+    return '';
+  }
 }
 
 function getItemStateKey(item) {
@@ -205,56 +318,52 @@ function getAutoPollSinceTime(config, _safetyPollDue, lastItemsPollAt) {
   return new Date(new Date(referenceTime).getTime() - bufferMs).toISOString();
 }
 
-async function probeFingerprint(mode) {
+async function probeItemsEtag(mode) {
   const normalizedMode = normalizeFeedMode(mode);
-  const { apiFingerprints = {}, apiFingerprintEtags = {} } = await chrome.storage.local.get(['apiFingerprints', 'apiFingerprintEtags']);
-  const headers = {};
-  if (apiFingerprints[normalizedMode] && apiFingerprintEtags.current) headers['If-None-Match'] = apiFingerprintEtags.current;
-
-  const res = await fetch(FINGERPRINT_URL, Object.keys(headers).length > 0 ? { headers } : undefined);
-  if (res.status === 304) {
-    return { ok: true, changed: !apiFingerprints[normalizedMode], fingerprints: apiFingerprints, etag: apiFingerprintEtags.current || '' };
-  }
-  if (!res.ok) {
-    return { ok: false, status: res.status, response: res };
-  }
-
-  const json = await res.json();
-  const nextFingerprint = json && json[normalizedMode];
-  if (!nextFingerprint) {
-    return { ok: true, changed: true, unavailable: true, fingerprints: apiFingerprints, etag: '' };
-  }
-
-  const etag = getResponseHeader(res, 'ETag');
-  const changed = apiFingerprints[normalizedMode] !== nextFingerprint;
-  return {
-    ok: true,
-    changed,
-    fingerprints: {
-      ...apiFingerprints,
-      ...(json.selected ? { selected: json.selected } : {}),
-      ...(json.all ? { all: json.all } : {})
-    },
-    etag
-  };
+  return { ok: true, changed: true, etagUrl: getApiUrl(normalizedMode) };
 }
 
 async function saveFingerprintProbe(probe) {
-  if (!probe || probe.unavailable) return;
+  if (!probe) return;
   const data = {};
-  if (probe.fingerprints) data.apiFingerprints = probe.fingerprints;
-  if (probe.etag) {
+  if (probe.etagUrl) {
     const { apiFingerprintEtags = {} } = await chrome.storage.local.get('apiFingerprintEtags');
-    data.apiFingerprintEtags = { ...apiFingerprintEtags, current: probe.etag };
+    const nextEtags = { ...apiFingerprintEtags };
+    if (probe.etag) nextEtags[probe.etagUrl] = probe.etag;
+    else delete nextEtags[probe.etagUrl];
+    data.apiFingerprintEtags = nextEtags;
   }
   if (Object.keys(data).length > 0) await chrome.storage.local.set(data);
 }
 
-async function fetchItemsPage(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw Object.assign(new Error(`API returned ${res.status}`), { response: res, status: res.status });
-  return res.json();
+async function withRequestDeadline(url, options, handleResponse) {
+  const controller = new AbortController();
+  let timeoutId;
+  const deadline = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms`));
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+  });
+
+  try {
+    const request = fetch(url, { ...(options || {}), signal: controller.signal })
+      .then(handleResponse);
+    return await Promise.race([request, deadline]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
+
+async function fetchItemsPageWithOptions(url, options) {
+  return withRequestDeadline(url, options, async res => {
+    if (res.status === 304) return { notModified: true, etag: getResponseHeader(res, 'ETag'), json: null };
+    if (!res.ok) throw Object.assign(new Error(`API returned ${res.status}`), { response: res, status: res.status });
+    return { notModified: false, etag: getResponseHeader(res, 'ETag'), json: await res.json() };
+  });
+}
+
+const fetchItemsPage = url => fetchItemsPageWithOptions(url);
 
 function isHttpsUrl(value) {
   try {
@@ -271,6 +380,12 @@ function normalizeAttribution(attribution) {
   return name || url ? { name, url } : null;
 }
 
+function normalizeTimestamp(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
+}
+
 function normalizeV1Item(item) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
   if (typeof item.id !== 'string' || !item.id || typeof item.title !== 'string' || !item.title) return null;
@@ -281,9 +396,14 @@ function normalizeV1Item(item) {
   const permalink = typeof item.links.aihot === 'string' ? item.links.aihot : '';
   const url = isHttpsUrl(original) ? original : (isHttpsUrl(permalink) ? permalink : '');
   if (!url) return null;
+  const indexedAt = normalizeTimestamp(item.indexedAt);
+  const publishedAt = normalizeTimestamp(item.publishedAt) || indexedAt;
+  if (!publishedAt) return null;
 
   return {
     ...item,
+    publishedAt,
+    indexedAt,
     selectedPresent: Object.prototype.hasOwnProperty.call(item, 'selected'),
     selected: item.selected === true,
     source: item.source.name,
@@ -314,13 +434,14 @@ function getV1Page(json) {
   return { items: json.items, hasMore: json.page.hasMore, nextCursor: nextCursor || '' };
 }
 
-async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '' }) {
+async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '', supportsMonotonicOrder = false }) {
   const normalizedMode = normalizeFeedMode(mode);
   let allItems = [];
   let cursor = null;
   let truncated = false;
   let nextCursor = '';
   let skippedItems = 0;
+  let etag = '';
   let termination = 'page-bound';
   const seenCursors = new Set();
 
@@ -328,7 +449,16 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
     let url = baseUrl || getApiUrl(normalizedMode);
     if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
-    const response = getV1Page(await fetchItemsPage(url));
+    const { apiFingerprintEtags = {} } = page === 0 ? await chrome.storage.local.get('apiFingerprintEtags') : { apiFingerprintEtags: {} };
+    const requestOptions = page === 0 && apiFingerprintEtags[url] ? { headers: { 'If-None-Match': apiFingerprintEtags[url] } } : undefined;
+    const pageResult = await fetchItemsPageWithOptions(url, requestOptions);
+    if (pageResult.notModified) {
+      allItems.notModified = true;
+      allItems.etag = pageResult.etag || apiFingerprintEtags[url] || '';
+      break;
+    }
+    etag = pageResult.etag || etag;
+    const response = getV1Page(pageResult.json);
     const items = response.items.map(normalizeV1Item).filter(Boolean);
     skippedItems += response.items.length - items.length;
     allItems = allItems.concat(items);
@@ -338,8 +468,10 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
       break;
     }
     const oldest = items[items.length - 1];
-    if (oldest && new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) {
+    if (supportsMonotonicOrder === true && oldest && new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) {
       termination = 'cutoff';
+      truncated = true;
+      nextCursor = response.nextCursor;
       break;
     }
     if (page === maxPages - 1) {
@@ -356,6 +488,7 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
   allItems.nextCursor = nextCursor;
   allItems.skippedItems = skippedItems;
   allItems.termination = termination;
+  allItems.etag = etag;
   return allItems;
 }
 
@@ -595,14 +728,36 @@ async function markWatchViewed(urls) {
   await updateBadge();
 }
 
-async function markItemsRead(ids) {
+async function markItemsRead(ids, options = {}) {
   const aliases = [...new Set((Array.isArray(ids) ? ids : [ids]).flatMap(getItemAliases).filter(Boolean))];
   const { readIds = [] } = await chrome.storage.local.get('readIds');
   const merged = [...new Set([...readIds, ...aliases])];
   const bounded = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
   await chrome.storage.local.set({ readIds: bounded });
-  await updateBadge();
+  if (options.skipBadge !== true) await updateBadge();
   return bounded;
+}
+
+async function openItem(urlValue, ids) {
+  const url = getSafeHttpsUrl(urlValue);
+  if (!url) return { ok: false, reason: 'unsafe-url' };
+  try {
+    await chrome.tabs.create({ url });
+  } catch (_e) {
+    return { ok: false, reason: 'tab-create-failed' };
+  }
+
+  const aliases = [...new Set([...(Array.isArray(ids) ? ids : [ids]), url].flatMap(getItemAliases).filter(Boolean))];
+  try {
+    await runMigratedStateMutation(async () => {
+      await markItemsRead(aliases, { skipBadge: true });
+      await markWatchViewed(aliases);
+      await updateBadge();
+    });
+    return { ok: true, opened: true, readCommitted: true };
+  } catch (error) {
+    return { ok: true, opened: true, readCommitted: false, error: error.message || 'read persistence failed' };
+  }
 }
 
 function normalizeStoredWatchRules(rules) {
@@ -825,14 +980,23 @@ function upsertCanonicalItems(state, items, options = {}) {
   const retainedWatchNotifyState = options.retainUnmatchedWatchState
     ? watchNotifyState
     : pruneWatchNotifyState(retainedHistory, watchNotifyState);
-
-  return {
+  const bounded = boundCanonicalStorageState({
     history: retainedHistory,
     readIds: Array.from(readIds),
     watchNotifyState: retainedWatchNotifyState,
-    inserted,
-    updated,
-    newlyMatched
+    lastItems: inserted,
+    retainUnmatchedWatchState: options.retainUnmatchedWatchState === true
+  });
+  const retainedAliases = new Set(bounded.history.flatMap(item => getItemAliases(item)));
+  const retainedInserted = inserted.filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias)));
+
+  return {
+    history: bounded.history,
+    readIds: bounded.readIds,
+    watchNotifyState: bounded.watchNotifyState,
+    inserted: retainedInserted,
+    updated: updated.filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias))),
+    newlyMatched: newlyMatched.filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias)))
   };
 }
 
@@ -847,8 +1011,8 @@ async function getPrunedStoredWatchNotifyState() {
   return pruneWatchNotifyState(history, watchNotifyState);
 }
 
-function getNormalizedItemTime(item, discoveredAt) {
-  return item.publishedAt || item.indexedAt || item.discoveredAt || discoveredAt || new Date().toISOString();
+function getNormalizedItemTime(item) {
+  return normalizeTimestamp(item.publishedAt) || normalizeTimestamp(item.indexedAt);
 }
 
 function getCycleWatchNotificationBudget(used = 0) {
@@ -950,7 +1114,7 @@ async function pollForUpdatesInternal() {
   const config = await getConfig();
   if (!config.enabled) return;
 
-  const { nextAllowedPollAt = '', lastItemsPollAt = '' } = await chrome.storage.local.get(['nextAllowedPollAt', 'lastItemsPollAt']);
+  const { nextAllowedPollAt = '', lastItemsPollAt = '', allFeedContinuation = {} } = await chrome.storage.local.get(['nextAllowedPollAt', 'lastItemsPollAt', 'allFeedContinuation']);
   if (nextAllowedPollAt && new Date(nextAllowedPollAt).getTime() > Date.now()) {
     console.log(`[AI HOT] polling paused until ${nextAllowedPollAt}`);
     return;
@@ -959,7 +1123,7 @@ async function pollForUpdatesInternal() {
   const now = new Date().toISOString();
 
   try {
-    const fingerprintProbe = await probeFingerprint(config.feedMode);
+    const fingerprintProbe = await probeItemsEtag(config.feedMode);
     if (!fingerprintProbe.ok) {
       console.warn(`[AI HOT] fingerprint returned ${fingerprintProbe.status}`);
       await recordApiFailure(fingerprintProbe.response || fingerprintProbe.status);
@@ -978,7 +1142,22 @@ async function pollForUpdatesInternal() {
 
     const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff });
-    const newWatchNotifications = await persistFetchedItems(allItems, { notify: true });
+    if (allItems.notModified) {
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      await runPostCommitSideEffect('poll 304 badge update', updateBadge);
+      return { notModified: true };
+    }
+    fingerprintProbe.etag = allItems.etag;
+    fingerprintProbe.etagUrl = getApiUrl(config.feedMode);
+    const continuation = config.feedMode === 'all' && allFeedContinuation.active !== true && allItems.truncated && allItems.nextCursor
+      ? { continuationId: getContinuationId(), cursor: allItems.nextCursor }
+      : null;
+    const newWatchNotifications = await persistFetchedItems(allItems, {
+      notify: true,
+      storageUpdates: continuation
+        ? { allFeedContinuation: getActiveAllContinuationStatus(allItems.nextCursor, continuation.continuationId) }
+        : undefined
+    });
     console.log(`[AI HOT] got ${allItems.length} items`);
 
     if (!allItems.truncated) {
@@ -986,6 +1165,9 @@ async function pollForUpdatesInternal() {
       await commitSuccessfulItemsPoll({ now });
     } else {
       await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      if (continuation) {
+        await runPostCommitSideEffect('automatic all continuation alarm scheduling', () => chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: Date.now() + RETRY_AFTER_FALLBACK_MS }));
+      }
     }
     return { watchNotificationsSent: newWatchNotifications, truncated: Boolean(allItems.truncated) };
   } catch (e) {
@@ -1047,7 +1229,7 @@ async function persistFetchedItems(items, options = {}) {
     historyDays,
     retainUnmatchedWatchState
   });
-  await chrome.storage.local.set({
+  await persistCanonicalState({
     history: persisted.history,
     readIds: persisted.readIds,
     watchNotifyState: persisted.watchNotifyState,
@@ -1088,7 +1270,11 @@ async function persistFetchedItems(items, options = {}) {
   if (shouldNotify || options.updateLastItems !== false) {
     const updates = { watchNotifyState: persistedWatchNotifyState };
     if (options.updateLastItems !== false) updates.lastItems = [...watchItems, ...normalItems].slice(0, 5);
-    await chrome.storage.local.set(updates);
+    await persistCanonicalState({
+      history: persisted.history,
+      readIds: persisted.readIds,
+      ...updates
+    });
   }
 
   if (options.updateBadge !== false) await runPostCommitSideEffect('persist badge update', updateBadge);
@@ -1118,7 +1304,12 @@ async function checkWatchRemindersInternal(limit = MAX_WATCH_NOTIFICATIONS_PER_C
   const nextWatchNotifyState = { ...watchNotifyState };
   const notified = await sendWatchNotifications(watchItems, nextWatchNotifyState, now, limit);
   if (notified.length > 0) {
-    await chrome.storage.local.set({ watchNotifyState: nextWatchNotifyState, lastItems: notified.slice(0, 5) });
+    await persistCanonicalState({
+      history,
+      readIds: (await chrome.storage.local.get('readIds')).readIds || [],
+      watchNotifyState: nextWatchNotifyState,
+      lastItems: notified.slice(0, 5)
+    });
   }
   return notified.length;
 }
@@ -1144,7 +1335,7 @@ async function manualPollInternal() {
   const now = new Date().toISOString();
 
   try {
-    const fingerprintProbe = await probeFingerprint(mode);
+    const fingerprintProbe = await probeItemsEtag(mode);
     if (!fingerprintProbe.ok) {
       console.warn(`[AI HOT] manual fingerprint returned ${fingerprintProbe.status}`);
       throw Object.assign(new Error(`API returned ${fingerprintProbe.status}`), { response: fingerprintProbe.response, status: fingerprintProbe.status });
@@ -1162,6 +1353,13 @@ async function manualPollInternal() {
     console.log(`[AI HOT] manual poll since=${sinceTime}`);
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES });
+    if (allItems.notModified) {
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      await runPostCommitSideEffect('manual 304 badge update', updateBadge);
+      return;
+    }
+    fingerprintProbe.etag = allItems.etag;
+    fingerprintProbe.etagUrl = getApiUrl(mode);
     const discoveredAt = new Date().toISOString();
     const persisted = upsertCanonicalItems({ history, readIds, watchRules, watchNotifyState }, allItems, {
       mode,
@@ -1171,7 +1369,7 @@ async function manualPollInternal() {
       retainUnmatchedWatchState: mode === 'all' && allFeedContinuation.active === true
     });
     const merged = persisted.history;
-    await chrome.storage.local.set({
+    await persistCanonicalState({
       history: persisted.history,
       readIds: persisted.readIds,
       watchNotifyState: persisted.watchNotifyState,
@@ -1275,7 +1473,7 @@ async function recoverAllFeedContinuationStatus() {
 }
 
 function startFingerprintProbe(mode) {
-  return probeFingerprint(mode).catch(() => null);
+  return probeItemsEtag(mode).catch(() => null);
 }
 
 function saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId = '') {
@@ -1348,13 +1546,15 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
       seenCursors.add(nextCursor);
 
       const url = `${getApiUrl('all')}&cursor=${encodeURIComponent(nextCursor)}`;
-      const response = getV1Page(await fetchItemsPage(url));
+      const pageResult = await fetchItemsPage(url);
+      if (pageResult.notModified) continue;
+      const response = getV1Page(pageResult.json);
       if (!await getActiveAllContinuation(generation, continuationId, expected)) return;
 
       const items = response.items.map(normalizeV1Item).filter(Boolean);
       const persisted = await commitAllContinuationMutation(generation, continuationId, expected, async continuation => {
         const reachedPageLimit = response.hasMore && page === ALL_MAX_PAGES - 1;
-        const terminal = !response.hasMore || reachedPageLimit;
+        const terminal = !response.hasMore;
         const continuationStatus = terminal
           ? getSettledAllContinuationStatus(continuation, { active: false, retryAt: '' })
           : { ...continuation, cursor: response.nextCursor, retryAttempts: 0, retryAt: '' };
@@ -1383,9 +1583,13 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
       retryAttempts = 0;
       retryAt = '';
       await runPostCommitSideEffect('continuation badge update', updateBadge);
-      if (!response.hasMore || reachedPageLimit) {
+      if (!response.hasMore) {
         await runPostCommitSideEffect('continuation alarm cleanup', () => chrome.alarms.clear(ALL_CONTINUATION_ALARM_NAME));
-        if (!response.hasMore && fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
+        if (fingerprintProbe) saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId);
+        return;
+      }
+      if (reachedPageLimit) {
+        await runPostCommitSideEffect('continuation page-budget alarm scheduling', () => chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: Date.now() + RETRY_AFTER_FALLBACK_MS }));
         return;
       }
     }
@@ -1486,7 +1690,12 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
     if (generation !== sourceSwitchGeneration) return { stale: true };
     const discoveredAt = new Date().toISOString();
     const hasContinuation = mode === 'all' && allItems.truncated && allItems.nextCursor;
-    const fingerprintProbe = startFingerprintProbe(mode);
+    const fingerprintProbe = {
+      ok: true,
+      changed: true,
+      etag: allItems.etag || '',
+      etagUrl: getApiUrl(mode)
+    };
     const committed = await runStateMutation(async () => {
       if (generation !== sourceSwitchGeneration) return { stale: true };
       const stored = await chrome.storage.local.get([...SOURCE_SWITCH_STORAGE_KEYS, 'historyDays', 'watchRules']);
@@ -1519,7 +1728,7 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
         ? { generation: nextGeneration, continuationId, cursor: allItems.nextCursor, fingerprintProbe }
         : null;
       if (generation !== sourceSwitchGeneration) return { stale: true };
-      await chrome.storage.local.set({
+      await persistCanonicalState({
         history: canonical.history,
         readIds: canonical.readIds,
         lastItems: [...watchItems, ...normalItems].slice(0, 5),
@@ -1660,6 +1869,12 @@ void runMigratedStateMutation(recoverAllFeedContinuationStatus)
   .catch(e => console.warn('[AI HOT] failed to initialize canonical history:', e));
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'openItem') {
+    openItem(msg.url, msg.ids || msg.urls || msg.id)
+      .then(result => sendResponse(result))
+      .catch((e) => sendResponse({ ok: false, reason: 'tab-create-failed', error: e.message }));
+    return true;
+  }
   if (msg.type === 'configChanged') {
     runMigratedStateMutation(setupAlarm)
       .then(() => sendResponse({ ok: true }))
@@ -1721,6 +1936,8 @@ if (typeof module === 'object' && module.exports) {
   module.exports = {
     isCompleteSelectedSnapshot,
     migrateCanonicalHistoryState,
+    boundCanonicalStorageState,
+    persistCanonicalState,
     resetAndPollForTest(feedMode, capabilities = {}) {
       const generation = ++sourceSwitchGeneration;
       return ensureCanonicalHistoryMigration()

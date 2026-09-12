@@ -6,6 +6,8 @@
 const assert = require('assert');
 const {
   createMutationQueue,
+  createPopupStatusController,
+  createSettingsPanelController,
   createFeedModeSwitchController,
   createLatestWinsLoadController,
   createPopupInitializationController,
@@ -17,6 +19,9 @@ const {
   restoreScrollAnchor,
   applyOptimisticReadState,
   runMarkAllReadMutation,
+  runOpenItemMutation,
+  createConfigMutationController,
+  removeOptimisticReadAliases,
   getSafeHttpsUrl,
   openHttpsUrl
 } = require('./popup-reliability.js');
@@ -27,6 +32,66 @@ async function waitFor(check) {
     await Promise.resolve();
   }
   throw new Error('Timed out waiting for test condition');
+}
+
+function testPopupStatusControllerKeepsErrorsVisible() {
+  const states = [];
+  const status = createPopupStatusController((message, kind) => states.push({ message, kind }));
+  status.show('正在补充更多内容…', { source: 'continuation' });
+  status.show('刷新失败，请重试。');
+  status.show('', { source: 'continuation' });
+  assert.deepStrictEqual(states.at(-1), { message: '刷新失败，请重试。', kind: 'error' }, '续拉结束不会覆盖较新的错误提示');
+  status.show('');
+  assert.deepStrictEqual(states.at(-1), { message: '', kind: '' }, '成功状态可清除旧错误');
+}
+
+function testSettingsPanelControllerFocusAndInertState() {
+  const classes = new Set();
+  const focused = [];
+  const panel = {
+    classList: {
+      toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }
+    },
+    toggleAttribute(name, enabled) { this[name] = enabled; }
+  };
+  const trigger = {
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = value; },
+    focus() { focused.push('trigger'); }
+  };
+  const title = { focus() { focused.push('summary'); } };
+  const groups = [{ open: true, querySelector: selector => selector === '.setting-group-title' ? title : null }];
+  const controller = createSettingsPanelController({ panel, trigger, groups, requestFrame: callback => callback() });
+
+  controller.setOpen(true);
+  assert(classes.has('open'), 'opening settings adds the open state');
+  assert.strictEqual(panel.inert, false, 'opening settings removes inert');
+  assert.strictEqual(trigger.attrs['aria-expanded'], 'true', 'opening settings exposes expanded state');
+  assert.strictEqual(groups[0].open, false, 'opening settings collapses groups');
+  assert.deepStrictEqual(focused, ['summary'], 'opening settings focuses the first summary');
+
+  controller.setOpen(false);
+  assert(!classes.has('open'), 'closing settings removes the open state');
+  assert.strictEqual(panel.inert, true, 'closing settings restores inert');
+  assert.strictEqual(trigger.attrs['aria-expanded'], 'false', 'closing settings exposes collapsed state');
+  assert.deepStrictEqual(focused, ['summary', 'trigger'], 'closing settings returns focus to the trigger');
+}
+
+function testSettingsPanelControllerDropsDeferredFocusAfterCloseReopen() {
+  const callbacks = [];
+  const focused = [];
+  const panel = { classList: { toggle() {} }, toggleAttribute() {} };
+  const trigger = { setAttribute() {}, focus: () => focused.push('trigger') };
+  const title = { focus: () => focused.push('title') };
+  const groups = [{ open: false, querySelector: () => title }];
+  const controller = createSettingsPanelController({ panel, trigger, groups, requestFrame: cb => callbacks.push(cb) });
+  controller.setOpen(true);
+  controller.setOpen(false);
+  controller.setOpen(true);
+  callbacks[0]();
+  assert.deepStrictEqual(focused, ['trigger'], 'deferred focus from a closed settings panel is discarded');
+  callbacks[1]();
+  assert.deepStrictEqual(focused, ['trigger', 'title'], 'the latest reopen receives focus once');
 }
 
 function createDeferred() {
@@ -498,6 +563,80 @@ async function testSafeOpenReadOrdering() {
   assert(!events.includes('unexpected-read'), 'tab creation failure does not submit read state');
 }
 
+async function testOpenItemMutationRollsBackOnlyTabFailure() {
+  const events = [];
+  const result = await runOpenItemMutation({
+    open: async () => ({ ok: false, reason: 'tab-create-failed' }),
+    applyOptimistic: () => events.push('optimistic'),
+    rollback: () => events.push('rollback'),
+    onFailure: reason => events.push(`failure:${reason}`)
+  });
+  assert.deepStrictEqual(events, ['optimistic', 'rollback', 'failure:tab-create-failed'], 'tab creation failure restores optimistic item state');
+  assert.strictEqual(result.ok, false);
+
+  const persistenceEvents = [];
+  const persistenceResult = await runOpenItemMutation({
+    open: async () => ({ ok: true, opened: true, readCommitted: false, error: 'storage down' }),
+    applyOptimistic: () => persistenceEvents.push('optimistic'),
+    rollback: () => persistenceEvents.push('rollback'),
+    onPersistenceFailure: () => persistenceEvents.push('persistence-failure')
+  });
+  assert.deepStrictEqual(persistenceEvents, ['optimistic', 'persistence-failure'], 'opened tab with read persistence failure keeps optimistic state');
+  assert.strictEqual(persistenceResult.opened, true);
+}
+
+function testConcurrentOpenRollbackPreservesNewerOptimisticRead() {
+  const baseline = new Set();
+  const current = new Set(['item-a', 'item-b']);
+  const restored = removeOptimisticReadAliases(current, ['item-a'], baseline);
+  assert.deepStrictEqual([...restored], ['item-b'], 'failed open rollback removes only aliases added by that operation');
+}
+
+async function testConfigMutationControllerLatestSafeRollback() {
+  let committed = { theme: 'dark' };
+  const applied = [];
+  let failPersist = false;
+  let notifyResult = { ok: true };
+  const controller = createConfigMutationController({
+    getCommitted: () => committed,
+    setCommitted: value => { committed = value; },
+    apply: value => applied.push({ ...value }),
+    persist: async value => { if (failPersist) throw new Error('write failed'); return value; },
+    notify: async () => notifyResult
+  });
+  failPersist = true;
+  await assert.rejects(controller.save({ theme: 'green-dark' }), /write failed/);
+  assert.deepStrictEqual(applied.at(-1), { theme: 'dark' }, 'failed config write restores the last committed controls');
+  failPersist = false;
+  notifyResult = { ok: false, error: 'alarm failed' };
+  await assert.rejects(controller.save({ theme: 'chrome-dark' }), /alarm failed/);
+  assert.deepStrictEqual(committed, { theme: 'chrome-dark' }, 'configChanged failure does not roll back a durable config commit');
+}
+
+async function testConfigMutationControllerFencesStaleInitialSnapshot() {
+  let committed = { theme: 'dark' };
+  const applied = [];
+  let release;
+  const persistGate = new Promise(resolve => { release = resolve; });
+  const controller = createConfigMutationController({
+    getCommitted: () => committed,
+    setCommitted: value => { committed = value; },
+    apply: value => applied.push({ ...value }),
+    persist: async () => persistGate
+  });
+  const save = controller.save({ theme: 'light' });
+  controller.observeCommitted({ theme: 'dark' });
+  assert.deepStrictEqual(committed, { theme: 'dark' }, 'stale initialization snapshot does not replace the committed baseline');
+  release();
+  await save;
+  assert.deepStrictEqual(committed, { theme: 'light' }, 'local save commits the requested config');
+  controller.observeCommitted({ theme: 'dark' });
+  assert.deepStrictEqual(committed, { theme: 'light' }, 'late stale snapshot remains fenced after save completes');
+  controller.observeCommitted({ theme: 'light' });
+  assert.deepStrictEqual(committed, { theme: 'light' }, 'matching committed snapshot clears the fence');
+  assert.deepStrictEqual(applied.at(-1), { theme: 'light' });
+}
+
 async function testPopupHistoryRenderOwnership() {
   const scheduled = [];
   const handleStorageChange = createPopupStorageChangeHandler({
@@ -762,6 +901,9 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
 }
 
 (async () => {
+  testPopupStatusControllerKeepsErrorsVisible();
+  testSettingsPanelControllerFocusAndInertState();
+  testSettingsPanelControllerDropsDeferredFocusAfterCloseReopen();
   await testMutationQueue();
   await testFeedModeOptimisticProjectionAndLatestWins();
   await testStaleSwitchCannotInvalidateNewOptimisticLoad();
@@ -775,6 +917,10 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   await testStaleInitializationCannotOverwriteCommittedMode();
   await testWarmCacheRendersBeforeFullStorage();
   await testSafeOpenReadOrdering();
+  await testOpenItemMutationRollsBackOnlyTabFailure();
+  testConcurrentOpenRollbackPreservesNewerOptimisticRead();
+  await testConfigMutationControllerLatestSafeRollback();
+  await testConfigMutationControllerFencesStaleInitialSnapshot();
   await testPopupHistoryRenderOwnership();
   await testActiveContinuationDefersIntermediateHistoryRenders();
   await testContinuationStatusExpiryTimer();
@@ -784,7 +930,7 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   testOptimisticReadStateRollback();
   testSessionWatchPinsStayStableAcrossReadTransitions();
   await testMarkAllReadMutationSeparatesCommitAndReloadFailure();
-  console.log('结果: 20 passed, 0 failed');
+  console.log('结果: popup reliability tests passed');
 })().catch(error => {
   console.error(error);
   process.exit(1);

@@ -12,6 +12,61 @@
     };
   }
 
+  function createPopupStatusController(render) {
+    let errorMessage = '';
+    let continuationMessage = '';
+
+    function publish() {
+      if (errorMessage) {
+        render(errorMessage, 'error');
+      } else {
+        render(continuationMessage, continuationMessage ? 'continuation' : '');
+      }
+    }
+
+    function show(message, options = {}) {
+      if (options.source === 'continuation') {
+        continuationMessage = String(message || '');
+      } else {
+        errorMessage = String(message || '');
+      }
+      publish();
+    }
+
+    return { show };
+  }
+
+  function createSettingsPanelController(deps) {
+    const requestFrame = deps.requestFrame || (callback => requestAnimationFrame(callback));
+    const panel = deps.panel;
+    const trigger = deps.trigger;
+    const groups = deps.groups || [];
+    let focusEpoch = 0;
+
+    function collapseGroups() {
+      groups.forEach(group => { group.open = false; });
+    }
+
+    function setOpen(isOpen, options = {}) {
+      const epoch = ++focusEpoch;
+      const shouldFocus = options.focus !== false;
+      panel.classList.toggle('open', isOpen);
+      trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      panel.toggleAttribute('inert', !isOpen);
+      if (isOpen) {
+        collapseGroups();
+        if (shouldFocus) requestFrame(() => {
+          if (epoch !== focusEpoch) return;
+          groups[0]?.querySelector('.setting-group-title')?.focus();
+        });
+      } else if (shouldFocus) {
+        trigger.focus();
+      }
+    }
+
+    return { setOpen, collapseGroups };
+  }
+
   function getSafeHttpsUrl(value) {
     try {
       const parsed = new URL(value);
@@ -31,6 +86,92 @@
     }
     await afterOpen(url);
     return { ok: true, url };
+  }
+
+  async function runOpenItemMutation(deps = {}) {
+    if (deps.applyOptimistic) deps.applyOptimistic();
+    let result;
+    try {
+      result = await deps.open();
+    } catch (_e) {
+      result = { ok: false, reason: 'tab-create-failed' };
+    }
+    if (result?.ok === false) {
+      if (deps.rollback) deps.rollback();
+      if (deps.onFailure) deps.onFailure(result.reason);
+    } else if (result?.opened && result.readCommitted === false) {
+      if (deps.onPersistenceFailure) deps.onPersistenceFailure(result.error || 'read-persist-failed');
+    }
+    return result || { ok: false, reason: 'tab-create-failed' };
+  }
+
+  function removeOptimisticReadAliases(currentReadIds, optimisticAliases, baselineReadIds) {
+    const next = new Set(currentReadIds || []);
+    const baseline = new Set(baselineReadIds || []);
+    (optimisticAliases || []).forEach(alias => {
+      if (alias && !baseline.has(alias)) next.delete(alias);
+    });
+    return next;
+  }
+
+  function createConfigMutationController(deps = {}) {
+    let tail = Promise.resolve();
+    let generation = 0;
+    let committed = deps.getCommitted ? deps.getCommitted() : null;
+    let pendingLocalIntent = null;
+
+    function sameConfig(a, b) {
+      if (!a || !b) return false;
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      return [...keys].every(key => a[key] === b[key]);
+    }
+
+    function save(nextConfig, options = {}) {
+      const requestId = ++generation;
+      pendingLocalIntent = nextConfig;
+      const operation = tail.then(async () => {
+        const previous = committed || (deps.getCommitted ? deps.getCommitted() : null);
+        try {
+          await deps.persist(nextConfig);
+        } catch (error) {
+          if (requestId === generation) {
+            if (deps.apply && previous) deps.apply(previous);
+          }
+          throw error;
+        }
+
+        committed = nextConfig;
+        if (deps.setCommitted) deps.setCommitted(nextConfig);
+        if (requestId === generation && deps.apply) deps.apply(nextConfig);
+
+        if (deps.notify && options.notifyBackground !== false) {
+          let response;
+          try {
+            response = await deps.notify(nextConfig, options);
+          } catch (error) {
+            throw Object.assign(error, { committed: true });
+          }
+          if (response?.ok === false) {
+            throw Object.assign(new Error(response.error || 'configChanged failed'), { committed: true });
+          }
+        }
+        return { ok: true, config: nextConfig };
+      });
+      tail = operation.catch(() => {});
+      return operation;
+    }
+
+    return {
+      save,
+      observeCommitted(config) {
+        if (pendingLocalIntent && !sameConfig(config, pendingLocalIntent)) return false;
+        if (pendingLocalIntent && sameConfig(config, pendingLocalIntent)) pendingLocalIntent = null;
+        committed = config;
+        if (deps.setCommitted) deps.setCommitted(config);
+        return true;
+      },
+      getCommitted: () => committed
+    };
   }
 
   function captureScrollAnchor(scroller, itemSelector = '.item') {
@@ -432,6 +573,8 @@
 
   return {
     createMutationQueue,
+    createPopupStatusController,
+    createSettingsPanelController,
     createFeedModeSwitchController,
     createLatestWinsLoadController,
     createPopupInitializationController,
@@ -445,6 +588,9 @@
     runMarkAllReadMutation,
     createSessionWatchPinTracker,
     getSafeHttpsUrl,
-    openHttpsUrl
+    openHttpsUrl,
+    runOpenItemMutation,
+    removeOptimisticReadAliases,
+    createConfigMutationController
   };
 });
