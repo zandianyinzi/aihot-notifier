@@ -24,7 +24,7 @@ async function fetchWithTimeout(url) {
 }
 
 async function fetchItems(mode) {
-  const url = `https://aihot.virxact.com/api/v1/items?mode=${mode}&window=7d&limit=50`;
+  const url = `https://aihot.news/api/v1/items?mode=${mode}&window=7d&limit=50`;
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`API ${mode} returned ${res.status}`);
   const json = await res.json();
@@ -37,7 +37,7 @@ async function fetchItemsPaginated(mode, maxPages = 3) {
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
   for (let page = 0; page < maxPages; page++) {
-    let url = `https://aihot.virxact.com/api/v1/items?mode=${mode}&window=7d&limit=50`;
+    let url = `https://aihot.news/api/v1/items?mode=${mode}&window=7d&limit=50`;
     if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
     const res = await fetchWithTimeout(url);
