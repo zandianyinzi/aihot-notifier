@@ -149,6 +149,9 @@ function boundCanonicalStorageState(state = {}) {
   }
   if (getManagedStorageBytes(bounded) > MAX_MANAGED_STORAGE_BYTES) {
     bounded.allFeedContinuation = null;
+    bounded.watchNotifyState = {};
+    bounded.lastItems = [];
+    bounded.readIds = [];
   }
   return bounded;
 }
