@@ -26,11 +26,11 @@
 
 **Interfaces:** Preserve `fetchItems({ mode, cutoff, maxPages, baseUrl })` return metadata. Add no public API. Automatic polling may reuse `getActiveAllContinuationStatus`, `continueAllFeed`, and `commitAllContinuationMutation`.
 
-- [ ] **Step 1: Write failing tests** for an unordered page where a later cursor still contains an in-window item, and for automatic `all` polling that persists a continuation after its page budget.
-- [ ] **Step 2: Run `node test-background.js` and verify the new tests fail for the early cutoff and missing continuation behavior.
-- [ ] **Step 3: Implement the smallest change: disable cutoff short-circuiting by default, mark cutoff termination incomplete, and make automatic `all` polling persist and schedule a fenced continuation.
-- [ ] **Step 4: Run `node test-background.js` and the focused existing pagination tests.
-- [ ] **Step 5: Commit with `fix: preserve complete all-feed pagination`.
+- [x] **Step 1: Write failing tests** for an unordered page where a later cursor still contains an in-window item, and for automatic `all` polling that persists a continuation after its page budget.
+- [x] **Step 2: Run `node test-background.js` and verify the new tests fail for the early cutoff and missing continuation behavior.
+- [x] **Step 3: Implement the smallest change: disable cutoff short-circuiting by default, mark cutoff termination incomplete, and make automatic `all` polling persist and schedule a fenced continuation.
+- [x] **Step 4: Run `node test-background.js` and the focused existing pagination tests.
+- [x] **Step 5: Commit with `fix: preserve complete all-feed pagination`.
 
 ### Task 2: Request Deadlines and Timestamp Validation
 
@@ -149,3 +149,4 @@ const encodedBytes = new TextEncoder().encode(JSON.stringify(managedData)).lengt
 
 The task briefs in the ignored work ledger provide exact execution details;
 this plan and the design are the durable review record. Reports are local only.
+
