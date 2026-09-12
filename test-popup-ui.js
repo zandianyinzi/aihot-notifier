@@ -663,6 +663,7 @@ assert(/createConfigMutationController/.test(popupJs) && /await\s+configMutation
 assert(/getSafeHttpsUrl\(value\)[\s\S]*?parsed\.protocol\s*===\s*'https:'/s.test(popupReliabilityJs), '条目打开拒绝非 HTTPS URL');
 assert(/await\s+createTab\(\{\s*url\s*}\);[\s\S]*?await\s+afterOpen\(url\);/s.test(popupReliabilityJs), 'openHttpsUrl 在创建标签页后执行 afterOpen 回调');
 assert(/id="popupStatus"[^>]*role="status"[^>]*aria-live="polite"/.test(popupHtml), '失败状态使用 aria-live status 区域提示');
+assert(popupHtml.indexOf('id="historyList"') < popupHtml.indexOf('id="popupStatus"'), '状态行位于列表底部，不插入菜单与首条内容之间');
 assert(/function\s+showPopupStatus\(message(?:,\s*options\s*=\s*\{\})?\)/.test(popupJs), 'popup 可向 status 区域发布失败提示');
 const popupStatusRule = popupHtml.match(/\.popup-status\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(popupStatusRule, 'height', '28px'), '状态行固定 28px 高度，列表布局保持稳定');
