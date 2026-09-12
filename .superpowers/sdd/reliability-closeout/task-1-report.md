@@ -30,3 +30,7 @@ Complete. The implementation preserves pagination completeness for unordered API
 ## Commit Hash
 
 `b65bd41` (`fix: preserve complete all-feed pagination`).
+
+## Review Finding
+
+Review round 1 found that a resumed continuation still treated its own page budget as terminal and could drop the next cursor after another 19 pages. The implementer is revising the implementation and adding a resumed-batch regression so the continuation remains active whenever `hasMore` and `nextCursor` remain true.
