@@ -120,14 +120,16 @@ function getManagedStorageBytes(state) {
 }
 
 function boundCanonicalStorageState(state = {}) {
+  const originalHistoryLength = Array.isArray(state.history) ? state.history.length : 0;
   let history = (state.history || [])
     .map(item => truncatePersistedValue(item))
     .sort((a, b) => getItemTime(b) - getItemTime(a))
     .slice(0, MAX_HISTORY_ENTRIES);
   const buildState = () => {
     const retainedAliases = new Set(history.flatMap(item => getItemAliases(item)));
+    const pruneOrphanReadIds = originalHistoryLength > history.length;
     const readIds = [...new Set((state.readIds || [])
-      .filter(value => typeof value === 'string' && retainedAliases.has(value)))].slice(-100);
+      .filter(value => typeof value === 'string' && (!pruneOrphanReadIds || retainedAliases.has(value))))].slice(-100);
     const watchNotifyState = state.retainUnmatchedWatchState
       ? { ...(state.watchNotifyState || {}) }
       : Object.fromEntries(Object.entries(state.watchNotifyState || {})
