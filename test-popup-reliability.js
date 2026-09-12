@@ -77,6 +77,23 @@ function testSettingsPanelControllerFocusAndInertState() {
   assert.deepStrictEqual(focused, ['summary', 'trigger'], 'closing settings returns focus to the trigger');
 }
 
+function testSettingsPanelControllerDropsDeferredFocusAfterCloseReopen() {
+  const callbacks = [];
+  const focused = [];
+  const panel = { classList: { toggle() {} }, toggleAttribute() {} };
+  const trigger = { setAttribute() {}, focus: () => focused.push('trigger') };
+  const title = { focus: () => focused.push('title') };
+  const groups = [{ open: false, querySelector: () => title }];
+  const controller = createSettingsPanelController({ panel, trigger, groups, requestFrame: cb => callbacks.push(cb) });
+  controller.setOpen(true);
+  controller.setOpen(false);
+  controller.setOpen(true);
+  callbacks[0]();
+  assert.deepStrictEqual(focused, ['trigger'], 'deferred focus from a closed settings panel is discarded');
+  callbacks[1]();
+  assert.deepStrictEqual(focused, ['trigger', 'title'], 'the latest reopen receives focus once');
+}
+
 function createDeferred() {
   let resolve;
   let reject;
@@ -596,6 +613,30 @@ async function testConfigMutationControllerLatestSafeRollback() {
   assert.deepStrictEqual(committed, { theme: 'chrome-dark' }, 'configChanged failure does not roll back a durable config commit');
 }
 
+async function testConfigMutationControllerFencesStaleInitialSnapshot() {
+  let committed = { theme: 'dark' };
+  const applied = [];
+  let release;
+  const persistGate = new Promise(resolve => { release = resolve; });
+  const controller = createConfigMutationController({
+    getCommitted: () => committed,
+    setCommitted: value => { committed = value; },
+    apply: value => applied.push({ ...value }),
+    persist: async () => persistGate
+  });
+  const save = controller.save({ theme: 'light' });
+  controller.observeCommitted({ theme: 'dark' });
+  assert.deepStrictEqual(committed, { theme: 'dark' }, 'stale initialization snapshot does not replace the committed baseline');
+  release();
+  await save;
+  assert.deepStrictEqual(committed, { theme: 'light' }, 'local save commits the requested config');
+  controller.observeCommitted({ theme: 'dark' });
+  assert.deepStrictEqual(committed, { theme: 'light' }, 'late stale snapshot remains fenced after save completes');
+  controller.observeCommitted({ theme: 'light' });
+  assert.deepStrictEqual(committed, { theme: 'light' }, 'matching committed snapshot clears the fence');
+  assert.deepStrictEqual(applied.at(-1), { theme: 'light' });
+}
+
 async function testPopupHistoryRenderOwnership() {
   const scheduled = [];
   const handleStorageChange = createPopupStorageChangeHandler({
@@ -862,6 +903,7 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
 (async () => {
   testPopupStatusControllerKeepsErrorsVisible();
   testSettingsPanelControllerFocusAndInertState();
+  testSettingsPanelControllerDropsDeferredFocusAfterCloseReopen();
   await testMutationQueue();
   await testFeedModeOptimisticProjectionAndLatestWins();
   await testStaleSwitchCannotInvalidateNewOptimisticLoad();
@@ -878,6 +920,7 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   await testOpenItemMutationRollsBackOnlyTabFailure();
   testConcurrentOpenRollbackPreservesNewerOptimisticRead();
   await testConfigMutationControllerLatestSafeRollback();
+  await testConfigMutationControllerFencesStaleInitialSnapshot();
   await testPopupHistoryRenderOwnership();
   await testActiveContinuationDefersIntermediateHistoryRenders();
   await testContinuationStatusExpiryTimer();

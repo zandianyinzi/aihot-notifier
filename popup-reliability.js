@@ -118,9 +118,17 @@
     let tail = Promise.resolve();
     let generation = 0;
     let committed = deps.getCommitted ? deps.getCommitted() : null;
+    let pendingLocalIntent = null;
+
+    function sameConfig(a, b) {
+      if (!a || !b) return false;
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      return [...keys].every(key => a[key] === b[key]);
+    }
 
     function save(nextConfig, options = {}) {
       const requestId = ++generation;
+      pendingLocalIntent = nextConfig;
       const operation = tail.then(async () => {
         const previous = committed || (deps.getCommitted ? deps.getCommitted() : null);
         try {
@@ -156,8 +164,11 @@
     return {
       save,
       observeCommitted(config) {
+        if (pendingLocalIntent && !sameConfig(config, pendingLocalIntent)) return false;
+        if (pendingLocalIntent && sameConfig(config, pendingLocalIntent)) pendingLocalIntent = null;
         committed = config;
         if (deps.setCommitted) deps.setCommitted(config);
+        return true;
       },
       getCommitted: () => committed
     };

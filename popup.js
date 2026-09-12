@@ -1229,8 +1229,8 @@ const popupInitializationController = createPopupInitializationController({
   },
   applyStorage: data => {
     feedModeSwitchController.observeCommittedMode(data.feedMode);
-    applyConfig(data);
-    configMutationController.observeCommitted(normalizeConfigSnapshot(data));
+    const acceptedConfig = configMutationController.observeCommitted(normalizeConfigSnapshot(data));
+    if (acceptedConfig !== false) applyConfig(data);
     if (data.theme && data.theme !== normalizeTheme(data.theme)) {
       chrome.storage.local.set({ theme: 'dark' });
     }

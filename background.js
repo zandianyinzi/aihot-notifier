@@ -113,7 +113,8 @@ function getManagedStorageBytes(state) {
     history: state.history || [],
     readIds: state.readIds || [],
     watchNotifyState: state.watchNotifyState || {},
-    lastItems: state.lastItems || []
+    lastItems: state.lastItems || [],
+    allFeedContinuation: state.allFeedContinuation || null
   });
   return new TextEncoder().encode(json).length;
 }
@@ -123,15 +124,19 @@ function boundCanonicalStorageState(state = {}) {
     .map(item => truncatePersistedValue(item))
     .sort((a, b) => getItemTime(b) - getItemTime(a))
     .slice(0, MAX_HISTORY_ENTRIES);
-  const readIds = [...new Set((state.readIds || []).filter(value => typeof value === 'string'))].slice(-100);
   const buildState = () => {
     const retainedAliases = new Set(history.flatMap(item => getItemAliases(item)));
+    const readIds = [...new Set((state.readIds || [])
+      .filter(value => typeof value === 'string' && retainedAliases.has(value)))].slice(-100);
     const watchNotifyState = state.retainUnmatchedWatchState
       ? { ...(state.watchNotifyState || {}) }
       : Object.fromEntries(Object.entries(state.watchNotifyState || {})
         .filter(([key]) => retainedAliases.has(key)));
     const lastItems = (state.lastItems || []).filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias))).slice(0, 5);
-    return { history, readIds, watchNotifyState, lastItems };
+    const allFeedContinuation = state.allFeedContinuation == null
+      ? state.allFeedContinuation
+      : truncatePersistedValue(state.allFeedContinuation, 'allFeedContinuation');
+    return { history, readIds, watchNotifyState, lastItems, allFeedContinuation };
   };
   let bounded = buildState();
   while (getManagedStorageBytes(bounded) > MAX_MANAGED_STORAGE_BYTES && history.length > 0) {
@@ -139,6 +144,9 @@ function boundCanonicalStorageState(state = {}) {
     const removeCount = Math.max(1, Math.ceil(history.length * (1 - (MAX_MANAGED_STORAGE_BYTES / bytes))));
     history.splice(Math.max(0, history.length - removeCount), removeCount);
     bounded = buildState();
+  }
+  if (getManagedStorageBytes(bounded) > MAX_MANAGED_STORAGE_BYTES) {
+    bounded.allFeedContinuation = null;
   }
   return bounded;
 }
@@ -154,6 +162,7 @@ async function persistCanonicalState(updates = {}) {
     history: bounded.history,
     readIds: bounded.readIds,
     watchNotifyState: bounded.watchNotifyState,
+    ...(Object.prototype.hasOwnProperty.call(updates, 'allFeedContinuation') ? { allFeedContinuation: bounded.allFeedContinuation } : {}),
     ...(Object.prototype.hasOwnProperty.call(updates, 'lastItems') ? { lastItems: bounded.lastItems } : {})
   };
   try {
@@ -170,6 +179,7 @@ async function persistCanonicalState(updates = {}) {
       history: retryState.history,
       readIds: retryState.readIds,
       watchNotifyState: retryState.watchNotifyState,
+      ...(Object.prototype.hasOwnProperty.call(updates, 'allFeedContinuation') ? { allFeedContinuation: retryState.allFeedContinuation } : {}),
       ...(Object.prototype.hasOwnProperty.call(updates, 'lastItems') ? { lastItems: retryState.lastItems } : {})
     };
     await chrome.storage.local.set(retryPayload);
@@ -1297,7 +1307,12 @@ async function checkWatchRemindersInternal(limit = MAX_WATCH_NOTIFICATIONS_PER_C
   const nextWatchNotifyState = { ...watchNotifyState };
   const notified = await sendWatchNotifications(watchItems, nextWatchNotifyState, now, limit);
   if (notified.length > 0) {
-    await chrome.storage.local.set({ watchNotifyState: nextWatchNotifyState, lastItems: notified.slice(0, 5) });
+    await persistCanonicalState({
+      history,
+      readIds: (await chrome.storage.local.get('readIds')).readIds || [],
+      watchNotifyState: nextWatchNotifyState,
+      lastItems: notified.slice(0, 5)
+    });
   }
   return notified.length;
 }
