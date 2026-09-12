@@ -28,6 +28,11 @@ const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 const CANONICAL_HISTORY_VERSION = 1;
+const MAX_HISTORY_ENTRIES = 2500;
+const MAX_MANAGED_STORAGE_BYTES = 6 * 1024 * 1024;
+const MAX_TITLE_LENGTH = 500;
+const MAX_SOURCE_LENGTH = 300;
+const MAX_SUMMARY_LENGTH = 3000;
 // Gated off until the API guarantees a consistent, un-paginated selected snapshot.
 // While false, isCompleteSelectedSnapshot() always returns false in production, so the
 // completeSelectedSnapshot de-selection branch in upsertCanonicalItems is unreachable
@@ -86,6 +91,90 @@ function ensureCanonicalHistoryMigration() {
 
 function runMigratedStateMutation(task) {
   return ensureCanonicalHistoryMigration().then(() => runStateMutation(task));
+}
+
+function truncatePersistedValue(value, key = '') {
+  if (typeof value === 'string') {
+    const limit = key === 'title' ? MAX_TITLE_LENGTH
+      : key === 'source' ? MAX_SOURCE_LENGTH
+      : key === 'summary' ? MAX_SUMMARY_LENGTH
+      : 4096;
+    return value.slice(0, limit);
+  }
+  if (Array.isArray(value)) return value.map(entry => truncatePersistedValue(entry, key));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, truncatePersistedValue(childValue, childKey)]));
+  }
+  return value;
+}
+
+function getManagedStorageBytes(state) {
+  const json = JSON.stringify({
+    history: state.history || [],
+    readIds: state.readIds || [],
+    watchNotifyState: state.watchNotifyState || {},
+    lastItems: state.lastItems || []
+  });
+  return new TextEncoder().encode(json).length;
+}
+
+function boundCanonicalStorageState(state = {}) {
+  let history = (state.history || [])
+    .map(item => truncatePersistedValue(item))
+    .sort((a, b) => getItemTime(b) - getItemTime(a))
+    .slice(0, MAX_HISTORY_ENTRIES);
+  const readIds = [...new Set((state.readIds || []).filter(value => typeof value === 'string'))].slice(-100);
+  const buildState = () => {
+    const retainedAliases = new Set(history.flatMap(item => getItemAliases(item)));
+    const watchNotifyState = state.retainUnmatchedWatchState
+      ? { ...(state.watchNotifyState || {}) }
+      : Object.fromEntries(Object.entries(state.watchNotifyState || {})
+        .filter(([key]) => retainedAliases.has(key)));
+    const lastItems = (state.lastItems || []).filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias))).slice(0, 5);
+    return { history, readIds, watchNotifyState, lastItems };
+  };
+  let bounded = buildState();
+  while (getManagedStorageBytes(bounded) > MAX_MANAGED_STORAGE_BYTES && history.length > 0) {
+    const bytes = getManagedStorageBytes(bounded);
+    const removeCount = Math.max(1, Math.ceil(history.length * (1 - (MAX_MANAGED_STORAGE_BYTES / bytes))));
+    history.splice(Math.max(0, history.length - removeCount), removeCount);
+    bounded = buildState();
+  }
+  return bounded;
+}
+
+function isQuotaStorageError(error) {
+  return /quota|QUOTA_BYTES|bytes/i.test(String(error?.message || error || ''));
+}
+
+async function persistCanonicalState(updates = {}) {
+  const bounded = boundCanonicalStorageState(updates);
+  const payload = {
+    ...updates,
+    history: bounded.history,
+    readIds: bounded.readIds,
+    watchNotifyState: bounded.watchNotifyState,
+    ...(Object.prototype.hasOwnProperty.call(updates, 'lastItems') ? { lastItems: bounded.lastItems } : {})
+  };
+  try {
+    await chrome.storage.local.set(payload);
+    return payload;
+  } catch (error) {
+    if (!isQuotaStorageError(error) || bounded.history.length <= 1) throw error;
+    const retryState = boundCanonicalStorageState({
+      ...bounded,
+      history: bounded.history.slice(0, Math.max(1, Math.floor(bounded.history.length / 2)))
+    });
+    const retryPayload = {
+      ...updates,
+      history: retryState.history,
+      readIds: retryState.readIds,
+      watchNotifyState: retryState.watchNotifyState,
+      ...(Object.prototype.hasOwnProperty.call(updates, 'lastItems') ? { lastItems: retryState.lastItems } : {})
+    };
+    await chrome.storage.local.set(retryPayload);
+    return retryPayload;
+  }
 }
 
 async function getConfig() {
@@ -891,14 +980,23 @@ function upsertCanonicalItems(state, items, options = {}) {
   const retainedWatchNotifyState = options.retainUnmatchedWatchState
     ? watchNotifyState
     : pruneWatchNotifyState(retainedHistory, watchNotifyState);
-
-  return {
+  const bounded = boundCanonicalStorageState({
     history: retainedHistory,
     readIds: Array.from(readIds),
     watchNotifyState: retainedWatchNotifyState,
-    inserted,
-    updated,
-    newlyMatched
+    lastItems: inserted,
+    retainUnmatchedWatchState: options.retainUnmatchedWatchState === true
+  });
+  const retainedAliases = new Set(bounded.history.flatMap(item => getItemAliases(item)));
+  const retainedInserted = inserted.filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias)));
+
+  return {
+    history: bounded.history,
+    readIds: bounded.readIds,
+    watchNotifyState: bounded.watchNotifyState,
+    inserted: retainedInserted,
+    updated: updated.filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias))),
+    newlyMatched: newlyMatched.filter(item => getItemAliases(item).some(alias => retainedAliases.has(alias)))
   };
 }
 
@@ -1124,7 +1222,7 @@ async function persistFetchedItems(items, options = {}) {
     historyDays,
     retainUnmatchedWatchState
   });
-  await chrome.storage.local.set({
+  await persistCanonicalState({
     history: persisted.history,
     readIds: persisted.readIds,
     watchNotifyState: persisted.watchNotifyState,
@@ -1165,7 +1263,11 @@ async function persistFetchedItems(items, options = {}) {
   if (shouldNotify || options.updateLastItems !== false) {
     const updates = { watchNotifyState: persistedWatchNotifyState };
     if (options.updateLastItems !== false) updates.lastItems = [...watchItems, ...normalItems].slice(0, 5);
-    await chrome.storage.local.set(updates);
+    await persistCanonicalState({
+      history: persisted.history,
+      readIds: persisted.readIds,
+      ...updates
+    });
   }
 
   if (options.updateBadge !== false) await runPostCommitSideEffect('persist badge update', updateBadge);
@@ -1248,7 +1350,7 @@ async function manualPollInternal() {
       retainUnmatchedWatchState: mode === 'all' && allFeedContinuation.active === true
     });
     const merged = persisted.history;
-    await chrome.storage.local.set({
+    await persistCanonicalState({
       history: persisted.history,
       readIds: persisted.readIds,
       watchNotifyState: persisted.watchNotifyState,
@@ -1600,7 +1702,7 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
         ? { generation: nextGeneration, continuationId, cursor: allItems.nextCursor, fingerprintProbe }
         : null;
       if (generation !== sourceSwitchGeneration) return { stale: true };
-      await chrome.storage.local.set({
+      await persistCanonicalState({
         history: canonical.history,
         readIds: canonical.readIds,
         lastItems: [...watchItems, ...normalItems].slice(0, 5),
@@ -1808,6 +1910,8 @@ if (typeof module === 'object' && module.exports) {
   module.exports = {
     isCompleteSelectedSnapshot,
     migrateCanonicalHistoryState,
+    boundCanonicalStorageState,
+    persistCanonicalState,
     resetAndPollForTest(feedMode, capabilities = {}) {
       const generation = ++sourceSwitchGeneration;
       return ensureCanonicalHistoryMigration()

@@ -302,6 +302,39 @@ async function runTests() {
   assert(backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 0, truncated: false }, 'selected', true) === true, '能力开启时仅正常完整 selected 快照允许按缺席降级');
   assert(backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 1, truncated: false }, 'selected', true) === false && backgroundApi.isCompleteSelectedSnapshot({ termination: 'page-bound', skippedItems: 0, truncated: true }, 'selected', true) === false && backgroundApi.isCompleteSelectedSnapshot({ termination: 'complete', skippedItems: 0, truncated: false }, 'selected', false) === false, '无效条目、截断或生产能力关闭时禁止 selected 缺席降级');
 
+  const oversizedHistory = Array.from({ length: 2600 }, (_, index) => ({
+    id: `bound-${index}`,
+    title: '标题'.repeat(400),
+    source: '来源'.repeat(200),
+    summary: '摘要'.repeat(2000),
+    time: new Date(Date.now() - index * 1000).toISOString(),
+    discoveredAt: new Date(Date.now() - index * 1000).toISOString()
+  }));
+  const bounded = backgroundApi.boundCanonicalStorageState({
+    history: oversizedHistory,
+    readIds: ['bound-0', 'orphan-read'],
+    watchNotifyState: { 'bound-0': { viewedAt: '' }, orphan: { viewedAt: '' } },
+    lastItems: oversizedHistory.slice(0, 10)
+  });
+  assert(bounded.history.length <= 2500 && bounded.history[0].id === 'bound-0', 'canonical history applies deterministic newest-first count cap');
+  assert(bounded.history.every(item => item.title.length <= 500 && item.source.length <= 300 && item.summary.length <= 3000), 'canonical history caps persisted text fields');
+  assert(!bounded.watchNotifyState.orphan && bounded.watchNotifyState['bound-0'], 'trimming removes orphan watch state while retaining survivor state');
+  assert(new TextEncoder().encode(JSON.stringify({ history: bounded.history, readIds: bounded.readIds, watchNotifyState: bounded.watchNotifyState, lastItems: bounded.lastItems })).length <= 6 * 1024 * 1024, 'canonical managed state stays within UTF-8 storage budget');
+  let quotaAttempts = 0;
+  storageSetImpl = values => {
+    quotaAttempts++;
+    if (quotaAttempts === 1) return Promise.reject(new Error('QUOTA_BYTES exceeded'));
+    Object.assign(storageData, values);
+    return Promise.resolve();
+  };
+  const quotaRecovered = await backgroundApi.persistCanonicalState({ history: oversizedHistory, readIds: [], watchNotifyState: {}, lastItems: [] });
+  assert(quotaAttempts === 2 && quotaRecovered.history.length < 2500, 'quota rejection retries once with a smaller bounded history');
+  const beforeQuotaFailure = JSON.stringify(storageData.history);
+  storageSetImpl = () => Promise.reject(new Error('QUOTA_BYTES exceeded'));
+  await backgroundApi.persistCanonicalState({ history: oversizedHistory, readIds: [], watchNotifyState: {}, lastItems: [] }).catch(() => {});
+  assert(JSON.stringify(storageData.history) === beforeQuotaFailure, 'repeated quota rejection preserves previously persisted history');
+  storageSetImpl = null;
+
   resetState({ canonicalHistoryVersion: 1, readIds: [] });
   const opened = await sendMessageWithTimeout({ type: 'openItem', url: 'https://example.com/open-item', ids: ['open-item'] });
   assert(opened.ok === true && opened.opened === true && opened.readCommitted === true && openedTabs.includes('https://example.com/open-item') && storageData.readIds.includes('open-item'), 'openItem creates HTTPS tab before durable read commit');
