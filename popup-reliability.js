@@ -12,6 +12,56 @@
     };
   }
 
+  function createPopupStatusController(render) {
+    let errorMessage = '';
+    let continuationMessage = '';
+
+    function publish() {
+      if (errorMessage) {
+        render(errorMessage, 'error');
+      } else {
+        render(continuationMessage, continuationMessage ? 'continuation' : '');
+      }
+    }
+
+    function show(message, options = {}) {
+      if (options.source === 'continuation') {
+        continuationMessage = String(message || '');
+      } else {
+        errorMessage = String(message || '');
+      }
+      publish();
+    }
+
+    return { show };
+  }
+
+  function createSettingsPanelController(deps) {
+    const requestFrame = deps.requestFrame || (callback => requestAnimationFrame(callback));
+    const panel = deps.panel;
+    const trigger = deps.trigger;
+    const groups = deps.groups || [];
+
+    function collapseGroups() {
+      groups.forEach(group => { group.open = false; });
+    }
+
+    function setOpen(isOpen, options = {}) {
+      const shouldFocus = options.focus !== false;
+      panel.classList.toggle('open', isOpen);
+      trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      panel.toggleAttribute('inert', !isOpen);
+      if (isOpen) {
+        collapseGroups();
+        if (shouldFocus) requestFrame(() => groups[0]?.querySelector('.setting-group-title')?.focus());
+      } else if (shouldFocus) {
+        trigger.focus();
+      }
+    }
+
+    return { setOpen, collapseGroups };
+  }
+
   function getSafeHttpsUrl(value) {
     try {
       const parsed = new URL(value);
@@ -432,6 +482,8 @@
 
   return {
     createMutationQueue,
+    createPopupStatusController,
+    createSettingsPanelController,
     createFeedModeSwitchController,
     createLatestWinsLoadController,
     createPopupInitializationController,

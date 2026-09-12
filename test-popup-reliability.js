@@ -6,6 +6,8 @@
 const assert = require('assert');
 const {
   createMutationQueue,
+  createPopupStatusController,
+  createSettingsPanelController,
   createFeedModeSwitchController,
   createLatestWinsLoadController,
   createPopupInitializationController,
@@ -27,6 +29,49 @@ async function waitFor(check) {
     await Promise.resolve();
   }
   throw new Error('Timed out waiting for test condition');
+}
+
+function testPopupStatusControllerKeepsErrorsVisible() {
+  const states = [];
+  const status = createPopupStatusController((message, kind) => states.push({ message, kind }));
+  status.show('正在补充更多内容…', { source: 'continuation' });
+  status.show('刷新失败，请重试。');
+  status.show('', { source: 'continuation' });
+  assert.deepStrictEqual(states.at(-1), { message: '刷新失败，请重试。', kind: 'error' }, '续拉结束不会覆盖较新的错误提示');
+  status.show('');
+  assert.deepStrictEqual(states.at(-1), { message: '', kind: '' }, '成功状态可清除旧错误');
+}
+
+function testSettingsPanelControllerFocusAndInertState() {
+  const classes = new Set();
+  const focused = [];
+  const panel = {
+    classList: {
+      toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }
+    },
+    toggleAttribute(name, enabled) { this[name] = enabled; }
+  };
+  const trigger = {
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = value; },
+    focus() { focused.push('trigger'); }
+  };
+  const title = { focus() { focused.push('summary'); } };
+  const groups = [{ open: true, querySelector: selector => selector === '.setting-group-title' ? title : null }];
+  const controller = createSettingsPanelController({ panel, trigger, groups, requestFrame: callback => callback() });
+
+  controller.setOpen(true);
+  assert(classes.has('open'), 'opening settings adds the open state');
+  assert.strictEqual(panel.inert, false, 'opening settings removes inert');
+  assert.strictEqual(trigger.attrs['aria-expanded'], 'true', 'opening settings exposes expanded state');
+  assert.strictEqual(groups[0].open, false, 'opening settings collapses groups');
+  assert.deepStrictEqual(focused, ['summary'], 'opening settings focuses the first summary');
+
+  controller.setOpen(false);
+  assert(!classes.has('open'), 'closing settings removes the open state');
+  assert.strictEqual(panel.inert, true, 'closing settings restores inert');
+  assert.strictEqual(trigger.attrs['aria-expanded'], 'false', 'closing settings exposes collapsed state');
+  assert.deepStrictEqual(focused, ['summary', 'trigger'], 'closing settings returns focus to the trigger');
 }
 
 function createDeferred() {
@@ -762,6 +807,8 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
 }
 
 (async () => {
+  testPopupStatusControllerKeepsErrorsVisible();
+  testSettingsPanelControllerFocusAndInertState();
   await testMutationQueue();
   await testFeedModeOptimisticProjectionAndLatestWins();
   await testStaleSwitchCannotInvalidateNewOptimisticLoad();

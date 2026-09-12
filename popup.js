@@ -72,12 +72,19 @@ let scrollSaveTimer = 0;
 let feedModeSwitchController = null;
 const enqueuePopupMutation = popupReliability.createMutationQueue();
 
-function showPopupStatus(message) {
-  if (popupStatusEl) popupStatusEl.textContent = message;
+const popupStatusController = popupReliability.createPopupStatusController((message, kind) => {
+  if (!popupStatusEl) return;
+  popupStatusEl.textContent = message;
+  popupStatusEl.classList.toggle('is-error', kind === 'error');
+  popupStatusEl.classList.toggle('is-continuation', kind === 'continuation');
+});
+
+function showPopupStatus(message, options = {}) {
+  popupStatusController.show(message, options);
 }
 
 const allFeedContinuationStatusController = createAllFeedContinuationStatusController({
-  showStatus: showPopupStatus
+  showStatus: (message, options) => showPopupStatus(message, { ...options, source: 'continuation' })
 });
 
 function clearButtonFeedback(button) {
@@ -329,10 +336,10 @@ function renderWatchRules(rules) {
           <span class="watch-rule-author">${escapeHtml(rule.author || '任意作者')}</span>
           <div class="watch-rule-actions">
             <button class="btn-mini watch-rule-btn" data-action="toggle">${rule.enabled ? '停用' : '启用'}</button>
-            <button class="btn-mini watch-rule-btn" data-action="delete" title="删除">×</button>
+            <button class="btn-mini watch-rule-btn" data-action="delete" title="删除" aria-label="删除特关规则">×</button>
           </div>
         </div>
-        ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag"><span class="watch-keyword-text">${escapeHtml(keyword)}</span><button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词">×</button></span>`).join('')}</div>` : ''}
+        ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag"><span class="watch-keyword-text">${escapeHtml(keyword)}</span><button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词" aria-label="删除关键词 ${escapeHtml(keyword)}">×</button></span>`).join('')}</div>` : ''}
       </div>
     </div>
   `).join('');
@@ -794,10 +801,18 @@ async function saveConfig(options = {}) {
   if (openPositionMode === 'unread') clearScrollPosition();
   writePopupCache(config);
   await chrome.storage.local.set(config);
+  showPopupStatus('');
   if (shouldNotifyBackground) {
     chrome.runtime.sendMessage({ type: 'configChanged' });
   }
   loadHistory(undefined, { immediate: true }).catch(() => showPopupStatus('内容加载失败，请重试。'));
+}
+
+function saveConfigWithStatus(options = {}) {
+  return saveConfig(options).catch(error => {
+    showPopupStatus('设置保存失败，请重试。');
+    throw error;
+  });
 }
 
 const POPUP_HISTORY_STORAGE_KEYS = [
@@ -836,6 +851,7 @@ const historyLoadController = createLatestWinsLoadController({
       skipUnchanged: !context.forceRender,
       scrollAnchor: context.scrollAnchor
     });
+    showPopupStatus('');
     allFeedContinuationStatusController.update(data.allFeedContinuation);
     cacheLoadedPopupData(data);
   },
@@ -963,15 +979,21 @@ markAllReadBtn.addEventListener('click', async () => {
 });
 
 const settingGroups = Array.from(settingsPanel.querySelectorAll('.setting-group'));
+const settingsPanelController = popupReliability.createSettingsPanelController({
+  panel: settingsPanel,
+  trigger: settingsBtn,
+  groups: settingGroups
+});
 function collapseSettingsGroups() {
-  settingGroups.forEach(group => {
-    group.open = false;
-  });
+  settingsPanelController.collapseGroups();
+}
+
+function setSettingsOpen(isOpen, { focus = true } = {}) {
+  settingsPanelController.setOpen(isOpen, { focus });
 }
 
 settingsBtn.addEventListener('click', () => {
-  settingsPanel.classList.toggle('open');
-  if (settingsPanel.classList.contains('open')) collapseSettingsGroups();
+  setSettingsOpen(!settingsPanel.classList.contains('open'));
   requestAnimationFrame(updateSettingsScrollHint);
   requestAnimationFrame(updateHistoryScrollControls);
 });
@@ -1056,8 +1078,8 @@ if (watchRulesList) {
   });
 }
 
-enabledEl.addEventListener('change', () => saveConfig());
-intervalEl.addEventListener('change', () => saveConfig());
+enabledEl.addEventListener('change', () => saveConfigWithStatus());
+intervalEl.addEventListener('change', () => saveConfigWithStatus());
 feedModeSwitchController = createFeedModeSwitchController({
   initialMode: normalizeFeedMode(readPopupCache()?.feedMode || feedModeEl.value),
   normalizeFeedMode,
@@ -1093,13 +1115,13 @@ feedModeEl.addEventListener('change', async () => {
   pollBtn.classList.add('is-loading');
   await feedModeSwitchController.switchFeedMode(nextFeedMode, feedbackStartedAt);
 });
-themeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
-fontFamilyEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
-fontSizeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
-openPositionModeEl.addEventListener('change', () => saveConfig({ notifyBackground: false }));
+themeEl.addEventListener('change', () => saveConfigWithStatus({ notifyBackground: false }));
+fontFamilyEl.addEventListener('change', () => saveConfigWithStatus({ notifyBackground: false }));
+fontSizeEl.addEventListener('change', () => saveConfigWithStatus({ notifyBackground: false }));
+openPositionModeEl.addEventListener('change', () => saveConfigWithStatus({ notifyBackground: false }));
 historyDaysEl.addEventListener('change', () => {
   clearScrollPosition();
-  saveConfig({ notifyBackground: false });
+  saveConfigWithStatus({ notifyBackground: false });
 });
 
 historyList.addEventListener('scroll', () => {
@@ -1128,6 +1150,7 @@ pollBtn.addEventListener('click', async () => {
     showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
   } catch (e) {
     showButtonResult(pollBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
+    showPopupStatus('刷新失败，请重试。');
   }
   pollBtn.disabled = false;
 });

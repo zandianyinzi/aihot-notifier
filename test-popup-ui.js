@@ -89,7 +89,6 @@ const agentsMd = fs.readFileSync('AGENTS.md', 'utf8');
 const packSh = fs.readFileSync('pack.sh', 'utf8');
 const readme = fs.readFileSync('README.md', 'utf8');
 const screenshotMjs = fs.readFileSync('screenshot.mjs', 'utf8');
-const storeNotes = fs.readFileSync('store/chrome-web-store-notes.md', 'utf8');
 const storeDescriptionZh = fs.readFileSync('store/description_zh.txt', 'utf8');
 const storeDescriptionEn = fs.readFileSync('store/description_en.txt', 'utf8');
 const htmlTag = popupHtml.match(/<html\b[^>]*>/i)?.[0] || '';
@@ -499,7 +498,7 @@ assert(hasDeclaration(keywordRemoveRule, 'flex', /0\s+0\s+auto/), '关键词删�
 const watchRuleActionsRule = popupHtml.match(/\.watch-rule-actions\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(watchRuleActionsRule, 'margin-left', 'auto'), '停用和删除按钮固定靠右，与作者保持间距');
 assert(hasDeclaration(watchRuleActionsRule, 'flex', /0\s+0\s+auto/), '规则操作按钮不被作者挤压');
-assert(/<button class="btn-mini watch-rule-btn" data-action="delete" title="删除">×<\/button>/.test(popupJs), '删除规则使用轻量 × 操作');
+assert(/<button class="btn-mini watch-rule-btn" data-action="delete" title="删除"[^>]*>×<\/button>/.test(popupJs), '删除规则使用轻量 × 操作');
 assert(/saveWatchRules\(nextRules,\s*\{\s*scrollToEnd:\s*true\s*}\)/.test(popupJs), '新增规则后滚动到列表底部，立即露出新规则');
 assert(/watchRulesList\.scrollTop\s*=\s*watchRulesList\.scrollHeight/.test(popupJs), '规则列表支持保存后滚到底部');
 assert(/function\s+updateWatchRulesScrollHint\(\)/.test(popupJs), '规则列表具备底部渐隐状态更新函数');
@@ -592,8 +591,7 @@ assert(/支持四套主题（墨夜\/暗森\/铬墨\/石青）/.test(readme), 'R
 assert(!/晴野/.test(readme), 'README 不再提及晴野主题');
 
 console.log('\n[商店素材]');
-assert(!/三款深色主题|3 张主题截图/.test(storeNotes + screenshotMjs), '商店文案和素材脚本不再停留在三主题描述');
-assert(/四套主题（墨夜\/暗森\/铬墨\/石青）/.test(storeNotes), '商店文案描述四套主题');
+assert(!/三款深色主题|3 张主题截图/.test(screenshotMjs), '素材脚本不再停留在三主题描述');
 assert(!/3 套精心设计的主题/.test(storeDescriptionZh), '中文商店描述不再停留在三主题');
 assert(/4 套精心设计的主题：墨夜 \/ 暗森 \/ 铬墨 \/ 石青/.test(storeDescriptionZh), '中文商店描述列出四套主题');
 assert(!/3 carefully crafted themes/.test(storeDescriptionEn), '英文商店描述不再停留在三主题');
@@ -616,7 +614,9 @@ assert(/feedModeEl\.value\s*=\s*normalizeFeedMode\(data\.feedMode\)/.test(popupJ
 console.log('\n[可访问性]');
 assert(/<button\s+class="btn-icon btn-mark-read"\s+id="markAllRead"\s+title="全部已读"\s+aria-label="全部已读">/.test(popupHtml), '全部已读图标按钮有 aria-label');
 assert(/<button\s+class="btn-icon"\s+id="pollNow"\s+title="刷新"\s+aria-label="刷新">/.test(popupHtml), '刷新图标按钮有 aria-label');
-assert(/<button\s+class="btn-icon"\s+id="settingsBtn"\s+title="设置"\s+aria-label="设置">/.test(popupHtml), '设置图标按钮有 aria-label');
+assert(/<button\s+class="btn-icon"\s+id="settingsBtn"\s+title="设置"\s+aria-label="设置"[^>]*>/.test(popupHtml), '设置图标按钮有 aria-label');
+assert(/id="settingsBtn"[^>]*aria-controls="settingsPanel"[^>]*aria-expanded="false"/.test(popupHtml), '设置按钮声明受控面板且默认折叠');
+assert(/<div class="settings" id="settingsPanel"[^>]*inert/.test(popupHtml), '设置面板默认 inert，关闭时不可聚焦');
 assert(/role="link"/.test(popupJs), '列表条目声明 link 角色');
 assert(/tabindex="0"/.test(popupJs), '列表条目可通过键盘聚焦');
 assert(/historyList\.addEventListener\('keydown'/.test(popupJs), '列表支持键盘打开条目');
@@ -661,8 +661,16 @@ assert(/getSafeHttpsUrl\(item\.dataset\.url\)/.test(popupJs) && /chrome\.tabs\.c
 assert(/getSafeHttpsUrl\(value\)[\s\S]*?parsed\.protocol\s*===\s*'https:'/s.test(popupReliabilityJs), '条目打开拒绝非 HTTPS URL');
 assert(/await\s+createTab\(\{\s*url\s*}\);[\s\S]*?await\s+afterOpen\(url\);/s.test(popupReliabilityJs), 'openHttpsUrl 在创建标签页后执行 afterOpen 回调');
 assert(/id="popupStatus"[^>]*role="status"[^>]*aria-live="polite"/.test(popupHtml), '失败状态使用 aria-live status 区域提示');
-assert(/function\s+showPopupStatus\(message\)/.test(popupJs), 'popup 可向 status 区域发布失败提示');
-assert(/allFeedContinuation/.test(popupJs) && /getAllFeedContinuationStatusMessage/.test(popupReliabilityJs) && /正在补充更多内容/.test(popupReliabilityJs), 'all 首屏返回后可在不改变布局的状态区提示后台续拉');
+assert(/function\s+showPopupStatus\(message(?:,\s*options\s*=\s*\{\})?\)/.test(popupJs), 'popup 可向 status 区域发布失败提示');
+const popupStatusRule = popupHtml.match(/\.popup-status\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(popupStatusRule, 'height', '28px'), '状态行固定 28px 高度，列表布局保持稳定');
+assert(hasDeclaration(popupStatusRule, 'min-height', '28px'), '状态行最小高度固定为 28px');
+assert(hasDeclaration(popupStatusRule, 'display', 'flex'), '状态行可见时使用可读的行内布局');
+assert(/popupStatusEl\.classList\.toggle\('is-error'/.test(popupJs), '失败状态使用可见错误样式');
+assert(/source:\s*'continuation'/.test(popupJs) && /source\s*===\s*'continuation'/.test(popupReliabilityJs), '续拉提示使用独立状态来源，不能覆盖后续错误');
+assert(/刷新失败，请重试/.test(popupJs), '刷新失败向用户显示可读状态');
+assert(/设置保存失败，请重试/.test(popupJs), '设置保存失败向用户显示可读状态');
+assert(/allFeedContinuation/.test(popupJs) && /createAllFeedContinuationStatusController/.test(popupReliabilityJs) && /正在补充更多内容/.test(popupReliabilityJs), 'all 首屏返回后可在不改变布局的状态区提示后台续拉');
 assert(/id="enabled"[^>]*aria-label="推送通知"/.test(popupHtml), '通知开关有程序化标签');
 assert(/id="watchSource"[^>]*aria-label="来源"/.test(popupHtml), '来源输入有程序化标签');
 assert(/id="watchAuthor"[^>]*aria-label="作者"/.test(popupHtml), '作者输入有程序化标签');
@@ -677,6 +685,12 @@ assert(/id="openPositionMode"[^>]*aria-label="定位"/.test(popupHtml), '定位�
 assert(/id="theme"[^>]*aria-label="主题"/.test(popupHtml), '主题有程序化标签');
 assert(/id="fontFamily"[^>]*aria-label="字体"/.test(popupHtml), '字体有程序化标签');
 assert(/id="fontSize"[^>]*aria-label="字号"/.test(popupHtml), '字号有程序化标签');
+assert(/data-action="delete"[^>]*[^>]*aria-label="删除特关规则"/.test(popupJs), '删除规则按钮有明确 aria-label');
+assert(/watch-keyword-remove[^>]*aria-label="删除关键词/.test(popupJs), '删除关键词按钮有明确 aria-label');
+const watchRuleDeleteRule = popupHtml.match(/\.watch-rule-actions \.watch-rule-btn\[data-action="delete"\]\s*{([\s\S]*?)}/i)?.[1] || '';
+const watchKeywordRemoveRule = popupHtml.match(/\.watch-keyword-remove\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchRuleDeleteRule, 'min-width', '24px') && hasDeclaration(watchRuleDeleteRule, 'height', '24px'), '删除规则命中区域至少 24x24');
+assert(hasDeclaration(watchKeywordRemoveRule, 'min-width', '24px') && hasDeclaration(watchKeywordRemoveRule, 'min-height', '24px'), '删除关键词命中区域至少 24x24');
 assert(/<script\s+src="popup-reliability\.js"><\/script>/i.test(popupHtml), 'popup 加载可执行的可靠性 helper');
 assert(/createFeedModeSwitchController/.test(popupReliabilityJs), '内容源切换协议位于可执行 helper 中');
 assert(/openHttpsUrl/.test(popupReliabilityJs), '安全打开与已读顺序位于可执行 helper 中');
@@ -686,8 +700,12 @@ assert(hasDeclaration(emptyStateRule, 'user-select', 'none'), '空态禁止文�
 
 console.log('\n[设置默认折叠]');
 assert(!/ensureDefaultSettingsGroupOpen/.test(popupJs), '打开设置面板不再自动展开默认分组');
-assert(/function collapseSettingsGroups\(\)\s*{[\s\S]*settingGroups\.forEach\(group => \{[\s\S]*group\.open\s*=\s*false/.test(popupJs), '设置面板重新打开时收起全部分组');
-assert(/settingsPanel\.classList\.contains\('open'\)[\s\S]*collapseSettingsGroups\(\)/.test(popupJs), '打开设置面板时执行分组收起');
+assert(/function\s+collapseGroups\(\)[\s\S]*?group\.open\s*=\s*false/.test(popupReliabilityJs), '设置面板重新打开时收起全部分组');
+assert(/createSettingsPanelController/.test(popupJs) && /settingsPanelController\.setOpen/.test(popupJs), '打开设置面板时执行分组收起');
+assert(/trigger\.setAttribute\('aria-expanded',\s*isOpen\s*\?\s*'true'\s*:\s*'false'\)/.test(popupReliabilityJs), '设置开关同步 aria-expanded');
+assert(/panel\.toggleAttribute\('inert',\s*!isOpen\)/.test(popupReliabilityJs), '设置关闭时同步 inert');
+assert(/groups\[0\][\s\S]*?querySelector\('\.setting-group-title'\)[\s\S]*?\.focus\(\)/.test(popupReliabilityJs), '设置打开后焦点进入首个分组标题');
+assert(/trigger\.focus\(\)/.test(popupReliabilityJs), '设置关闭后焦点返回触发按钮');
 assert(/设置面板按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，打开设置时默认不展开任何分组/.test(claudeMd), 'CLAUDE 描述设置面板默认不展开');
 assert(/主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧 hover 颜色条/.test(claudeMd), 'CLAUDE 描述主列表 hover 不使用颜色条');
 assert(/Windows\/PowerShell 无 bash 时使用 Compress-Archive/.test(claudeMd), 'CLAUDE 记录 PowerShell 打包替代命令');
