@@ -953,7 +953,9 @@ async function openHistoryItem(item) {
         el.classList.add('unread');
       }
     });
-    if (previousUnread.size > 0) markAllReadBtn.classList.add('visible');
+    if (Array.from(previousUnread.values()).some(Boolean)) {
+      markAllReadBtn.classList.add('visible');
+    }
   };
 
   const result = await runOpenItemMutation({
