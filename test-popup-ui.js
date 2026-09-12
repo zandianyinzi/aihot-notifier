@@ -313,6 +313,10 @@ assert(hasDeclaration(btnIconFocusVisibleRule, 'outline', /1px\s+solid\s+var\(--
 assert(hasDeclaration(btnIconFocusVisibleRule, 'outline-offset', '2px'), '右上角按钮键盘焦点描边外移避免遮挡图标');
 assert(hasDeclaration(btnMiniFocusVisibleRule, 'outline', /1px\s+solid\s+var\(--accent\)/), '文字按钮键盘焦点使用主题色描边');
 assert(hasDeclaration(btnMiniFocusVisibleRule, 'outline-offset', '2px'), '文字按钮键盘焦点描边外移');
+assert(/id="scrollToTop"[^>]*title="置顶"[^>]*aria-label="置顶"/.test(popupHtml), '顶部导航按钮有置顶语义标签');
+assert(/id="scrollToBottom"[^>]*title="置底"[^>]*aria-label="置底"/.test(popupHtml), '底部导航按钮有置底语义标签');
+assert(/class="btn-icon scroll-nav-btn" id="scrollToTop"/.test(popupHtml), '置顶按钮复用统一图标按钮样式');
+assert(/class="btn-icon scroll-nav-btn" id="scrollToBottom"/.test(popupHtml), '置底按钮复用统一图标按钮样式');
 
 console.log('\n[键盘焦点可访问性]');
 const switchInputRule = popupHtml.match(/\.switch input\s*{([\s\S]*?)}/i)?.[1] || '';
@@ -339,6 +343,12 @@ assert(hasDeclaration(mainListRule, '-ms-overflow-style', 'none'), '主列表隐
 const mainListScrollbarRule = popupHtml.match(/\.list::-webkit-scrollbar\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(mainListScrollbarRule, 'width', '0'), '主列表隐藏 Chrome 滚动条宽度');
 assert(hasDeclaration(mainListScrollbarRule, 'height', '0'), '主列表隐藏 Chrome 横向滚动条高度');
+assert(/function\s+updateHistoryScrollControls\(\)/.test(popupJs), '主列表具备首尾导航按钮状态更新函数');
+assert(/scrollToTopBtn\.classList\.toggle\('visible'/.test(popupJs), '置顶按钮按当前滚动位置动态显隐');
+assert(/scrollToBottomBtn\.classList\.toggle\('visible'/.test(popupJs), '置底按钮按当前滚动位置动态显隐');
+assert(/historyList\.addEventListener\('scroll',[\s\S]*?updateHistoryScrollControls\(\)/.test(popupJs), '主列表滚动时刷新首尾导航按钮');
+assert(/scrollToTopBtn\.addEventListener\('click',[\s\S]*?scrollHistoryTo\(0\)/.test(popupJs), '置顶按钮平滑滚动到列表开头');
+assert(/scrollToBottomBtn\.addEventListener\('click',[\s\S]*?scrollHistoryTo\(historyList\.scrollHeight\)/.test(popupJs), '置底按钮平滑滚动到列表结尾');
 
 console.log('\n[特关UI]');
 assert(!/id="watchSection"/.test(popupHtml), '不再使用重复的特关顶部区域');
@@ -660,6 +670,9 @@ assert(/id="watchKeywords"[^>]*aria-label="关键词，逗号分隔"/.test(popup
 assert(/id="interval"[^>]*aria-label="检查频率"/.test(popupHtml), '检查频率有程序化标签');
 assert(/id="feedMode"[^>]*aria-label="内容源"/.test(popupHtml), '内容源有程序化标签');
 assert(/id="historyDays"[^>]*aria-label="显示天数"/.test(popupHtml), '显示天数有程序化标签');
+assert(/<select class="select-mini" id="historyDays"[^>]*>[\s\S]*?<option value="1" selected>1 天<\/option>[\s\S]*?<option value="2">2 天<\/option>/.test(popupHtml), '显示天数默认选择 1 天');
+assert(/const DEFAULT_HISTORY_DAYS = 1;/.test(popupJs), 'popup 默认显示天数为 1 天');
+assert(/const DEFAULT_HISTORY_DAYS = 1;/.test(backgroundJs), 'background 默认显示天数为 1 天');
 assert(/id="openPositionMode"[^>]*aria-label="定位"/.test(popupHtml), '定位有程序化标签');
 assert(/id="theme"[^>]*aria-label="主题"/.test(popupHtml), '主题有程序化标签');
 assert(/id="fontFamily"[^>]*aria-label="字体"/.test(popupHtml), '字体有程序化标签');

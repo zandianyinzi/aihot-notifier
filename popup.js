@@ -21,6 +21,8 @@ const fontSizeEl = document.getElementById('fontSize');
 const openPositionModeEl = document.getElementById('openPositionMode');
 const historyDaysEl = document.getElementById('historyDays');
 const markAllReadBtn = document.getElementById('markAllRead');
+const scrollToTopBtn = document.getElementById('scrollToTop');
+const scrollToBottomBtn = document.getElementById('scrollToBottom');
 const pollBtn = document.getElementById('pollNow');
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsPanel = document.getElementById('settingsPanel');
@@ -48,7 +50,7 @@ const CATEGORY_MAP = {
 };
 
 const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark', 'slate-night']);
-const DEFAULT_HISTORY_DAYS = 2;
+const DEFAULT_HISTORY_DAYS = 1;
 const POPUP_CACHE_KEY = 'popupDataSnapshot';
 const POPUP_SESSION_KEY = 'popupWarmSession';
 const POPUP_SCROLL_KEY = 'popupScrollPosition';
@@ -295,6 +297,20 @@ function updateSettingsScrollHint() {
   if (!settingsInnerEl) return;
   const hasScrollTail = settingsInnerEl.scrollHeight - settingsInnerEl.scrollTop - settingsInnerEl.clientHeight > 1;
   settingsInnerEl.classList.toggle('has-scroll-tail', hasScrollTail);
+}
+
+function updateHistoryScrollControls() {
+  if (!historyList || !scrollToTopBtn || !scrollToBottomBtn) return;
+  const maxScrollTop = Math.max(historyList.scrollHeight - historyList.clientHeight, 0);
+  const canScroll = maxScrollTop > 1;
+  const scrollTop = Math.max(historyList.scrollTop, 0);
+  scrollToTopBtn.classList.toggle('visible', canScroll && scrollTop > 1);
+  scrollToBottomBtn.classList.toggle('visible', canScroll && maxScrollTop - scrollTop > 1);
+}
+
+function scrollHistoryTo(top) {
+  const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 'auto' : 'smooth';
+  historyList.scrollTo({ top, behavior });
 }
 
 function renderWatchRules(rules) {
@@ -664,6 +680,7 @@ function renderHistory(data, options = {}) {
 
   if (skipUnchanged && signature === lastRenderSignature) {
     applyRenderPosition(data, options);
+    updateHistoryScrollControls();
     logPerf('render-skip', { items: history.length });
     return;
   }
@@ -677,6 +694,7 @@ function renderHistory(data, options = {}) {
       markAllReadBtn.classList.remove('visible');
     }
     applyRenderPosition(data, options);
+    updateHistoryScrollControls();
     lastRenderSignature = signature;
     logPerf('render-end', { items: 0, empty: true });
     return;
@@ -718,6 +736,7 @@ function renderHistory(data, options = {}) {
 
   historyList.innerHTML = html;
   applyRenderPosition(data, options);
+  updateHistoryScrollControls();
   lastRenderSignature = signature;
   logPerf('render-end', { items: history.length, unread });
 }
@@ -954,6 +973,7 @@ settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.toggle('open');
   if (settingsPanel.classList.contains('open')) collapseSettingsGroups();
   requestAnimationFrame(updateSettingsScrollHint);
+  requestAnimationFrame(updateHistoryScrollControls);
 });
 
 settingGroups.forEach(group => {
@@ -1083,12 +1103,16 @@ historyDaysEl.addEventListener('change', () => {
 });
 
 historyList.addEventListener('scroll', () => {
+  updateHistoryScrollControls();
   const data = {
     feedMode: feedModeEl.value,
     historyDays: Number(historyDaysEl.value)
   };
   scheduleScrollPositionWrite(data);
 }, { passive: true });
+
+scrollToTopBtn.addEventListener('click', () => scrollHistoryTo(0));
+scrollToBottomBtn.addEventListener('click', () => scrollHistoryTo(historyList.scrollHeight));
 
 pollBtn.addEventListener('click', async () => {
   const feedbackStartedAt = Date.now();
