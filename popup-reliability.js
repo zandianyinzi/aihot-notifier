@@ -100,6 +100,15 @@
     return result || { ok: false, reason: 'tab-create-failed' };
   }
 
+  function removeOptimisticReadAliases(currentReadIds, optimisticAliases, baselineReadIds) {
+    const next = new Set(currentReadIds || []);
+    const baseline = new Set(baselineReadIds || []);
+    (optimisticAliases || []).forEach(alias => {
+      if (alias && !baseline.has(alias)) next.delete(alias);
+    });
+    return next;
+  }
+
   function createConfigMutationController(deps = {}) {
     let tail = Promise.resolve();
     let generation = 0;
@@ -565,6 +574,7 @@
     getSafeHttpsUrl,
     openHttpsUrl,
     runOpenItemMutation,
+    removeOptimisticReadAliases,
     createConfigMutationController
   };
 });

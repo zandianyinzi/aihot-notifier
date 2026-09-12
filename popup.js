@@ -36,7 +36,7 @@ const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
 const { normalizeFeedMode, projectHistory } = window.FeedState;
-const { getSafeHttpsUrl, openHttpsUrl, runOpenItemMutation, createConfigMutationController, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, runOpenItemMutation, removeOptimisticReadAliases, createConfigMutationController, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
 const sessionWatchPinTracker = createSessionWatchPinTracker();
 
 const CATEGORY_MAP = {
@@ -922,6 +922,7 @@ async function openHistoryItem(item) {
   const key = item.dataset.key || url;
   const scrollAnchor = captureScrollAnchor(historyList);
   const previousReadIds = new Set(cachedReadIds);
+  const optimisticAliases = [key, url].filter(alias => alias && !previousReadIds.has(alias));
   const elements = Array.from(document.querySelectorAll(`.item[data-key="${CSS.escape(key)}"], .item[data-url="${CSS.escape(url)}"]`));
   const previousUnread = new Map(elements.map(el => [el, el.classList.contains('unread')]));
 
@@ -943,7 +944,7 @@ async function openHistoryItem(item) {
     else if (!markAllReadBtn.classList.contains('is-confirmed')) markAllReadBtn.classList.remove('visible');
   };
   const rollback = () => {
-    cachedReadIds = new Set(previousReadIds);
+    cachedReadIds = removeOptimisticReadAliases(cachedReadIds, optimisticAliases, previousReadIds);
     writePopupCache({ readIds: [...cachedReadIds] });
     lastRenderSignature = '';
     previousUnread.forEach((wasUnread, el) => {

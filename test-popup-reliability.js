@@ -21,6 +21,7 @@ const {
   runMarkAllReadMutation,
   runOpenItemMutation,
   createConfigMutationController,
+  removeOptimisticReadAliases,
   getSafeHttpsUrl,
   openHttpsUrl
 } = require('./popup-reliability.js');
@@ -567,6 +568,13 @@ async function testOpenItemMutationRollsBackOnlyTabFailure() {
   assert.strictEqual(persistenceResult.opened, true);
 }
 
+function testConcurrentOpenRollbackPreservesNewerOptimisticRead() {
+  const baseline = new Set();
+  const current = new Set(['item-a', 'item-b']);
+  const restored = removeOptimisticReadAliases(current, ['item-a'], baseline);
+  assert.deepStrictEqual([...restored], ['item-b'], 'failed open rollback removes only aliases added by that operation');
+}
+
 async function testConfigMutationControllerLatestSafeRollback() {
   let committed = { theme: 'dark' };
   const applied = [];
@@ -868,6 +876,7 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   await testWarmCacheRendersBeforeFullStorage();
   await testSafeOpenReadOrdering();
   await testOpenItemMutationRollsBackOnlyTabFailure();
+  testConcurrentOpenRollbackPreservesNewerOptimisticRead();
   await testConfigMutationControllerLatestSafeRollback();
   await testPopupHistoryRenderOwnership();
   await testActiveContinuationDefersIntermediateHistoryRenders();
