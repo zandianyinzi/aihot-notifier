@@ -283,6 +283,54 @@ async function runTests() {
   assert(storageData.history[0]?.url === 'https://example.com/v1-original' && storageData.history[0]?.permalink === 'https://aihot.virxact.com/items/v1-item', 'links.original 和 links.aihot 映射为历史链接');
   assert(storageData.history[0]?.source === 'v1 来源', 'source.name 映射为历史来源');
 
+  console.log('\n[API v1 无序分页不提前截断]');
+  resetState({ apiFingerprints: { selected: 'fp-old' }, historyDays: 5 });
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-unordered-new');
+    const cursor = new URL(url).searchParams.get('cursor');
+    if (cursor === 'unordered-next') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(v1Page([v1Item({
+          id: 'unordered-in-window',
+          publishedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+        })]))
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({
+        id: 'unordered-old-page-item',
+        publishedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+      })], { hasMore: true, nextCursor: 'unordered-next' }))
+    });
+  };
+  const unorderedResponse = await sendMessage({ type: 'pollNow' });
+  assert(unorderedResponse.ok === true && requestedUrls.some(url => isV1ItemsUrl(url, 'selected', 'unordered-next')) && storageData.history.some(item => item.id === 'unordered-in-window'), '无序分页即使首页面末条目超出 cutoff 仍继续拉取后续页');
+
+  console.log('\n[自动 all 分页预算续拉]');
+  resetState({ feedMode: 'all', apiFingerprints: { all: 'fp-auto-all-old' } });
+  let automaticAllPages = 0;
+  fetchImpl = (url) => {
+    requestedUrls.push(url);
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-selected', 'fp-auto-all-new');
+    const parsed = new URL(url);
+    const cursor = parsed.searchParams.get('cursor');
+    automaticAllPages++;
+    const pageNumber = cursor ? Number(cursor.replace('auto-all-page-', '')) : 1;
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([v1Item({
+        id: `auto-all-item-${pageNumber}`,
+        publishedAt: new Date(Date.now() - pageNumber * 60 * 1000).toISOString()
+      })], { hasMore: true, nextCursor: `auto-all-page-${pageNumber + 1}` }))
+    });
+  };
+  await onAlarmHandler({ name: 'aihot-poll' });
+  const autoContinuationScheduled = alarmCreateCalls.some(call => call.name === 'aihot-all-continuation');
+  assert(automaticAllPages === 20 && storageData.history.length === 20 && storageData.allFeedContinuation?.active === true && storageData.allFeedContinuation?.cursor === 'auto-all-page-21' && autoContinuationScheduled, '自动 all 拉满分页预算后持久化 cursor 并调度续拉 alarm');
+
   console.log('\n[API v1 aihot 链接回退]');
   resetState();
   fetchImpl = () => Promise.resolve({

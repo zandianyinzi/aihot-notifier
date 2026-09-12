@@ -314,7 +314,7 @@ function getV1Page(json) {
   return { items: json.items, hasMore: json.page.hasMore, nextCursor: nextCursor || '' };
 }
 
-async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '' }) {
+async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '', supportsMonotonicOrder = false }) {
   const normalizedMode = normalizeFeedMode(mode);
   let allItems = [];
   let cursor = null;
@@ -338,8 +338,10 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
       break;
     }
     const oldest = items[items.length - 1];
-    if (oldest && new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) {
+    if (supportsMonotonicOrder === true && oldest && new Date(getNormalizedItemTime(oldest)).getTime() < cutoff) {
       termination = 'cutoff';
+      truncated = true;
+      nextCursor = response.nextCursor;
       break;
     }
     if (page === maxPages - 1) {
@@ -978,7 +980,15 @@ async function pollForUpdatesInternal() {
 
     const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff });
-    const newWatchNotifications = await persistFetchedItems(allItems, { notify: true });
+    const continuation = config.feedMode === 'all' && allItems.truncated && allItems.nextCursor
+      ? { continuationId: getContinuationId(), cursor: allItems.nextCursor }
+      : null;
+    const newWatchNotifications = await persistFetchedItems(allItems, {
+      notify: true,
+      storageUpdates: continuation
+        ? { allFeedContinuation: getActiveAllContinuationStatus(allItems.nextCursor, continuation.continuationId) }
+        : undefined
+    });
     console.log(`[AI HOT] got ${allItems.length} items`);
 
     if (!allItems.truncated) {
@@ -986,6 +996,9 @@ async function pollForUpdatesInternal() {
       await commitSuccessfulItemsPoll({ now });
     } else {
       await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      if (continuation) {
+        await runPostCommitSideEffect('automatic all continuation alarm scheduling', () => chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: Date.now() + RETRY_AFTER_FALLBACK_MS }));
+      }
     }
     return { watchNotificationsSent: newWatchNotifications, truncated: Boolean(allItems.truncated) };
   } catch (e) {
