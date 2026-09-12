@@ -56,7 +56,7 @@
       if (isOpen) {
         collapseGroups();
         if (shouldFocus) requestFrame(() => {
-          if (epoch !== focusEpoch || !panel.classList.contains('open')) return;
+          if (epoch !== focusEpoch) return;
           groups[0]?.querySelector('.setting-group-title')?.focus();
         });
       } else if (shouldFocus) {
