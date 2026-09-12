@@ -668,7 +668,9 @@ assert(/function\s+showPopupStatus\(message(?:,\s*options\s*=\s*\{\})?\)/.test(p
 const popupStatusRule = popupHtml.match(/\.popup-status\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(popupStatusRule, 'height', '28px'), '状态行固定 28px 高度，列表布局保持稳定');
 assert(hasDeclaration(popupStatusRule, 'min-height', '28px'), '状态行最小高度固定为 28px');
-assert(hasDeclaration(popupStatusRule, 'display', 'flex'), '状态行可见时使用可读的行内布局');
+assert(/\.popup-status:not\(:empty\)\s*\{[\s\S]*?display:\s*flex/i.test(popupHtml), '状态行可见时使用可读的行内布局');
+assert(hasDeclaration(popupStatusRule, 'display', 'none'), '状态栏无提示时完全隐藏，不占用布局空间');
+assert(/\.popup-status:not\(:empty\)\s*\{[\s\S]*?display:\s*flex/i.test(popupHtml), '状态栏有提示时恢复可见布局');
 assert(/popupStatusEl\.classList\.toggle\('is-error'/.test(popupJs), '失败状态使用可见错误样式');
 assert(/source:\s*'continuation'/.test(popupJs) && /source\s*===\s*'continuation'/.test(popupReliabilityJs), '续拉提示使用独立状态来源，不能覆盖后续错误');
 assert(/刷新失败，请重试/.test(popupJs), '刷新失败向用户显示可读状态');
