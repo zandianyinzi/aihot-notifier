@@ -23,3 +23,7 @@ The popup will serialize watch-rule changes and content-source changes, prevent 
 ## Testing and acceptance criteria
 
 Tests are added before each production change. They cover v1 field and pagination mapping, ETag/304 behavior, malformed payloads, unsupported links, orphan state cleanup, concurrent refreshes, stale source changes, and watch-rule writes. All existing Node suites plus the updated v1 E2E contract suite must pass. The old `/api/public/*` endpoints must be absent from production and test requests.
+
+### Reliability storage policy
+Canonical history is bounded to 2,500 newest entries; text fields are normalized and managed JSON stays within a 6 MiB UTF-8 budget. Quota failures retry once with a smaller history before state or fingerprint changes are committed.
+

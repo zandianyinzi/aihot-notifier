@@ -75,6 +75,8 @@ Chrome 浏览器扩展，监控 [aihot.virxact.com](https://aihot.virxact.com/) 
 - 使用 `chrome.alarms` 定时轮询，系统重启后自动恢复
 - 数据存储在浏览器本地存储中，主要使用 `chrome.storage.local`
 - API 轮询采用 fingerprint-first：先请求临时保留、已纳入弃用追踪的 legacy `GET https://aihot.virxact.com/api/public/fingerprint`，有变化或兜底到期后再请求 `GET https://aihot.virxact.com/api/v1/items?mode=<selected|all>&window=7d&limit=100&cursor=<nextCursor>`。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；响应以 `page.hasMore` / `page.nextCursor` 分页。条目来源为 `source.name`，链接为 `links.original`（优先打开）与 `links.aihot`（permalink / 回退）。手动刷新同样先查 fingerprint，最多拉 3 页。
+
+扩展保留 canonical history，不因内容源切换清空既有记录；每次持久化最多保留 2500 条最新内容，并限制标题 500、来源 300、摘要 3000 字符。history、已读、特关提醒和最近条目的合计 JSON 使用 6 MiB UTF-8 预算，遇到 quota 会以更小 history 重试一次。legacy fingerprint 仅用于临时变更探测，items 分页成功且持久化完成后才提交 fingerprint。
 - 已读/特关状态优先使用稳定 key（`id` / `permalink` / `url`），并兼容旧 URL 数据
 
 ## 文件结构
@@ -95,3 +97,7 @@ aihot-notifier/
 ├── pack.sh          # 扩展打包脚本
 └── README.md
 ```
+
+### Reliability storage policy
+Canonical history is bounded to 2,500 newest entries; text fields are normalized and managed JSON stays within a 6 MiB UTF-8 budget. Quota failures retry once with a smaller history before state or fingerprint changes are committed.
+

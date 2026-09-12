@@ -89,3 +89,7 @@ PR 需包含变更摘要、已运行的测试命令。涉及界面变化时附�
 - GitHub: https://github.com/zandianyinzi/aihot-notifier
 - 隐私政策: https://zandianyinzi.github.io/aihot-notifier/privacy-policy.html
 - Chrome Web Store 素材在 `store/` 目录
+
+### Reliability storage policy
+Canonical history is bounded to 2,500 newest entries; text fields are normalized and managed JSON stays within a 6 MiB UTF-8 budget. Quota failures retry once with a smaller history before state or fingerprint changes are committed.
+
