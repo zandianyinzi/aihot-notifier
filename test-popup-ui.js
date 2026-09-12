@@ -346,8 +346,9 @@ assert(/function\s+updateHistoryScrollControls\(\)/.test(popupJs), '主列表具
 assert(/scrollToTopBtn\.classList\.toggle\('visible'/.test(popupJs), '置顶按钮按当前滚动位置动态显隐');
 assert(/scrollToBottomBtn\.classList\.toggle\('visible'/.test(popupJs), '置底按钮按当前滚动位置动态显隐');
 assert(/historyList\.addEventListener\('scroll',[\s\S]*?updateHistoryScrollControls\(\)/.test(popupJs), '主列表滚动时刷新首尾导航按钮');
-assert(/scrollToTopBtn\.addEventListener\('click',[\s\S]*?scrollHistoryTo\(0\)/.test(popupJs), '置顶按钮平滑滚动到列表开头');
-assert(/scrollToBottomBtn\.addEventListener\('click',[\s\S]*?scrollHistoryTo\(historyList\.scrollHeight\)/.test(popupJs), '置底按钮平滑滚动到列表结尾');
+assert(/scrollToTopBtn\.addEventListener\('click',[\s\S]*?scrollHistoryTo\(0\)/.test(popupJs), '置顶按钮立即跳转到列表开头');
+assert(/scrollToBottomBtn\.addEventListener\('click',[\s\S]*?scrollHistoryTo\(historyList\.scrollHeight\)/.test(popupJs), '置底按钮立即跳转到列表结尾');
+assert(/historyList\.scrollTo\(\{\s*top,\s*behavior:\s*'auto'\s*}\)/.test(popupJs), '首尾导航跳过平滑滚动重绘');
 
 console.log('\n[特关UI]');
 assert(!/id="watchSection"/.test(popupHtml), '不再使用重复的特关顶部区域');
@@ -432,7 +433,7 @@ const watchUnreadRule = popupHtml.match(/\.item\.watch-item\.unread\s*{([\s\S]*?
 assert(hasDeclaration(watchUnreadRule, 'box-shadow', 'none'), '未读特关条目不再保留左侧颜色条');
 assert(/::-webkit-scrollbar-thumb\s*{[^}]*background:\s*var\(--scrollbar, var\(--border\)\)/i.test(popupHtml), '滚动条使用独立 scrollbar token 并回退 border');
 assert(/\.cat-tag\.cat-model\s*{[\s\S]*color-mix\(in srgb, var\(--cat-model\) 9%, transparent\)/i.test(popupHtml), '分类标签背景更克制');
-assert(/\.date-label\s*{[\s\S]*background:\s*var\(--bg-sub\)/i.test(popupHtml), '日期浮标使用面板背景降低按钮感');
+assert(/\.date-label\s*{[\s\S]*background:\s*color-mix\(in\s+srgb,\s*var\(--accent\)/i.test(popupHtml), '日期浮标使用主题色低对比背景');
 assert(!/\.watch-rule-card::before\s*{/.test(popupHtml), '特关规则卡片不使用左侧主色竖条');
 assert(!/pinnedUrls\.has\(item\.url\) \? '特别关注'/.test(popupJs), '置顶重点条目不额外显示悬浮分组标签');
 assert(/'readAllBeforeByMode', 'watchRules'/.test(popupJs), '初始化时从 chrome.storage.local 读取特关规则');
@@ -520,18 +521,19 @@ assert(!hasDeclaration(dateLabelRule, 'float', 'left'), '日期浮标不使用�
 assert(hasDeclaration(dateLabelRule, 'position', 'sticky'), '日期标签使用 sticky 悬浮在可视列表顶部');
 assert(hasDeclaration(dateLabelRule, 'top', '6px'), '日期标签保持右上角 6px 悬浮偏移');
 assert(hasDeclaration(dateLabelRule, 'z-index', '2'), '日期标签提升层级避免被条目覆盖');
-assert(hasDeclaration(dateLabelRule, 'float', 'right'), '日期浮标使用右浮动压到首条卡片上');
+assert(hasDeclaration(dateLabelRule, 'display', 'block'), '日期浮标使用块级布局');
 assert(hasDeclaration(dateLabelRule, 'margin-right', '6px'), '日期浮标靠右贴近卡片内容区');
 assert(hasDeclaration(dateLabelRule, 'margin-bottom', '-24px'), '日期浮标使用负下边距覆盖在卡片右上角');
-assert(hasDeclaration(dateLabelRule, 'background', /var\(--bg-sub\)/), '日期浮标使用面板背景');
-assert(hasDeclaration(dateLabelRule, 'border', /1px\s+solid\s+var\(--border-light\)/), '日期浮标使用完整边框');
+assert(/background:\s*color-mix\(in\s+srgb,\s*var\(--accent\)/.test(dateLabelRule), '日期浮标使用主题色背景');
+assert(/border:\s*1px\s+solid\s+color-mix\(in\s+srgb,\s*var\(--accent\)/.test(dateLabelRule), '日期浮标使用主题色边框');
 assert(hasDeclaration(dateLabelRule, 'padding', /2px\s+8px/), '日期浮标使用紧凑内边距');
 assert(hasDeclaration(dateLabelRule, 'border-radius', '10px'), '日期浮标保持胶囊圆角');
-assert(!hasDeclaration(dateLabelRule, 'width', 'max-content'), '日期浮标不使用独立行靠右布局');
+assert(hasDeclaration(dateLabelRule, 'width', 'max-content'), '日期浮标按内容宽度靠右布局');
 assert(!hasDeclaration(dateLabelRule, 'margin', /6px\s+18px\s+6px\s+auto/), '日期浮标不退化为两卡片之间的靠右独立行');
-assert(!hasDeclaration(dateLabelRule, 'display', 'block'), '日期浮标不退化成全宽分隔行');
+assert(hasDeclaration(dateLabelRule, 'display', 'block'), '日期浮标保持块级悬浮布局');
 assert(!hasDeclaration(dateLabelRule, 'box-sizing', 'border-box'), '日期浮标不使用分隔行盒模型');
-assert(/Object\.entries\(groups\)\.forEach\(\(\[dateLabel,\s*items\]\)\s*=>\s*\{\s*html\s*\+=\s*`<div class="date-label">\$\{dateLabel\}<\/div>`/.test(popupJs), '每个日期组都渲染悬浮日期标签，包括首组');
+assert(/Object\.entries\(groups\)\.forEach\(\(\[dateLabel,\s*items\]\)\s*=>\s*\{\s*html\s*\+=\s*`<section class="history-group"><div class="date-label">\$\{dateLabel\}<\/div>`/.test(popupJs), '每个日期组都渲染独立悬浮日期标签');
+assert(/class="history-group"/.test(popupJs), '日期标签使用独立分组约束 sticky 范围');
 const itemRule = popupHtml.match(/\.item\s*{([\s\S]*?)}/i)?.[1] || '';
 const itemTitleRule = popupHtml.match(/\n\s*\.item-title\s*{([\s\S]*?)}/i)?.[1] || '';
 const unreadTitleRule = popupHtml.match(/\.item\.unread\s+\.item-title\s*{([\s\S]*?)}/i)?.[1] || '';
@@ -666,8 +668,8 @@ assert(/id="popupStatus"[^>]*role="status"[^>]*aria-live="polite"/.test(popupHtm
 assert(popupHtml.indexOf('id="historyList"') < popupHtml.indexOf('id="popupStatus"'), '状态行位于列表底部，不插入菜单与首条内容之间');
 assert(/function\s+showPopupStatus\(message(?:,\s*options\s*=\s*\{\})?\)/.test(popupJs), 'popup 可向 status 区域发布失败提示');
 const popupStatusRule = popupHtml.match(/\.popup-status\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(popupStatusRule, 'height', '28px'), '状态行固定 28px 高度，列表布局保持稳定');
-assert(hasDeclaration(popupStatusRule, 'min-height', '28px'), '状态行最小高度固定为 28px');
+assert(hasDeclaration(popupStatusRule, 'height', '22px'), '状态行固定 22px 高度，列表布局保持稳定');
+assert(hasDeclaration(popupStatusRule, 'min-height', '22px'), '状态行最小高度固定为 22px');
 assert(/\.popup-status:not\(:empty\)\s*\{[\s\S]*?display:\s*flex/i.test(popupHtml), '状态行可见时使用可读的行内布局');
 assert(hasDeclaration(popupStatusRule, 'display', 'none'), '状态栏无提示时完全隐藏，不占用布局空间');
 assert(/\.popup-status:not\(:empty\)\s*\{[\s\S]*?display:\s*flex/i.test(popupHtml), '状态栏有提示时恢复可见布局');

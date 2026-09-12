@@ -318,8 +318,9 @@ function updateHistoryScrollControls() {
 }
 
 function scrollHistoryTo(top) {
-  const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 'auto' : 'smooth';
-  historyList.scrollTo({ top, behavior });
+  // Large grouped histories can expose compositor repaint gaps during smooth
+  // scrolling; navigation buttons should jump directly to the requested edge.
+  historyList.scrollTo({ top, behavior: 'auto' });
 }
 
 function renderWatchRules(rules) {
@@ -722,10 +723,11 @@ function renderHistory(data, options = {}) {
 
   let html = '';
   if (pinnedWatch.length > 0) {
-    html += `<div class="date-label date-label--watch">特关</div>`;
+    html += `<section class="history-group"><div class="date-label date-label--watch">特关</div>`;
     pinnedWatch.forEach(item => {
       html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime));
     });
+    html += '</section>';
   }
 
   const groups = {};
@@ -736,11 +738,12 @@ function renderHistory(data, options = {}) {
   });
 
   Object.entries(groups).forEach(([dateLabel, items]) => {
-    html += `<div class="date-label">${dateLabel}</div>`;
+    html += `<section class="history-group"><div class="date-label">${dateLabel}</div>`;
     items.forEach(item => {
       const isUnread = !isReadFast(item, cachedReadIds, readAllBeforeTime);
       html += renderItemHtml(item, isUnread);
     });
+    html += '</section>';
   });
 
   historyList.innerHTML = html;
