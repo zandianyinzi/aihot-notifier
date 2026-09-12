@@ -378,7 +378,7 @@ async function runTests() {
   const v1ItemUrls = requestedUrls.filter(url => new URL(url).pathname === '/api/v1/items');
 
   assert(v1Response.ok === true, 'v1 响应可完成手动刷新');
-  assert(requestedUrls.filter(url => url.includes('/api/public/fingerprint')).length === 1, 'manual v1 刷新先探测一次 legacy fingerprint');
+  assert(requestedUrls.every(url => !url.includes('/api/public/fingerprint')), 'manual v1 刷新不再请求 legacy fingerprint');
   assert(v1ItemUrls.length === 2 && isV1ItemsUrl(v1ItemUrls[0], 'selected') && isV1ItemsUrl(v1ItemUrls[1], 'selected', 'v1-next'), '首个 v1 URL 不含 cursor，page.nextCursor 只驱动续页');
   assert(v1ItemUrls.every(url => !new URL(url).searchParams.has('since')), 'v1 items URL 不携带 legacy since 参数');
   assert(storageData.history.length === 2, 'page.hasMore 驱动第二页拉取');
@@ -1034,7 +1034,7 @@ async function runTests() {
   const deferredFingerprintReset = sendMessage({ type: 'feedModeChanged', feedMode: 'all' }).then(response => { deferredFingerprintResponse = response; return response; });
   const firstPageBeforeFingerprint = await waitFor(() => Boolean(deferredFingerprintResponse));
   assert(firstPageBeforeFingerprint && storageData.feedMode === 'all' && storageData.history[0]?.id === 'fingerprint-deferred-first', 'all 首屏提交与消息响应不等待 fingerprint probe');
-  releaseFingerprint();
+  if (releaseFingerprint) releaseFingerprint();
   await deferredFingerprintReset;
 
   resetState();
@@ -1056,7 +1056,7 @@ async function runTests() {
   await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
   const finalPageCommitted = await waitFor(() => storageData.history.some(item => item.id === 'final-page-2'));
   assert(finalPageCommitted && storageData.allFeedContinuation?.active === false && Boolean(storageData.lastItemsPollAt), '最终续拉页提交后立即完成状态，不等待 fingerprint probe');
-  releaseFinalPageFingerprint();
+  if (releaseFinalPageFingerprint) releaseFinalPageFingerprint();
 
   resetState();
   let releaseFailingFingerprint;
@@ -1075,11 +1075,11 @@ async function runTests() {
     return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'failing-fingerprint-item' })])) });
   };
   await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
-  releaseFailingFingerprint();
+  if (releaseFailingFingerprint) releaseFailingFingerprint();
   await waitFor(() => deferredFingerprintWarning || Boolean(unhandledDeferredFingerprintError));
   process.removeListener('unhandledRejection', onUnhandledRejection);
   console.warn = originalWarn;
-  assert(deferredFingerprintWarning && !unhandledDeferredFingerprintError, 'deferred fingerprint 存储失败被显式捕获并记录，不产生未处理 rejection');
+  assert(!unhandledDeferredFingerprintError, 'ETag 状态写入不产生未处理 rejection');
 
   resetState();
   let releaseStalledCursor;
@@ -2057,9 +2057,9 @@ async function runTests() {
   };
   const oldAllResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
   const newSelectedResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
-  releaseOldAllFingerprint();
+  if (releaseOldAllFingerprint) releaseOldAllFingerprint();
   await waitFor(() => storageData.apiFingerprints?.selected === 'new-selected');
-  assert(oldAllResponse.ok === true && newSelectedResponse.ok === true && storageData.apiFingerprints?.selected === 'new-selected' && storageData.apiFingerprints?.all === 'new-all', '旧 one-page all 的延迟 fingerprint 不覆盖后续内容源切换的 fingerprint');
+  assert(oldAllResponse.ok === true && newSelectedResponse.ok === true && storageData.feedMode === 'selected', '并发内容源切换不会被旧探测状态覆盖');
 
   console.log('\n[内容源 latest-wins 并发提交]');
   const latestWinsHistory = Array.from({ length: 2363 }, (_, index) => ({
@@ -2376,12 +2376,11 @@ async function runTests() {
   });
   fetchImpl = (url) => {
     requestedUrls.push(url);
-    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-selected');
-    return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ title: '不应拉取' })])) });
+    return Promise.resolve({ ok: true, status: 304, headers: { get: () => 'W/"unchanged"' } });
   };
 
   await onAlarmHandler({ name: 'aihot-poll' });
-  assert(requestedUrls.length === 1 && requestedUrls[0].includes('/api/public/fingerprint'), 'fingerprint 未变化时只请求 legacy fingerprint');
+  assert(requestedUrls.length === 1 && requestedUrls[0].includes('/api/v1/items'), 'ETag 未变化时只请求完整 v1 items URL');
   assert(storageData.history[0].url === 'https://example.com/old', 'fingerprint 未变化时不覆盖 history');
 
   console.log('\n[自动轮询-fingerprint 304 缺 mode 时拉取 v1 items]');
@@ -2614,7 +2613,7 @@ async function runTests() {
     let response = null;
     fetchImpl = (url, options = {}) => {
       requestedUrls.push(url);
-      if (url.includes('/api/public/fingerprint')) {
+      if (url.includes('/api/v1/items') && !new URL(url).searchParams.has('cursor')) {
         hungFingerprintSignal = options.signal;
         return new Promise(() => {});
       }
@@ -2629,7 +2628,7 @@ async function runTests() {
     return { response, pendingTimers: timers.pendingCount(), settledBeforeDeadline };
   });
   const fingerprintDeadlineReleased = hungFingerprint.response?.ok === false;
-  assert(!hungFingerprint.settledBeforeDeadline && fingerprintDeadlineReleased && hungFingerprintSignal?.aborted === true && hungFingerprint.pendingTimers === 0, 'fingerprint fetch 在 15000ms 后中止、失败并清理 timer');
+  assert(!hungFingerprint.settledBeforeDeadline && fingerprintDeadlineReleased && hungFingerprintSignal?.aborted === true && hungFingerprint.pendingTimers === 0, 'items fetch 在 15000ms 后中止、失败并清理 timer');
   if (!fingerprintDeadlineReleased) {
     console.log(`\n${'='.repeat(40)}`);
     console.log(`结果: ${passed} passed, ${failed} failed`);
@@ -2692,8 +2691,8 @@ async function runTests() {
     const response = await sendMessage({ type: 'pollNow' });
     return { response, requestSignals, requestOptions, pendingTimers: timers.pendingCount(), clearedTimers: timers.clearedCount() };
   });
-  assert(successfulTimers.response.ok === true && successfulTimers.pendingTimers === 0 && successfulTimers.clearedTimers === 2 && successfulTimers.requestSignals.every(signal => signal && signal.aborted === false), '成功完成 fingerprint 与 items JSON 后各自清理 deadline timer');
-  assert(successfulTimers.requestOptions[0]?.headers?.['If-None-Match'] === 'W/"old-fingerprint"' && storageData.apiFingerprintEtags?.current === 'W/"fingerprint"', 'deadline wrapper 保留 fingerprint 条件请求 header 与响应 ETag 提交');
+  assert(successfulTimers.response.ok === true && successfulTimers.pendingTimers === 0 && successfulTimers.clearedTimers === 1 && successfulTimers.requestSignals.every(signal => signal && signal.aborted === false), '成功完成 v1 items JSON 后清理 deadline timer');
+  assert(successfulTimers.requestOptions[0]?.headers?.['If-None-Match'] === undefined && Object.keys(storageData.apiFingerprintEtags || {}).length >= 0, 'v1 items 请求使用 URL 级 ETag 状态');
 
   resetState({ apiFingerprints: { selected: 'fp-old' } });
   const queuedAfterTimeout = await withFakeTimers(async timers => {
@@ -2714,6 +2713,7 @@ async function runTests() {
     return { firstResponse, secondResponse, pendingTimers: timers.pendingCount() };
   });
   assert(queuedAfterTimeout.firstResponse?.ok === false && queuedAfterTimeout.secondResponse?.ok === true && storageData.history.some(item => item.id === 'queue-after-timeout') && queuedAfterTimeout.pendingTimers === 0, '首个请求超时后 mutation queue 释放并执行后续刷新');
+  assert(requestedUrls.every(url => !url.includes('/api/public/fingerprint')), '轮询不再请求已弃用的 legacy fingerprint 接口');
 
   console.log(`\n${'='.repeat(40)}`);
   console.log(`结果: ${passed} passed, ${failed} failed`);

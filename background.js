@@ -3,11 +3,10 @@ const feedState = typeof importScripts === 'function'
   : require('./feed-state.js');
 const { normalizeFeedMode, projectHistory } = feedState;
 
-const API_BASE = 'https://aihot.virxact.com/api/v1/items';
+const API_BASE = 'https://aihot.news/api/v1/items';
 const API_WINDOW = '7d';
 const API_LIMIT = 100;
 const MAX_CURSOR_LENGTH = 1024;
-const FINGERPRINT_URL = 'https://aihot.virxact.com/api/public/fingerprint';
 const REQUEST_TIMEOUT_MS = 15000;
 const ALARM_NAME = 'aihot-poll';
 const ALL_CONTINUATION_ALARM_NAME = 'aihot-all-continuation';
@@ -319,48 +318,17 @@ function getAutoPollSinceTime(config, _safetyPollDue, lastItemsPollAt) {
   return new Date(new Date(referenceTime).getTime() - bufferMs).toISOString();
 }
 
-async function probeFingerprint(mode) {
+async function probeItemsEtag(mode) {
   const normalizedMode = normalizeFeedMode(mode);
-  const { apiFingerprints = {}, apiFingerprintEtags = {} } = await chrome.storage.local.get(['apiFingerprints', 'apiFingerprintEtags']);
-  const headers = {};
-  if (apiFingerprints[normalizedMode] && apiFingerprintEtags.current) headers['If-None-Match'] = apiFingerprintEtags.current;
-
-  return withRequestDeadline(FINGERPRINT_URL, Object.keys(headers).length > 0 ? { headers } : undefined, async res => {
-    if (res.status === 304) {
-      return { ok: true, changed: !apiFingerprints[normalizedMode], fingerprints: apiFingerprints, etag: apiFingerprintEtags.current || '' };
-    }
-    if (!res.ok) {
-      return { ok: false, status: res.status, response: res };
-    }
-
-    const json = await res.json();
-    const nextFingerprint = json && json[normalizedMode];
-    if (!nextFingerprint) {
-      return { ok: true, changed: true, unavailable: true, fingerprints: apiFingerprints, etag: '' };
-    }
-
-    const etag = getResponseHeader(res, 'ETag');
-    const changed = apiFingerprints[normalizedMode] !== nextFingerprint;
-    return {
-      ok: true,
-      changed,
-      fingerprints: {
-        ...apiFingerprints,
-        ...(json.selected ? { selected: json.selected } : {}),
-        ...(json.all ? { all: json.all } : {})
-      },
-      etag
-    };
-  });
+  return { ok: true, changed: true, etagUrl: getApiUrl(normalizedMode) };
 }
 
 async function saveFingerprintProbe(probe) {
-  if (!probe || probe.unavailable) return;
+  if (!probe) return;
   const data = {};
-  if (probe.fingerprints) data.apiFingerprints = probe.fingerprints;
-  if (probe.etag) {
+  if (probe.etag && probe.etagUrl) {
     const { apiFingerprintEtags = {} } = await chrome.storage.local.get('apiFingerprintEtags');
-    data.apiFingerprintEtags = { ...apiFingerprintEtags, current: probe.etag };
+    data.apiFingerprintEtags = { ...apiFingerprintEtags, [probe.etagUrl]: probe.etag };
   }
   if (Object.keys(data).length > 0) await chrome.storage.local.set(data);
 }
@@ -384,12 +352,15 @@ async function withRequestDeadline(url, options, handleResponse) {
   }
 }
 
-async function fetchItemsPage(url) {
-  return withRequestDeadline(url, undefined, async res => {
+async function fetchItemsPageWithOptions(url, options) {
+  return withRequestDeadline(url, options, async res => {
+    if (res.status === 304) return { notModified: true, etag: getResponseHeader(res, 'ETag'), json: null };
     if (!res.ok) throw Object.assign(new Error(`API returned ${res.status}`), { response: res, status: res.status });
-    return res.json();
+    return { notModified: false, etag: getResponseHeader(res, 'ETag'), json: await res.json() };
   });
 }
+
+const fetchItemsPage = url => fetchItemsPageWithOptions(url);
 
 function isHttpsUrl(value) {
   try {
@@ -467,6 +438,7 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
   let truncated = false;
   let nextCursor = '';
   let skippedItems = 0;
+  let etag = '';
   let termination = 'page-bound';
   const seenCursors = new Set();
 
@@ -474,7 +446,16 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
     let url = baseUrl || getApiUrl(normalizedMode);
     if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
-    const response = getV1Page(await fetchItemsPage(url));
+    const { apiFingerprintEtags = {} } = page === 0 ? await chrome.storage.local.get('apiFingerprintEtags') : { apiFingerprintEtags: {} };
+    const requestOptions = page === 0 && apiFingerprintEtags[url] ? { headers: { 'If-None-Match': apiFingerprintEtags[url] } } : undefined;
+    const pageResult = await fetchItemsPageWithOptions(url, requestOptions);
+    if (pageResult.notModified) {
+      allItems.notModified = true;
+      allItems.etag = pageResult.etag || apiFingerprintEtags[url] || '';
+      break;
+    }
+    etag = pageResult.etag || etag;
+    const response = getV1Page(pageResult.json);
     const items = response.items.map(normalizeV1Item).filter(Boolean);
     skippedItems += response.items.length - items.length;
     allItems = allItems.concat(items);
@@ -504,6 +485,7 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
   allItems.nextCursor = nextCursor;
   allItems.skippedItems = skippedItems;
   allItems.termination = termination;
+  allItems.etag = etag;
   return allItems;
 }
 
@@ -1138,7 +1120,7 @@ async function pollForUpdatesInternal() {
   const now = new Date().toISOString();
 
   try {
-    const fingerprintProbe = await probeFingerprint(config.feedMode);
+    const fingerprintProbe = await probeItemsEtag(config.feedMode);
     if (!fingerprintProbe.ok) {
       console.warn(`[AI HOT] fingerprint returned ${fingerprintProbe.status}`);
       await recordApiFailure(fingerprintProbe.response || fingerprintProbe.status);
@@ -1157,6 +1139,13 @@ async function pollForUpdatesInternal() {
 
     const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff });
+    if (allItems.notModified) {
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      await runPostCommitSideEffect('poll 304 badge update', updateBadge);
+      return { notModified: true };
+    }
+    fingerprintProbe.etag = allItems.etag;
+    fingerprintProbe.etagUrl = getApiUrl(config.feedMode);
     const continuation = config.feedMode === 'all' && allFeedContinuation.active !== true && allItems.truncated && allItems.nextCursor
       ? { continuationId: getContinuationId(), cursor: allItems.nextCursor }
       : null;
@@ -1343,7 +1332,7 @@ async function manualPollInternal() {
   const now = new Date().toISOString();
 
   try {
-    const fingerprintProbe = await probeFingerprint(mode);
+    const fingerprintProbe = await probeItemsEtag(mode);
     if (!fingerprintProbe.ok) {
       console.warn(`[AI HOT] manual fingerprint returned ${fingerprintProbe.status}`);
       throw Object.assign(new Error(`API returned ${fingerprintProbe.status}`), { response: fingerprintProbe.response, status: fingerprintProbe.status });
@@ -1361,6 +1350,13 @@ async function manualPollInternal() {
     console.log(`[AI HOT] manual poll since=${sinceTime}`);
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES });
+    if (allItems.notModified) {
+      await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
+      await runPostCommitSideEffect('manual 304 badge update', updateBadge);
+      return;
+    }
+    fingerprintProbe.etag = allItems.etag;
+    fingerprintProbe.etagUrl = getApiUrl(mode);
     const discoveredAt = new Date().toISOString();
     const persisted = upsertCanonicalItems({ history, readIds, watchRules, watchNotifyState }, allItems, {
       mode,
@@ -1474,7 +1470,7 @@ async function recoverAllFeedContinuationStatus() {
 }
 
 function startFingerprintProbe(mode) {
-  return probeFingerprint(mode).catch(() => null);
+  return probeItemsEtag(mode).catch(() => null);
 }
 
 function saveDeferredAllFingerprintProbe(generation, fingerprintProbe, continuationId = '') {
@@ -1547,7 +1543,9 @@ async function continueAllFeedInternal({ generation, continuationId, cursor, ret
       seenCursors.add(nextCursor);
 
       const url = `${getApiUrl('all')}&cursor=${encodeURIComponent(nextCursor)}`;
-      const response = getV1Page(await fetchItemsPage(url));
+      const pageResult = await fetchItemsPage(url);
+      if (pageResult.notModified) continue;
+      const response = getV1Page(pageResult.json);
       if (!await getActiveAllContinuation(generation, continuationId, expected)) return;
 
       const items = response.items.map(normalizeV1Item).filter(Boolean);

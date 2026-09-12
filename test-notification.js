@@ -267,7 +267,7 @@ async function runTests() {
   storageData.apiFingerprints = { selected: 'fp-new' };
   storageData.lastItemsPollAt = new Date().toISOString();
   notificationsCreated = [];
-  useV1Feed([], 'fp-new');
+  fetchImpl = () => Promise.resolve({ ok: true, status: 304, headers: { get: () => 'W/"fp-new"' } });
   await autoPoll();
   assert(notificationsCreated.length === 0, '已查看的特关不重复通知');
   const repeat = storageData.history[1];
