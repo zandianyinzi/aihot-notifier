@@ -41,19 +41,24 @@
     const panel = deps.panel;
     const trigger = deps.trigger;
     const groups = deps.groups || [];
+    let focusEpoch = 0;
 
     function collapseGroups() {
       groups.forEach(group => { group.open = false; });
     }
 
     function setOpen(isOpen, options = {}) {
+      const epoch = ++focusEpoch;
       const shouldFocus = options.focus !== false;
       panel.classList.toggle('open', isOpen);
       trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
       panel.toggleAttribute('inert', !isOpen);
       if (isOpen) {
         collapseGroups();
-        if (shouldFocus) requestFrame(() => groups[0]?.querySelector('.setting-group-title')?.focus());
+        if (shouldFocus) requestFrame(() => {
+          if (epoch !== focusEpoch || !panel.classList.contains('open')) return;
+          groups[0]?.querySelector('.setting-group-title')?.focus();
+        });
       } else if (shouldFocus) {
         trigger.focus();
       }
