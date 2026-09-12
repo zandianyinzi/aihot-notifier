@@ -83,7 +83,7 @@ PR 需包含变更摘要、已运行的测试命令。涉及界面变化时附�
 
 ## 安全与配置提示
 
-保持 `host_permissions` 限定为 `https://aihot.virxact.com/*`。不要提交 `node_modules/`、生成的 zip、密钥或本地浏览器 profile。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。
+保持 `host_permissions` 限定为 `https://aihot.news/*`。不要提交 `node_modules/`、生成的 zip、密钥或本地浏览器 profile。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。
 
 ## 发布
 

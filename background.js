@@ -326,9 +326,12 @@ async function probeItemsEtag(mode) {
 async function saveFingerprintProbe(probe) {
   if (!probe) return;
   const data = {};
-  if (probe.etag && probe.etagUrl) {
+  if (probe.etagUrl) {
     const { apiFingerprintEtags = {} } = await chrome.storage.local.get('apiFingerprintEtags');
-    data.apiFingerprintEtags = { ...apiFingerprintEtags, [probe.etagUrl]: probe.etag };
+    const nextEtags = { ...apiFingerprintEtags };
+    if (probe.etag) nextEtags[probe.etagUrl] = probe.etag;
+    else delete nextEtags[probe.etagUrl];
+    data.apiFingerprintEtags = nextEtags;
   }
   if (Object.keys(data).length > 0) await chrome.storage.local.set(data);
 }
@@ -1687,7 +1690,12 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
     if (generation !== sourceSwitchGeneration) return { stale: true };
     const discoveredAt = new Date().toISOString();
     const hasContinuation = mode === 'all' && allItems.truncated && allItems.nextCursor;
-    const fingerprintProbe = startFingerprintProbe(mode);
+    const fingerprintProbe = {
+      ok: true,
+      changed: true,
+      etag: allItems.etag || '',
+      etagUrl: getApiUrl(mode)
+    };
     const committed = await runStateMutation(async () => {
       if (generation !== sourceSwitchGeneration) return { stale: true };
       const stored = await chrome.storage.local.get([...SOURCE_SWITCH_STORAGE_KEYS, 'historyDays', 'watchRules']);
