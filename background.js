@@ -8,6 +8,7 @@ const API_WINDOW = '7d';
 const API_LIMIT = 100;
 const MAX_CURSOR_LENGTH = 1024;
 const FINGERPRINT_URL = 'https://aihot.virxact.com/api/public/fingerprint';
+const REQUEST_TIMEOUT_MS = 15000;
 const ALARM_NAME = 'aihot-poll';
 const ALL_CONTINUATION_ALARM_NAME = 'aihot-all-continuation';
 const DEFAULT_INTERVAL = 5;
@@ -211,32 +212,33 @@ async function probeFingerprint(mode) {
   const headers = {};
   if (apiFingerprints[normalizedMode] && apiFingerprintEtags.current) headers['If-None-Match'] = apiFingerprintEtags.current;
 
-  const res = await fetch(FINGERPRINT_URL, Object.keys(headers).length > 0 ? { headers } : undefined);
-  if (res.status === 304) {
-    return { ok: true, changed: !apiFingerprints[normalizedMode], fingerprints: apiFingerprints, etag: apiFingerprintEtags.current || '' };
-  }
-  if (!res.ok) {
-    return { ok: false, status: res.status, response: res };
-  }
+  return withRequestDeadline(FINGERPRINT_URL, Object.keys(headers).length > 0 ? { headers } : undefined, async res => {
+    if (res.status === 304) {
+      return { ok: true, changed: !apiFingerprints[normalizedMode], fingerprints: apiFingerprints, etag: apiFingerprintEtags.current || '' };
+    }
+    if (!res.ok) {
+      return { ok: false, status: res.status, response: res };
+    }
 
-  const json = await res.json();
-  const nextFingerprint = json && json[normalizedMode];
-  if (!nextFingerprint) {
-    return { ok: true, changed: true, unavailable: true, fingerprints: apiFingerprints, etag: '' };
-  }
+    const json = await res.json();
+    const nextFingerprint = json && json[normalizedMode];
+    if (!nextFingerprint) {
+      return { ok: true, changed: true, unavailable: true, fingerprints: apiFingerprints, etag: '' };
+    }
 
-  const etag = getResponseHeader(res, 'ETag');
-  const changed = apiFingerprints[normalizedMode] !== nextFingerprint;
-  return {
-    ok: true,
-    changed,
-    fingerprints: {
-      ...apiFingerprints,
-      ...(json.selected ? { selected: json.selected } : {}),
-      ...(json.all ? { all: json.all } : {})
-    },
-    etag
-  };
+    const etag = getResponseHeader(res, 'ETag');
+    const changed = apiFingerprints[normalizedMode] !== nextFingerprint;
+    return {
+      ok: true,
+      changed,
+      fingerprints: {
+        ...apiFingerprints,
+        ...(json.selected ? { selected: json.selected } : {}),
+        ...(json.all ? { all: json.all } : {})
+      },
+      etag
+    };
+  });
 }
 
 async function saveFingerprintProbe(probe) {
@@ -250,10 +252,30 @@ async function saveFingerprintProbe(probe) {
   if (Object.keys(data).length > 0) await chrome.storage.local.set(data);
 }
 
+async function withRequestDeadline(url, options, handleResponse) {
+  const controller = new AbortController();
+  let timeoutId;
+  const deadline = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms`));
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+  });
+
+  try {
+    const request = fetch(url, { ...(options || {}), signal: controller.signal })
+      .then(handleResponse);
+    return await Promise.race([request, deadline]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchItemsPage(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw Object.assign(new Error(`API returned ${res.status}`), { response: res, status: res.status });
-  return res.json();
+  return withRequestDeadline(url, undefined, async res => {
+    if (!res.ok) throw Object.assign(new Error(`API returned ${res.status}`), { response: res, status: res.status });
+    return res.json();
+  });
 }
 
 function isHttpsUrl(value) {
@@ -271,6 +293,12 @@ function normalizeAttribution(attribution) {
   return name || url ? { name, url } : null;
 }
 
+function normalizeTimestamp(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
+}
+
 function normalizeV1Item(item) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
   if (typeof item.id !== 'string' || !item.id || typeof item.title !== 'string' || !item.title) return null;
@@ -281,9 +309,14 @@ function normalizeV1Item(item) {
   const permalink = typeof item.links.aihot === 'string' ? item.links.aihot : '';
   const url = isHttpsUrl(original) ? original : (isHttpsUrl(permalink) ? permalink : '');
   if (!url) return null;
+  const indexedAt = normalizeTimestamp(item.indexedAt);
+  const publishedAt = normalizeTimestamp(item.publishedAt) || indexedAt;
+  if (!publishedAt) return null;
 
   return {
     ...item,
+    publishedAt,
+    indexedAt,
     selectedPresent: Object.prototype.hasOwnProperty.call(item, 'selected'),
     selected: item.selected === true,
     source: item.source.name,
@@ -849,8 +882,8 @@ async function getPrunedStoredWatchNotifyState() {
   return pruneWatchNotifyState(history, watchNotifyState);
 }
 
-function getNormalizedItemTime(item, discoveredAt) {
-  return item.publishedAt || item.indexedAt || item.discoveredAt || discoveredAt || new Date().toISOString();
+function getNormalizedItemTime(item) {
+  return normalizeTimestamp(item.publishedAt) || normalizeTimestamp(item.indexedAt);
 }
 
 function getCycleWatchNotificationBudget(used = 0) {

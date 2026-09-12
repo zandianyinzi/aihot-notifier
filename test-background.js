@@ -208,6 +208,58 @@ function sendMessageWithTimeout(message, timeoutMs = 50) {
   ]);
 }
 
+async function flushMicrotasks(turns = 40) {
+  for (let turn = 0; turn < turns; turn++) await Promise.resolve();
+}
+
+function createFakeTimers() {
+  let nextId = 1;
+  let now = 0;
+  const pending = new Map();
+  let cleared = 0;
+
+  return {
+    setTimeout(callback, delay, ...args) {
+      const id = nextId++;
+      pending.set(id, { callback, dueAt: now + delay, args });
+      return id;
+    },
+    clearTimeout(id) {
+      if (pending.delete(id)) cleared++;
+    },
+    async advanceBy(delay) {
+      now += delay;
+      const ready = Array.from(pending.entries())
+        .filter(([, timer]) => timer.dueAt <= now);
+      for (const [id, timer] of ready) {
+        pending.delete(id);
+        timer.callback(...timer.args);
+      }
+      await flushMicrotasks();
+    },
+    pendingCount() {
+      return pending.size;
+    },
+    clearedCount() {
+      return cleared;
+    }
+  };
+}
+
+async function withFakeTimers(task) {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = createFakeTimers();
+  globalThis.setTimeout = timers.setTimeout;
+  globalThis.clearTimeout = timers.clearTimeout;
+  try {
+    return await task(timers);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+}
+
 async function runTests() {
   console.log('\n[canonical history 一次性迁移]');
   const failedMigration = await sendMessage({ type: 'configChanged' });
@@ -430,6 +482,47 @@ async function runTests() {
   assert(mappingResponse.ok === true && storageData.history.length === 1, '无效 v1 item 被跳过且有效 item 继续入库');
   assert(storageData.history[0]?.titleEn === 'Original English title' && storageData.history[0]?.attribution?.name === '原作者' && storageData.history[0]?.attribution?.url === 'https://example.com/author', 'originalTitle 和 attribution 映射并持久化到 history');
   assert(storageData.history[0]?.url === 'https://aihot.virxact.com/items/v1-mapped' && storageData.history[0]?.permalink === 'https://aihot.virxact.com/items/v1-mapped', '非 HTTPS original 回退到 HTTPS aihot');
+
+  console.log('\n[API v1 时间戳验证与回退]');
+  resetState({ apiFingerprints: { selected: 'fp-old' } });
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-time-new');
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([
+        v1Item({
+          id: 'published-canonical',
+          publishedAt: '2026-06-05T10:00:00+08:00'
+        }),
+        v1Item({
+          id: 'invalid-published-valid-indexed',
+          publishedAt: 'not-a-time',
+          indexedAt: '2026-06-05T03:04:05+08:00'
+        }),
+        v1Item({
+          id: 'missing-published-valid-indexed',
+          publishedAt: undefined,
+          indexedAt: '2026-06-05T04:05:06Z'
+        }),
+        v1Item({
+          id: 'invalid-times',
+          publishedAt: 'not-a-time',
+          indexedAt: 'also-not-a-time'
+        }),
+        v1Item({
+          id: 'old-but-newly-discovered',
+          publishedAt: '2020-01-02T03:04:05Z'
+        })
+      ]))
+    });
+  };
+
+  const timestampResponse = await sendMessage({ type: 'pollNow' });
+  const timestampHistory = new Map(storageData.history.map(item => [item.id, item]));
+  assert(timestampResponse.ok === true && !timestampHistory.has('invalid-times') && storageData.history.length === 4, 'publishedAt 与 indexedAt 都无效的条目被跳过且不伪造当前发布时间');
+  assert(timestampHistory.get('published-canonical')?.time === '2026-06-05T02:00:00.000Z', '有效 publishedAt 规范化为 canonical ISO');
+  assert(timestampHistory.get('invalid-published-valid-indexed')?.time === '2026-06-04T19:04:05.000Z' && timestampHistory.get('missing-published-valid-indexed')?.time === '2026-06-05T04:05:06.000Z', '无效或缺失 publishedAt 回退到有效 indexedAt');
+  assert(timestampHistory.get('old-but-newly-discovered')?.time === '2020-01-02T03:04:05.000Z', '合法旧内容保留原发布时间并按新发现条目入库');
 
   console.log('\n[首次安装发现时间]');
   const oldInstallPublishedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -2151,9 +2244,12 @@ async function runTests() {
   resetState({ feedMode: 'all', canonicalHistoryVersion: 1, history: selectedSnapshotHistory() });
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
     ? legacyFingerprintResponse('fp-skipped-selected', 'fp-all')
-    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'snapshot-present' }), {}])) });
-  const skippedSelectedResult = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
-  assert(skippedSelectedResult.ok === true && storageData.history.find(item => item.id === 'snapshot-absent')?.selected === true, '包含跳过无效项的 selected 快照不按缺席降级');
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
+      v1Item({ id: 'snapshot-present' }),
+      v1Item({ id: 'snapshot-invalid-time', publishedAt: 'invalid', indexedAt: '' })
+    ])) });
+  const skippedSelectedResult = await backgroundApi.resetAndPollForTest('selected', { supportsConsistentSelectedSnapshot: true });
+  assert(skippedSelectedResult?.stale === false && storageData.history.find(item => item.id === 'snapshot-absent')?.selected === true, '无效时间计入 skippedItems，authoritative selected 快照不按缺席降级');
 
   const invalidSelectedCases = [{
     name: 'missing cursor',
@@ -2460,6 +2556,114 @@ async function runTests() {
 
   assert(failureResponse.ok === false, 'API 500 时手动刷新返回失败');
   assert(storageData.failCount === 1, 'API 500 时递增失败计数');
+
+  console.log('\n[请求 deadline 覆盖 fetch、JSON 与队列释放]');
+  resetState({ apiFingerprints: { selected: 'fp-old' } });
+  let hungFingerprintSignal = null;
+  const hungFingerprint = await withFakeTimers(async timers => {
+    let response = null;
+    fetchImpl = (url, options = {}) => {
+      requestedUrls.push(url);
+      if (url.includes('/api/public/fingerprint')) {
+        hungFingerprintSignal = options.signal;
+        return new Promise(() => {});
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([])) });
+    };
+    void sendMessage({ type: 'pollNow' }).then(value => { response = value; });
+    await flushMicrotasks();
+    await timers.advanceBy(14999);
+    const settledBeforeDeadline = response !== null;
+    await timers.advanceBy(1);
+    await flushMicrotasks();
+    return { response, pendingTimers: timers.pendingCount(), settledBeforeDeadline };
+  });
+  const fingerprintDeadlineReleased = hungFingerprint.response?.ok === false;
+  assert(!hungFingerprint.settledBeforeDeadline && fingerprintDeadlineReleased && hungFingerprintSignal?.aborted === true && hungFingerprint.pendingTimers === 0, 'fingerprint fetch 在 15000ms 后中止、失败并清理 timer');
+  if (!fingerprintDeadlineReleased) {
+    console.log(`\n${'='.repeat(40)}`);
+    console.log(`结果: ${passed} passed, ${failed} failed`);
+    process.exit(1);
+    return;
+  }
+
+  resetState({ apiFingerprints: { selected: 'fp-old' } });
+  let hungItemsSignal = null;
+  const hungItems = await withFakeTimers(async timers => {
+    let response = null;
+    fetchImpl = (url, options = {}) => {
+      if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-items-timeout');
+      hungItemsSignal = options.signal;
+      return new Promise(() => {});
+    };
+    void sendMessage({ type: 'pollNow' }).then(value => { response = value; });
+    await flushMicrotasks();
+    await timers.advanceBy(15000);
+    await flushMicrotasks();
+    return { response, pendingTimers: timers.pendingCount() };
+  });
+  assert(hungItems.response?.ok === false && hungItemsSignal?.aborted === true && hungItems.pendingTimers === 0 && storageData.failCount === 1, 'items fetch 超时沿用手动刷新失败计数语义');
+
+  resetState({ apiFingerprints: { selected: 'fp-old' } });
+  let hungBodySignal = null;
+  const hungBody = await withFakeTimers(async timers => {
+    let response = null;
+    fetchImpl = (url, options = {}) => {
+      if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-body-timeout');
+      hungBodySignal = options.signal;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => new Promise(() => {})
+      });
+    };
+    void sendMessage({ type: 'pollNow' }).then(value => { response = value; });
+    await flushMicrotasks();
+    await timers.advanceBy(15000);
+    await flushMicrotasks();
+    return { response, pendingTimers: timers.pendingCount() };
+  });
+  assert(hungBody.response?.ok === false && hungBodySignal?.aborted === true && hungBody.pendingTimers === 0, 'response.json 悬挂也受同一个 15000ms deadline 约束');
+
+  resetState({
+    apiFingerprints: { selected: 'fp-old' },
+    apiFingerprintEtags: { current: 'W/"old-fingerprint"' }
+  });
+  const successfulTimers = await withFakeTimers(async timers => {
+    const requestSignals = [];
+    const requestOptions = [];
+    fetchImpl = (url, options = {}) => {
+      requestSignals.push(options.signal);
+      requestOptions.push(options);
+      return url.includes('/api/public/fingerprint')
+        ? legacyFingerprintResponse('fp-success-cleanup')
+        : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'timer-cleanup-item' })])) });
+    };
+    const response = await sendMessage({ type: 'pollNow' });
+    return { response, requestSignals, requestOptions, pendingTimers: timers.pendingCount(), clearedTimers: timers.clearedCount() };
+  });
+  assert(successfulTimers.response.ok === true && successfulTimers.pendingTimers === 0 && successfulTimers.clearedTimers === 2 && successfulTimers.requestSignals.every(signal => signal && signal.aborted === false), '成功完成 fingerprint 与 items JSON 后各自清理 deadline timer');
+  assert(successfulTimers.requestOptions[0]?.headers?.['If-None-Match'] === 'W/"old-fingerprint"' && storageData.apiFingerprintEtags?.current === 'W/"fingerprint"', 'deadline wrapper 保留 fingerprint 条件请求 header 与响应 ETag 提交');
+
+  resetState({ apiFingerprints: { selected: 'fp-old' } });
+  const queuedAfterTimeout = await withFakeTimers(async timers => {
+    let fetchCount = 0;
+    let firstResponse = null;
+    let secondResponse = null;
+    fetchImpl = (url) => {
+      fetchCount++;
+      if (fetchCount === 1) return new Promise(() => {});
+      if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-queue-success');
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'queue-after-timeout' })])) });
+    };
+    void sendMessage({ type: 'pollNow' }).then(value => { firstResponse = value; });
+    await flushMicrotasks();
+    void sendMessage({ type: 'pollNow' }).then(value => { secondResponse = value; });
+    await timers.advanceBy(15000);
+    await flushMicrotasks(80);
+    return { firstResponse, secondResponse, pendingTimers: timers.pendingCount() };
+  });
+  assert(queuedAfterTimeout.firstResponse?.ok === false && queuedAfterTimeout.secondResponse?.ok === true && storageData.history.some(item => item.id === 'queue-after-timeout') && queuedAfterTimeout.pendingTimers === 0, '首个请求超时后 mutation queue 释放并执行后续刷新');
 
   console.log(`\n${'='.repeat(40)}`);
   console.log(`结果: ${passed} passed, ${failed} failed`);
