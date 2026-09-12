@@ -672,10 +672,10 @@ assert(/\.popup-status:not\(:empty\)\s*\{[\s\S]*?display:\s*flex/i.test(popupHtm
 assert(hasDeclaration(popupStatusRule, 'display', 'none'), '状态栏无提示时完全隐藏，不占用布局空间');
 assert(/\.popup-status:not\(:empty\)\s*\{[\s\S]*?display:\s*flex/i.test(popupHtml), '状态栏有提示时恢复可见布局');
 assert(/popupStatusEl\.classList\.toggle\('is-error'/.test(popupJs), '失败状态使用可见错误样式');
-assert(/source:\s*'continuation'/.test(popupJs) && /source\s*===\s*'continuation'/.test(popupReliabilityJs), '续拉提示使用独立状态来源，不能覆盖后续错误');
+assert(/createAllFeedContinuationStatusController/.test(popupJs) && /showStatus:\s*\(\)\s*=>\s*\{\}/.test(popupJs), '后台续拉不显示进度提示，状态栏仅保留可操作错误');
 assert(/刷新失败，请重试/.test(popupJs), '刷新失败向用户显示可读状态');
 assert(/设置保存失败，请重试/.test(popupJs), '设置保存失败向用户显示可读状态');
-assert(/allFeedContinuation/.test(popupJs) && /createAllFeedContinuationStatusController/.test(popupReliabilityJs) && /正在补充更多内容/.test(popupReliabilityJs), 'all 首屏返回后可在不改变布局的状态区提示后台续拉');
+assert(/allFeedContinuation/.test(popupJs) && /createAllFeedContinuationStatusController/.test(popupReliabilityJs), 'all 首屏返回后继续执行后台续拉');
 assert(/id="enabled"[^>]*aria-label="推送通知"/.test(popupHtml), '通知开关有程序化标签');
 assert(/id="watchSource"[^>]*aria-label="来源"/.test(popupHtml), '来源输入有程序化标签');
 assert(/id="watchAuthor"[^>]*aria-label="作者"/.test(popupHtml), '作者输入有程序化标签');

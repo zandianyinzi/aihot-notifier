@@ -85,7 +85,8 @@ function showPopupStatus(message, options = {}) {
 }
 
 const allFeedContinuationStatusController = createAllFeedContinuationStatusController({
-  showStatus: (message, options) => showPopupStatus(message, { ...options, source: 'continuation' })
+  // Background continuation is intentionally silent; only actionable errors use the status bar.
+  showStatus: () => {}
 });
 
 function clearButtonFeedback(button) {
