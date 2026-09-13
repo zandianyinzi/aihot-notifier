@@ -42,29 +42,39 @@
     const trigger = deps.trigger;
     const groups = deps.groups || [];
     let focusEpoch = 0;
+    let isOpen = panel.classList.contains('open');
 
     function collapseGroups() {
       groups.forEach(group => { group.open = false; });
     }
 
-    function setOpen(isOpen, options = {}) {
+    function setOpen(nextOpen, options = {}) {
       const epoch = ++focusEpoch;
       const shouldFocus = options.focus !== false;
+      isOpen = Boolean(nextOpen);
       panel.classList.toggle('open', isOpen);
       trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
       panel.toggleAttribute('inert', !isOpen);
       if (isOpen) {
         collapseGroups();
+        // Leave a rendering opportunity between opening the panel and focusing.
         if (shouldFocus) requestFrame(() => {
           if (epoch !== focusEpoch) return;
-          groups[0]?.querySelector('.setting-group-title')?.focus();
+          requestFrame(() => {
+            if (epoch !== focusEpoch) return;
+            groups[0]?.querySelector('.setting-group-title')?.focus({ preventScroll: true });
+          });
         });
       } else if (shouldFocus) {
         trigger.focus();
       }
     }
 
-    return { setOpen, collapseGroups };
+    function toggle(options = {}) {
+      setOpen(!isOpen, options);
+    }
+
+    return { setOpen, toggle, collapseGroups };
   }
 
   function getSafeHttpsUrl(value) {

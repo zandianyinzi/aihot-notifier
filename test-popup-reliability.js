@@ -46,10 +46,12 @@ function testPopupStatusControllerKeepsErrorsVisible() {
 }
 
 function testSettingsPanelControllerFocusAndInertState() {
+  const frames = [];
   const classes = new Set();
   const focused = [];
   const panel = {
     classList: {
+      contains(name) { return classes.has(name); },
       toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }
     },
     toggleAttribute(name, enabled) { this[name] = enabled; }
@@ -61,26 +63,37 @@ function testSettingsPanelControllerFocusAndInertState() {
   };
   const title = { focus() { focused.push('summary'); } };
   const groups = [{ open: true, querySelector: selector => selector === '.setting-group-title' ? title : null }];
-  const controller = createSettingsPanelController({ panel, trigger, groups, requestFrame: callback => callback() });
+  const controller = createSettingsPanelController({ panel, trigger, groups, requestFrame: callback => frames.push(callback) });
 
   controller.setOpen(true);
   assert(classes.has('open'), 'opening settings adds the open state');
   assert.strictEqual(panel.inert, false, 'opening settings removes inert');
   assert.strictEqual(trigger.attrs['aria-expanded'], 'true', 'opening settings exposes expanded state');
   assert.strictEqual(groups[0].open, false, 'opening settings collapses groups');
-  assert.deepStrictEqual(focused, ['summary'], 'opening settings focuses the first summary');
+  assert.deepStrictEqual(focused, [], 'opening does not focus before a rendering opportunity');
+  frames.shift()();
+  assert.deepStrictEqual(focused, [], 'the first frame leaves room for painting');
+  frames.shift()();
+  assert.deepStrictEqual(focused, ['summary'], 'the second frame focuses the first summary');
 
   controller.setOpen(false);
   assert(!classes.has('open'), 'closing settings removes the open state');
   assert.strictEqual(panel.inert, true, 'closing settings restores inert');
   assert.strictEqual(trigger.attrs['aria-expanded'], 'false', 'closing settings exposes collapsed state');
   assert.deepStrictEqual(focused, ['summary', 'trigger'], 'closing settings returns focus to the trigger');
+  for (let i = 0; i < 5; i++) {
+    controller.toggle({ focus: false });
+    const expected = i % 2 === 0;
+    assert.strictEqual(classes.has('open'), expected);
+    assert.strictEqual(panel.inert, !expected);
+    assert.strictEqual(trigger.attrs['aria-expanded'], String(expected));
+  }
 }
 
 function testSettingsPanelControllerDropsDeferredFocusAfterCloseReopen() {
   const callbacks = [];
   const focused = [];
-  const panel = { classList: { toggle() {} }, toggleAttribute() {} };
+  const panel = { classList: { contains: () => false, toggle() {} }, toggleAttribute() {} };
   const trigger = { setAttribute() {}, focus: () => focused.push('trigger') };
   const title = { focus: () => focused.push('title') };
   const groups = [{ open: false, querySelector: () => title }];
@@ -91,7 +104,14 @@ function testSettingsPanelControllerDropsDeferredFocusAfterCloseReopen() {
   callbacks[0]();
   assert.deepStrictEqual(focused, ['trigger'], 'deferred focus from a closed settings panel is discarded');
   callbacks[1]();
+  assert.deepStrictEqual(focused, ['trigger'], 'reopening still waits for the second frame');
+  callbacks[2]();
   assert.deepStrictEqual(focused, ['trigger', 'title'], 'the latest reopen receives focus once');
+  controller.setOpen(true);
+  callbacks[3]();
+  controller.setOpen(false);
+  callbacks[4]();
+  assert.deepStrictEqual(focused, ['trigger', 'title', 'trigger'], 'closing between frames cancels focus');
 }
 
 function createDeferred() {

@@ -102,6 +102,50 @@ function logPerf(phase, fields = {}) {
   perfLog(phase, fields);
 }
 
+let settingsTraceSequence = 0;
+let activeSettingsTrace = null;
+
+function beginSettingsTrace(nextOpen) {
+  const trace = {
+    id: ++settingsTraceSequence,
+    nextOpen: Boolean(nextOpen),
+    startedAt: performance.now()
+  };
+  activeSettingsTrace = trace;
+  logPerf('settings-click', {
+    id: trace.id,
+    nextOpen: trace.nextOpen,
+    historyChildren: historyList?.children.length || 0
+  });
+
+  function logFrame(frame) {
+    requestAnimationFrame(() => {
+      if (activeSettingsTrace !== trace) return;
+      logPerf('settings-frame', {
+        id: trace.id,
+        frame,
+        sinceClickMs: Number((performance.now() - trace.startedAt).toFixed(2))
+      });
+      if (frame < 2) logFrame(frame + 1);
+    });
+  }
+  logFrame(1);
+}
+
+function measureSettingsLayoutRead(target, read) {
+  const startedAt = performance.now();
+  const result = read();
+  if (activeSettingsTrace) {
+    logPerf('settings-layout-read', {
+      id: activeSettingsTrace.id,
+      target,
+      durationMs: Number((performance.now() - startedAt).toFixed(2)),
+      ...result
+    });
+  }
+  return result;
+}
+
 function getButtonResultDuration(elapsedMs) {
   if (!Number.isFinite(elapsedMs)) return BUTTON_RESULT_MAX_MS;
   return Math.round(Math.max(
@@ -304,15 +348,25 @@ function updateWatchRulesScrollHint() {
 
 function updateSettingsScrollHint() {
   if (!settingsInnerEl) return;
-  const hasScrollTail = settingsInnerEl.scrollHeight - settingsInnerEl.scrollTop - settingsInnerEl.clientHeight > 1;
+  const metrics = measureSettingsLayoutRead('settings-inner', () => ({
+    scrollHeight: settingsInnerEl.scrollHeight,
+    scrollTop: settingsInnerEl.scrollTop,
+    clientHeight: settingsInnerEl.clientHeight
+  }));
+  const hasScrollTail = metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight > 1;
   settingsInnerEl.classList.toggle('has-scroll-tail', hasScrollTail);
 }
 
 function updateHistoryScrollControls() {
   if (!historyList || !scrollToTopBtn || !scrollToBottomBtn) return;
-  const maxScrollTop = Math.max(historyList.scrollHeight - historyList.clientHeight, 0);
+  const metrics = measureSettingsLayoutRead('history-list', () => ({
+    scrollHeight: historyList.scrollHeight,
+    clientHeight: historyList.clientHeight,
+    scrollTop: historyList.scrollTop
+  }));
+  const maxScrollTop = Math.max(metrics.scrollHeight - metrics.clientHeight, 0);
   const canScroll = maxScrollTop > 1;
-  const scrollTop = Math.max(historyList.scrollTop, 0);
+  const scrollTop = Math.max(metrics.scrollTop, 0);
   scrollToTopBtn.classList.toggle('visible', canScroll && scrollTop > 1);
   scrollToBottomBtn.classList.toggle('visible', canScroll && maxScrollTop - scrollTop > 1);
 }
@@ -1037,10 +1091,35 @@ function setSettingsOpen(isOpen, { focus = true } = {}) {
   settingsPanelController.setOpen(isOpen, { focus });
 }
 
-settingsBtn.addEventListener('click', () => {
-  setSettingsOpen(!settingsPanel.classList.contains('open'));
-  requestAnimationFrame(updateSettingsScrollHint);
+settingsPanel.addEventListener('transitionrun', event => {
+  if (event.propertyName !== 'max-height' || !activeSettingsTrace) return;
+  logPerf('settings-transition-run', {
+    id: activeSettingsTrace.id,
+    nextOpen: activeSettingsTrace.nextOpen,
+    elapsedMs: Number((performance.now() - activeSettingsTrace.startedAt).toFixed(2))
+  });
+});
+
+settingsPanel.addEventListener('transitionend', event => {
+  if (event.propertyName !== 'max-height') return;
+  // The panel resize changes the list viewport. Refresh edge controls only
+  // after the transition, so opening settings does not force a 2,500-item
+  // history layout while the first frame is being presented.
   requestAnimationFrame(updateHistoryScrollControls);
+  if (!activeSettingsTrace) return;
+  logPerf('settings-transition-end', {
+    id: activeSettingsTrace.id,
+    nextOpen: activeSettingsTrace.nextOpen,
+    elapsedMs: Number((performance.now() - activeSettingsTrace.startedAt).toFixed(2))
+  });
+  activeSettingsTrace = null;
+});
+
+settingsBtn.addEventListener('click', () => {
+  const nextOpen = !settingsPanel.classList.contains('open');
+  beginSettingsTrace(nextOpen);
+  settingsPanelController.toggle();
+  requestAnimationFrame(updateSettingsScrollHint);
 });
 
 settingGroups.forEach(group => {
