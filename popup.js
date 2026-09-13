@@ -69,6 +69,8 @@ const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
 let cachedReadIds = new Set();
 let lastRenderSignature = '';
 let scrollSaveTimer = 0;
+let scrollPersistenceSuppressed = false;
+let cachedHistoryScrollHeight = 0;
 let feedModeSwitchController = null;
 let lastCommittedConfig = null;
 const enqueuePopupMutation = popupReliability.createMutationQueue();
@@ -357,13 +359,18 @@ function updateSettingsScrollHint() {
   settingsInnerEl.classList.toggle('has-scroll-tail', hasScrollTail);
 }
 
-function updateHistoryScrollControls() {
+function updateHistoryScrollControls(options = {}) {
   if (!historyList || !scrollToTopBtn || !scrollToBottomBtn) return;
   const metrics = measureSettingsLayoutRead('history-list', () => ({
-    scrollHeight: historyList.scrollHeight,
+    scrollHeight: options.readScrollHeight !== false || cachedHistoryScrollHeight <= 0
+      ? historyList.scrollHeight
+      : cachedHistoryScrollHeight,
     clientHeight: historyList.clientHeight,
     scrollTop: historyList.scrollTop
   }));
+  if (options.readScrollHeight !== false || cachedHistoryScrollHeight <= 0) {
+    cachedHistoryScrollHeight = metrics.scrollHeight;
+  }
   const maxScrollTop = Math.max(metrics.scrollHeight - metrics.clientHeight, 0);
   const canScroll = maxScrollTop > 1;
   const scrollTop = Math.max(metrics.scrollTop, 0);
@@ -503,6 +510,17 @@ function getScrollContext(data) {
   };
 }
 
+function getScrollDiagnostics(position = {}) {
+  return {
+    scrollTop: Number.isFinite(position.scrollTop) ? Math.round(position.scrollTop * 10) / 10 : null,
+    anchorKey: String(position.anchorKey || '').slice(0, 120),
+    anchorUrl: String(position.anchorUrl || '').slice(0, 120),
+    offsetTop: Number.isFinite(position.offsetTop) ? Math.round(position.offsetTop * 10) / 10 : null,
+    feedMode: position.feedMode || '',
+    historyDays: Number(position.historyDays || 0)
+  };
+}
+
 function readScrollPosition() {
   try {
     const raw = localStorage.getItem(POPUP_SCROLL_KEY);
@@ -522,12 +540,12 @@ function readScrollPosition() {
 function writeScrollPosition(data = {}, anchor = null) {
   if (normalizeOpenPositionMode(openPositionModeEl.value) !== 'free') return;
   const context = getScrollContext(data);
+  const position = anchor
+    ? { ...anchor, ...context, savedAt: Date.now() }
+    : buildScrollPosition(historyList, context);
   try {
-    localStorage.setItem(POPUP_SCROLL_KEY, JSON.stringify({
-      ...(anchor
-        ? { ...anchor, ...context, savedAt: Date.now() }
-        : buildScrollPosition(historyList, context))
-    }));
+    localStorage.setItem(POPUP_SCROLL_KEY, JSON.stringify(position));
+    logPerf('scroll-save', getScrollDiagnostics(position));
   } catch (_e) {
     // Scroll position is a convenience only.
   }
@@ -542,12 +560,30 @@ function clearScrollPosition() {
 }
 
 function scheduleScrollPositionWrite(data = {}) {
-  if (normalizeOpenPositionMode(openPositionModeEl.value) !== 'free') return;
+  if (scrollPersistenceSuppressed || normalizeOpenPositionMode(openPositionModeEl.value) !== 'free') return;
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
   scrollSaveTimer = setTimeout(() => {
     scrollSaveTimer = 0;
+    if (scrollPersistenceSuppressed) return;
     writeScrollPosition(data);
   }, POPUP_SCROLL_SAVE_DELAY_MS);
+}
+
+function suppressScrollPersistenceForFrames(frameCount = 3) {
+  if (scrollSaveTimer) {
+    clearTimeout(scrollSaveTimer);
+    scrollSaveTimer = 0;
+  }
+  scrollPersistenceSuppressed = true;
+  let remaining = Math.max(1, frameCount);
+  const release = () => {
+    if (--remaining > 0) {
+      requestAnimationFrame(release);
+      return;
+    }
+    scrollPersistenceSuppressed = false;
+  };
+  requestAnimationFrame(release);
 }
 
 function getFirstVisibleItem() {
@@ -561,10 +597,34 @@ function getFirstVisibleItem() {
 
 function restoreScrollPosition(data) {
   const position = readScrollPosition();
-  if (!position) return false;
+  const beforeScrollTop = historyList.scrollTop;
+  if (!position) {
+    logPerf('scroll-restore', { result: 'missing', beforeScrollTop });
+    return false;
+  }
 
   const context = getScrollContext(data);
-  if (position.feedMode !== context.feedMode || position.historyDays !== context.historyDays) return false;
+  if (position.feedMode !== context.feedMode || position.historyDays !== context.historyDays) {
+    logPerf('scroll-restore', {
+      result: 'context-mismatch',
+      beforeScrollTop,
+      currentFeedMode: context.feedMode,
+      currentHistoryDays: context.historyDays,
+      ...getScrollDiagnostics(position)
+    });
+    return false;
+  }
+
+  if (Number.isFinite(position.scrollTop)) {
+    historyList.scrollTop = Math.max(position.scrollTop, 0);
+    logPerf('scroll-restore', {
+      result: 'scroll-top',
+      beforeScrollTop,
+      afterScrollTop: historyList.scrollTop,
+      ...getScrollDiagnostics(position)
+    });
+    return true;
+  }
 
   if ((position.anchorKey || position.anchorUrl) && Number.isFinite(position.offsetTop)) {
     if (restoreScrollAnchor(historyList, {
@@ -572,14 +632,18 @@ function restoreScrollPosition(data) {
       anchorKey: position.anchorKey || '',
       anchorUrl: position.anchorUrl,
       offsetTop: position.offsetTop
-    })) return true;
+    })) {
+      logPerf('scroll-restore', {
+        result: 'anchor',
+        beforeScrollTop,
+        afterScrollTop: historyList.scrollTop,
+        ...getScrollDiagnostics(position)
+      });
+      return true;
+    }
   }
 
-  if (Number.isFinite(position.scrollTop)) {
-    historyList.scrollTop = Math.max(position.scrollTop, 0);
-    return true;
-  }
-
+  logPerf('scroll-restore', { result: 'invalid', beforeScrollTop, ...getScrollDiagnostics(position) });
   return false;
 }
 
@@ -781,13 +845,19 @@ function renderHistory(data, options = {}) {
   const displayHistory = [...pinnedWatch, ...history.filter(item => !pinnedKeys.has(getItemStateKey(item)))];
 
   let html = '';
-  if (pinnedWatch.length > 0) {
-    html += `<section class="history-group"><div class="date-label date-label--watch">特关</div>`;
-    pinnedWatch.forEach(item => {
+  const pinnedGroups = {};
+  pinnedWatch.forEach(item => {
+    const label = getDateLabel(item.time);
+    if (!pinnedGroups[label]) pinnedGroups[label] = [];
+    pinnedGroups[label].push(item);
+  });
+  Object.entries(pinnedGroups).forEach(([dateLabel, items]) => {
+    html += `<section class="history-group"><div class="date-label date-label--watch">${dateLabel}</div>`;
+    items.forEach(item => {
       html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime));
     });
     html += '</section>';
-  }
+  });
 
   const groups = {};
   displayHistory.filter(item => !pinnedKeys.has(getItemStateKey(item))).forEach(item => {
@@ -1107,10 +1177,9 @@ settingsPanel.addEventListener('transitionrun', event => {
 
 settingsPanel.addEventListener('transitionend', event => {
   if (event.propertyName !== 'max-height') return;
-  // The panel resize changes the list viewport. Refresh edge controls only
-  // after the transition, so opening settings does not force a 2,500-item
-  // history layout while the first frame is being presented.
-  requestAnimationFrame(updateHistoryScrollControls);
+  // The panel remains in normal document flow; only refresh edge controls
+  // after its height transition has settled.
+  requestAnimationFrame(() => updateHistoryScrollControls({ readScrollHeight: false }));
   if (!activeSettingsTrace) return;
   logPerf('settings-transition-end', {
     id: activeSettingsTrace.id,
@@ -1253,7 +1322,12 @@ historyDaysEl.addEventListener('change', () => {
   void saveConfigWithStatus({ notifyBackground: false }).catch(() => {});
 });
 
-historyList.addEventListener('scroll', () => {
+historyList.addEventListener('scroll', event => {
+  logPerf('scroll-event', {
+    scrollTop: Math.round(historyList.scrollTop * 10) / 10,
+    trusted: event?.isTrusted === true,
+    mode: normalizeOpenPositionMode(openPositionModeEl.value)
+  });
   updateHistoryScrollControls();
   const data = {
     feedMode: feedModeEl.value,
@@ -1303,7 +1377,10 @@ const popupInitializationController = createPopupInitializationController({
   },
   waitForPaint: waitForNextPaint,
   renderCache: data => {
+    const beforeScrollTop = historyList.scrollTop;
     renderHistory(data, { applyInitialPosition: true, persistWatchPins: false });
+    suppressScrollPersistenceForFrames();
+    logPerf('scroll-render', { phase: 'cache', beforeScrollTop, afterScrollTop: historyList.scrollTop });
     logPerf('render-cache');
   },
   onStorageResolved: () => logPerf('storage-ready'),
@@ -1327,10 +1404,18 @@ const popupInitializationController = createPopupInitializationController({
     }
   },
   renderStorage: data => {
+    const beforeScrollTop = historyList.scrollTop;
     const scrollAnchor = captureScrollAnchor(historyList);
     renderHistory(data, scrollAnchor?.anchorUrl
       ? { scrollAnchor }
       : { applyInitialPosition: true });
+    suppressScrollPersistenceForFrames();
+    logPerf('scroll-render', {
+      phase: 'storage',
+      beforeScrollTop,
+      afterScrollTop: historyList.scrollTop,
+      anchor: getScrollDiagnostics(scrollAnchor || {})
+    });
     logPerf('render-storage');
     cacheLoadedPopupData(data);
     markPopupSessionWarm();
