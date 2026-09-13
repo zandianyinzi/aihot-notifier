@@ -2556,6 +2556,21 @@ async function runTests() {
   assert(typeof onStorageChangedHandler === 'function', '注册 storage badge 更新处理器');
 
   resetState({
+    historyDays: 7,
+    history: [{
+      id: 'history-days-badge',
+      title: '显示天数角标测试',
+      url: 'https://example.com/history-days-badge',
+      time: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      discoveredAt: new Date().toISOString()
+    }],
+    readIds: []
+  });
+  onStorageChangedHandler({ historyDays: { oldValue: 7, newValue: 1 } });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(badgeTexts.at(-1) === '', '修改显示天数后 badge 立即按新发布时间窗口更新');
+
+  resetState({
     apiFingerprints: { selected: 'fp-old' },
     history: [{
       id: 'v1-retained',

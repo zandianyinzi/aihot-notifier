@@ -1081,6 +1081,11 @@ function isWithinHistoryWindow(item, cutoff) {
   return getUnreadReferenceTime(item) > cutoff;
 }
 
+function isWithinDisplayWindow(item, cutoff) {
+  const publishedAt = new Date(item?.time || 0).getTime();
+  return Number.isFinite(publishedAt) && publishedAt > cutoff;
+}
+
 function toHistoryEntry(item, discoveredAt, watchMatches = [], watchMatchedAt = discoveredAt) {
   const normalizedTime = getNormalizedItemTime(item, discoveredAt);
   const entry = {
@@ -1403,7 +1408,7 @@ async function updateBadge() {
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const projectedHistory = projectHistory(history, feedMode);
   const unread = projectedHistory.filter(i => {
-    if (!isWithinHistoryWindow(i, cutoff)) return false;
+    if (!isWithinDisplayWindow(i, cutoff)) return false;
     if (getItemAliases(i).some(alias => readIdSet.has(alias))) return false;
     if (readAllBefore && getUnreadReferenceTime(i) <= new Date(readAllBefore).getTime()) return false;
     return true;
@@ -1926,7 +1931,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // 数据变化时自动更新 badge
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.history || changes.readIds || changes.readAllBefore || changes.readAllBeforeByMode || changes.feedMode) {
+  if (changes.history || changes.readIds || changes.readAllBefore || changes.readAllBeforeByMode || changes.feedMode || changes.historyDays) {
     runMigratedStateMutation(updateBadge)
       .catch(e => console.warn('[AI HOT] failed to update badge:', e));
   }

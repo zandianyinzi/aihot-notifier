@@ -67,6 +67,10 @@ function isWithinHistoryWindow(item, cutoff) {
   return getUnreadReferenceTime(item) > cutoff;
 }
 
+function isWithinDisplayWindow(item, cutoff) {
+  return getItemTime(item) > cutoff;
+}
+
 function mergeAndSort(newEntries, history, cutoffDays) {
   const cutoff = cutoffDays === Infinity ? -Infinity : Date.now() - cutoffDays * 24 * 60 * 60 * 1000;
   return [...newEntries, ...history]
@@ -316,6 +320,14 @@ console.log('\n[新发现旧内容-按发现时间保留]');
 
   assert(result.length === 1, '发布时间超出显示天数但发现时间在窗口内时保留');
   assert(result[0].title === '新发现旧内容', '保留已通知的新发现条目');
+})();
+
+console.log('\n[显示天数-严格按发布时间]');
+(function() {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const oldPublished = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const discoveredAt = new Date().toISOString();
+  assert(!isWithinDisplayWindow({ time: oldPublished, discoveredAt }, cutoff), '发布时间超出显示天数时不显示新发现旧内容');
 })();
 
 console.log('\n[新发现旧内容-排序仍按发布时间]');

@@ -235,7 +235,7 @@ async function runTests() {
   await autoPoll();
   assert(notificationsCreated.length === 1, '旧发布时间的新 URL 仍触发通知');
   assert(storageData.history.length === 1 && Boolean(storageData.history[0].discoveredAt), '已通知条目写入 history 并记录发现时间');
-  assert(badgeText === '1', `旧全部已读不吞掉新发现条目角标: "${badgeText}"`);
+  assert(badgeText === '', `发布时间超出显示天数时不计入角标: "${badgeText}"`);
 
   console.log('\n[场景11-12: 特关通知单独发送且每轮至多三条]');
   resetState({

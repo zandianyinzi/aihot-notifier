@@ -259,6 +259,8 @@ assert(/function\s+updateSettingsScrollHint\(\)/.test(popupJs), '设置面板具
 assert(/settingsInnerEl\.classList\.toggle\('has-scroll-tail',\s*hasScrollTail\)/.test(popupJs), '设置面板按滚动位置切换渐隐 class');
 assert(/settingsInnerEl\.addEventListener\('scroll',\s*updateSettingsScrollHint,\s*\{\s*passive:\s*true\s*}\)/.test(popupJs), '设置面板滚动时刷新渐隐状态');
 assert(/requestAnimationFrame\(updateSettingsScrollHint\)/.test(popupJs), '设置面板布局变化后下一帧重新计算渐隐状态');
+assert(/function\s+isWithinDisplayWindow\(item,\s*cutoff\)/.test(popupJs), '显示天数具备按发布时间筛选函数');
+assert(/const\s+history\s*=\s*rawHistory\.filter\(i\s*=>\s*isWithinDisplayWindow\(i,\s*cutoff\)\)/.test(popupJs), '主列表按发布时间应用显示天数');
 assert(/logPerf\('settings-click'/.test(popupJs), '设置面板点击记录目标状态');
 assert(/logPerf\('settings-frame'/.test(popupJs), '设置面板展开帧记录关键帧时序');
 assert(/settingsPanel\.addEventListener\('transition(run|end)'/.test(popupJs), '设置面板记录高度过渡起止事件');

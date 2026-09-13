@@ -606,6 +606,11 @@ function isWithinHistoryWindow(item, cutoff) {
   return getUnreadReferenceTime(item) > cutoff;
 }
 
+function isWithinDisplayWindow(item, cutoff) {
+  const publishedAt = new Date(item?.time || 0).getTime();
+  return Number.isFinite(publishedAt) && publishedAt > cutoff;
+}
+
 function mergeReadIds(current = [], cached = []) {
   const merged = [...new Set([...current, ...cached])];
   return merged.length > 100 ? merged.slice(merged.length - 100) : merged;
@@ -725,7 +730,7 @@ function renderHistory(data, options = {}) {
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
 
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
-  const history = rawHistory.filter(i => isWithinHistoryWindow(i, cutoff));
+  const history = rawHistory.filter(i => isWithinDisplayWindow(i, cutoff));
   const signature = getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays);
   logPerf('render-start', { items: history.length, cached: signature === lastRenderSignature });
 
