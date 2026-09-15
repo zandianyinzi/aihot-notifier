@@ -272,7 +272,7 @@ assert(/logPerf\('scroll-save'/.test(popupJs), '滚动位置保存记录快照')
 assert(/logPerf\('scroll-event'/.test(popupJs), '滚动事件记录当前位置');
 assert(/function\s+suppressScrollPersistenceForFrames\(/.test(popupJs), '初始化恢复后暂时抑制滚动位置持久化');
 assert(/if\s*\(scrollPersistenceSuppressed\)\s*return;/.test(popupJs), '滚动位置持久化跳过初始化滚动事件');
-assert(/if\s*\(Number\.isFinite\(position\.scrollTop\)\)[\s\S]*?historyList\.scrollTop\s*=\s*Math\.max\(position\.scrollTop,\s*0\)[\s\S]*?if\s*\(\(position\.anchorKey/.test(popupJs), '初始恢复优先使用精确 scrollTop，避免离屏锚点几何估算漂移');
+// Refresh/reopen position behavior is exercised by test-popup-scroll.js.
 assert(!/settingsPanelController\.toggle\(\);\s*requestAnimationFrame\(updateSettingsScrollHint\);\s*requestAnimationFrame\(updateHistoryScrollControls\)/.test(popupJs), '设置面板展开首帧不强制测量历史列表布局');
 assert(/settingsPanel\.addEventListener\('transitionend',[\s\S]*?requestAnimationFrame\(\(\)\s*=>\s*updateHistoryScrollControls\(\{\s*readScrollHeight:\s*false\s*\}\)\)/.test(popupJs), '设置面板过渡结束后复用历史列表尺寸刷新边缘按钮');
 const settingGroupRule = popupHtml.match(/\.setting-group\s*{([\s\S]*?)}/i)?.[1] || '';

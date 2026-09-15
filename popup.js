@@ -433,7 +433,7 @@ function renderItemHtml(item, isUnread, options = {}) {
   const summaryHtml = summary ? `<div class="item-summary">${summary}</div>` : '';
   const stateKey = getItemStateKey(item);
   const openUrl = getItemOpenUrl(item);
-  return `<div class="item ${isUnread ? 'unread' : 'read'} ${item.watchMatched ? 'watch-item' : ''}" data-key="${escapeHtml(stateKey)}" data-url="${escapeHtml(openUrl)}" role="link" tabindex="0">
+  return `<div class="item ${isUnread ? 'unread' : 'read'} ${item.watchMatched ? 'watch-item' : ''}" data-key="${escapeHtml(stateKey)}" data-url="${escapeHtml(openUrl)}"${options.watchPinned ? ' data-watch-pinned="true"' : ''} role="link" tabindex="0">
     <div class="item-body">
       <div class="item-title">${options.prefix || ''}${title}</div>
       ${summaryHtml}
@@ -615,23 +615,15 @@ function restoreScrollPosition(data) {
     return false;
   }
 
-  if (Number.isFinite(position.scrollTop)) {
-    historyList.scrollTop = Math.max(position.scrollTop, 0);
-    logPerf('scroll-restore', {
-      result: 'scroll-top',
-      beforeScrollTop,
-      afterScrollTop: historyList.scrollTop,
-      ...getScrollDiagnostics(position)
-    });
-    return true;
-  }
-
+  // Content above the saved item can change between popup sessions.
   if ((position.anchorKey || position.anchorUrl) && Number.isFinite(position.offsetTop)) {
     if (restoreScrollAnchor(historyList, {
       scrollTop: position.scrollTop,
       anchorKey: position.anchorKey || '',
       anchorUrl: position.anchorUrl,
-      offsetTop: position.offsetTop
+      offsetTop: position.offsetTop,
+      anchorWasUnreadWatch: position.anchorWasUnreadWatch,
+      anchorWasPinnedWatch: position.anchorWasPinnedWatch
     })) {
       logPerf('scroll-restore', {
         result: 'anchor',
@@ -641,6 +633,17 @@ function restoreScrollPosition(data) {
       });
       return true;
     }
+  }
+
+  if (Number.isFinite(position.scrollTop)) {
+    historyList.scrollTop = Math.max(position.scrollTop, 0);
+    logPerf('scroll-restore', {
+      result: 'scroll-top',
+      beforeScrollTop,
+      afterScrollTop: historyList.scrollTop,
+      ...getScrollDiagnostics(position)
+    });
+    return true;
   }
 
   logPerf('scroll-restore', { result: 'invalid', beforeScrollTop, ...getScrollDiagnostics(position) });
@@ -854,7 +857,7 @@ function renderHistory(data, options = {}) {
   Object.entries(pinnedGroups).forEach(([dateLabel, items]) => {
     html += `<section class="history-group"><div class="date-label date-label--watch">${dateLabel}</div>`;
     items.forEach(item => {
-      html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime));
+      html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime), { watchPinned: true });
     });
     html += '</section>';
   });
@@ -1341,6 +1344,8 @@ scrollToBottomBtn.addEventListener('click', () => scrollHistoryTo(historyList.sc
 
 pollBtn.addEventListener('click', async () => {
   const feedbackStartedAt = Date.now();
+  // Save synchronously in case the popup closes before the request completes.
+  writeScrollPosition({ feedMode: feedModeEl.value, historyDays: Number(historyDaysEl.value) });
   clearButtonFeedback(pollBtn);
   pollBtn.classList.add('is-loading');
   pollBtn.disabled = true;
@@ -1348,8 +1353,9 @@ pollBtn.addEventListener('click', async () => {
     const response = await chrome.runtime.sendMessage({ type: 'pollNow' });
     if (!response || response.ok === false) throw new Error(response?.error || 'manual poll failed');
     const { failCount = 0 } = await chrome.storage.local.get('failCount');
-    clearScrollPosition();
     await loadHistory();
+    // A skipped render may emit no scroll event; persist the current anchor explicitly.
+    writeScrollPosition({ feedMode: feedModeEl.value, historyDays: Number(historyDaysEl.value) });
     showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
   } catch (e) {
     showButtonResult(pollBtn, 'is-result-danger', Date.now() - feedbackStartedAt);

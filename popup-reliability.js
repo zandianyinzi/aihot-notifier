@@ -197,7 +197,8 @@
       anchorKey: anchorItem.dataset?.key || '',
       anchorUrl: anchorItem.dataset?.url || '',
       offsetTop: anchorItem.getBoundingClientRect().top - listTop,
-      ...(anchorWasUnreadWatch ? { anchorWasUnreadWatch: true } : {})
+      ...(anchorWasUnreadWatch ? { anchorWasUnreadWatch: true } : {}),
+      ...(anchorItem.dataset?.watchPinned === 'true' ? { anchorWasPinnedWatch: true } : {})
     };
   }
 
@@ -209,6 +210,8 @@
       anchorKey: anchor?.anchorKey || '',
       anchorUrl: anchor?.anchorUrl || '',
       ...(Number.isFinite(anchor?.offsetTop) ? { offsetTop: anchor.offsetTop } : {}),
+      ...(anchor?.anchorWasUnreadWatch ? { anchorWasUnreadWatch: true } : {}),
+      ...(anchor?.anchorWasPinnedWatch ? { anchorWasPinnedWatch: true } : {}),
       savedAt
     };
   }
@@ -226,7 +229,8 @@
       return false;
     }
 
-    if (anchor.anchorWasUnreadWatch && !anchorItem.classList?.contains('unread')) {
+    if ((anchor.anchorWasUnreadWatch && !anchorItem.classList?.contains('unread')) ||
+        (anchor.anchorWasPinnedWatch && anchorItem.dataset?.watchPinned !== 'true')) {
       scroller.scrollTop = fallbackScrollTop;
       return false;
     }
