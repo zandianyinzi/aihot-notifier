@@ -551,7 +551,7 @@ assert(hasDeclaration(dateLabelRule, 'margin-right', '6px'), '日期浮标靠右
 assert(hasDeclaration(dateLabelRule, 'margin-bottom', '-24px'), '日期浮标使用负下边距覆盖在卡片右上角');
 assert(/background:\s*color-mix\(in\s+srgb,\s*var\(--accent\)/.test(dateLabelRule), '日期浮标使用主题色背景');
 assert(/border:\s*1px\s+solid\s+color-mix\(in\s+srgb,\s*var\(--accent\)/.test(dateLabelRule), '日期浮标使用主题色边框');
-assert(hasDeclaration(dateLabelRule, 'padding', /2px\s+8px/), '日期浮标使用紧凑内边距');
+assert(hasDeclaration(dateLabelRule, 'padding', /2px\s+6px/), '日期浮标使用紧凑内边距');
 assert(hasDeclaration(dateLabelRule, 'border-radius', '10px'), '日期浮标保持胶囊圆角');
 assert(hasDeclaration(dateLabelRule, 'width', 'max-content'), '日期浮标按内容宽度靠右布局');
 assert(!hasDeclaration(dateLabelRule, 'margin', /6px\s+18px\s+6px\s+auto/), '日期浮标不退化为两卡片之间的靠右独立行');

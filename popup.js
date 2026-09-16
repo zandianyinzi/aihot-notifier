@@ -271,13 +271,9 @@ function formatTime(isoStr) {
 function getDateLabel(isoStr) {
   const d = new Date(isoStr || Date.now());
   if (!Number.isFinite(d.getTime())) return '';
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  if (d.toDateString() === today.toDateString()) return '今天';
-  if (d.toDateString() === yesterday.toDateString()) return '昨天';
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}/${day}`;
 }
 
 
