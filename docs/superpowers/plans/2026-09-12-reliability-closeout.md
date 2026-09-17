@@ -1,5 +1,7 @@
 # Reliability Closeout Implementation Plan
 
+> 历史实施计划，保留当时步骤供追溯；复选框不是当前待办。当前行为见 [README](../../../README.md#技术说明)，本文的 legacy fingerprint 依赖不再生效。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the audited background reliability, popup accessibility/feedback, and storage-boundary gaps while preserving the current extension contract.

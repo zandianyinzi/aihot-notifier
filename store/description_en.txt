@@ -6,9 +6,9 @@ Automatically tracks the latest AI updates and delivers desktop notifications, s
 
 • Automatic monitoring for AI news with desktop notifications
 • Click notifications or list items to jump directly to the source
-• News list with title + summary for quick scanning
+• News list with title + summary, grouped by date with MM/DD labels
 • Read/unread state persists across browser restarts
-• Category tags (Model / Product / Industry / Paper / Tips) for quick filtering
+• Category tags (Model / Product / Industry / Paper / Tips) for quick scanning
 
 ✦ Personalization
 
@@ -17,8 +17,8 @@ Automatically tracks the latest AI updates and delivers desktop notifications, s
 • 5 font size levels: Small / Default / Large / Extra Large / Huge
 • Position mode: Free Browse / Unread First
 • Configurable polling interval: 2 / 5 / 15 / 30 / 60 minutes
-• Configurable display range: 1 / 2 / 3 / 5 days (default: 2 days)
+• Configurable display range: 1 / 2 / 3 / 5 days (default: 1 day)
 
 ✦ Data Source
 
-News curated from aihot.virxact.com, covering AI model releases, product updates, industry news, academic papers, and usage tips. All data is stored locally — no user information collected.
+News curated from aihot.news, covering AI model releases, product updates, industry news, academic papers, and usage tips. Preferences, cached news, and read state stay on your device; no user information is collected.

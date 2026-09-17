@@ -1,5 +1,7 @@
 # AI HOT v1 Migration and Reliability Design
 
+> 历史迁移设计。当前轮询直接使用 v1 items 的 ETag，不再请求 legacy fingerprint；现役合同见 [README](../../../README.md#技术说明)。
+
 ## Goal
 
 Keep the extension working after the AI HOT legacy public API sunset while eliminating the refresh and state races found in the audit.

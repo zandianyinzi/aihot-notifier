@@ -1,5 +1,7 @@
 # Reliability Closeout Design
 
+> 历史设计快照。legacy fingerprint 依赖已退役；状态栏目前有消息时为 22px、无消息时隐藏，本文 28px 方案不再适用。现役合同见 [README](../../../README.md#技术说明)。
+
 ## Goal
 
 Raise the extension from a reliable prototype to a production-ready MV3 extension by closing the audited data-integrity, request-lifecycle, accessibility, feedback, and storage-boundary gaps without changing permissions or the public product model.

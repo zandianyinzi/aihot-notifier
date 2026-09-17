@@ -744,9 +744,13 @@ assert(/trigger\.setAttribute\('aria-expanded',\s*isOpen\s*\?\s*'true'\s*:\s*'fa
 assert(/panel\.toggleAttribute\('inert',\s*!isOpen\)/.test(popupReliabilityJs), '设置关闭时同步 inert');
 assert(/groups\[0\][\s\S]*?querySelector\('\.setting-group-title'\)[\s\S]*?\.focus\(\)/.test(popupReliabilityJs), '设置打开后焦点进入首个分组标题');
 assert(/trigger\.focus\(\)/.test(popupReliabilityJs), '设置关闭后焦点返回触发按钮');
-assert(/设置面板按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，打开设置时默认不展开任何分组/.test(claudeMd), 'CLAUDE 描述设置面板默认不展开');
-assert(/主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧 hover 颜色条/.test(claudeMd), 'CLAUDE 描述主列表 hover 不使用颜色条');
-assert(/Windows\/PowerShell 无 bash 时使用 Compress-Archive/.test(claudeMd), 'CLAUDE 记录 PowerShell 打包替代命令');
+assert(
+  fs.lstatSync('CLAUDE.md').isSymbolicLink() &&
+    fs.readlinkSync('CLAUDE.md') === 'AGENTS.md' && claudeMd === agentsMd,
+  'CLAUDE 通过相对软链接读取 AGENTS 规则源'
+);
+assert(/主列表 hover 只使用整行轻压暗反馈，不使用左侧或右侧 hover 颜色条/.test(agentsMd), 'AGENTS 描述主列表 hover 不使用颜色条');
+assert(/Windows\/PowerShell 无 bash 时使用 Compress-Archive/.test(agentsMd), 'AGENTS 记录 PowerShell 打包替代命令');
 assert(/设置面板(?:使用原生折叠分组，打开设置时|按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，)默认不展开任何分组/.test(agentsMd), 'AGENTS 描述设置面板默认不展开');
 assert(!/默认只展开 `常规`/.test(agentsMd), 'AGENTS 不再描述默认展开常规');
 

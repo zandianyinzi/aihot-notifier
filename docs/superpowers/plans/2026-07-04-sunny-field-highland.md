@@ -1,5 +1,7 @@
 # Sunny Field Sky Theme Implementation Note
 
+> 历史主题方案：`clear-light` 已退役，当前主题见 [README](../../../README.md#功能)。本文仅用于追溯旧设计，不作为当前实施任务。
+
 **Goal:** Replace the old `clear-light` Sunny Field theme with a cooler sky-blue/light-paper palette while preserving the theme key, display name, storage compatibility, and shared popup behavior.
 
 **Outcome:** Implemented the sky-field direction. The palette reduces the previous green cast, uses blue-gray text and borders for long reading, keeps category colors distinct, and preserves the AI HOT orange only for hot-state emphasis.

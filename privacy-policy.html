@@ -14,10 +14,10 @@
 </head>
 <body>
   <h1>AI HOT Notifier 隐私政策</h1>
-  <p class="date">最后更新：2026年6月5日</p>
+  <p class="date">最后更新：2026年9月17日</p>
 
   <h2>概述</h2>
-  <p>AI HOT Notifier 是一款浏览器扩展，用于监控 aihot.virxact.com 的公开资讯并推送桌面通知。我们重视您的隐私，本扩展的设计原则是最小化数据使用。</p>
+  <p>AI HOT Notifier 是一款浏览器扩展，通过 aihot.news 的公开 API 获取 AI HOT 资讯并推送桌面通知。我们重视您的隐私，本扩展的设计原则是最小化数据使用。</p>
 
   <h2>数据收集</h2>
   <p><strong>我们不收集任何用户个人数据。</strong></p>
@@ -35,18 +35,22 @@
     <li>用户偏好设置（主题、字体、轮询间隔等）</li>
     <li>资讯历史记录（标题、链接、来源、时间）</li>
     <li>已读状态标记</li>
+    <li>特关规则及提醒状态</li>
+    <li>阅读位置和界面缓存</li>
   </ul>
   <p>这些数据完全保存在本地，不会上传到任何服务器。</p>
+  <p>弹窗性能日志仅保存在本次弹窗内存和浏览器控制台中，不会自动上传；点击“拷贝日志”时会写入本机剪贴板。</p>
 
   <h2>网络请求</h2>
-  <p>扩展仅向 aihot.virxact.com 的公开 API 发起 GET 请求以获取最新资讯，不携带任何用户标识信息。</p>
+  <p>扩展通过 GET 请求访问 aihot.news 的公开资讯 API，并可能使用 ETag 条件请求避免重复下载内容。请求不上传您的偏好、阅读记录、特关规则或本地日志。API 服务会收到正常网络连接所需的信息，例如 IP 地址。</p>
+  <p>点击资讯或品牌链接后，浏览器会打开对应网站；目标网站的数据处理适用其自身隐私政策。</p>
 
   <h2>权限说明</h2>
   <ul>
     <li><strong>alarms</strong>：用于定时轮询</li>
     <li><strong>notifications</strong>：用于推送桌面通知</li>
     <li><strong>storage</strong>：用于本地保存设置和历史记录</li>
-    <li><strong>host_permissions (aihot.virxact.com)</strong>：用于访问资讯 API</li>
+    <li><strong>host_permissions (https://aihot.news/*)</strong>：用于访问资讯 API</li>
   </ul>
 
   <h2>联系方式</h2>

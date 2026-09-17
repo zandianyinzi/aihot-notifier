@@ -1,5 +1,7 @@
 # Popup List Hover Feedback Design
 
+> 历史视觉设计依据。整行 hover 与无状态色条的约定仍适用；当前标题字重固定 500，以颜色区分已读，具体色值以代码为准，见 [README](../../../README.md#界面约束)。
+
 Date: 2026-07-10
 Updated: 2026-07-24
 

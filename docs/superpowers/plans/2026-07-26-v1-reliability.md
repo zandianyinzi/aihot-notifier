@@ -1,5 +1,7 @@
 # AI HOT v1 Migration and Reliability Implementation Plan
 
+> 历史实施计划，保留当时步骤供追溯；复选框不是当前待办。当前 API 与状态规则见 [README](../../../README.md#技术说明)，旧 fingerprint 方案已退役。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Migrate the extension to AI HOT API v1 and make polling, persistence, links, and popup changes race-safe.

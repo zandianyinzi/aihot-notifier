@@ -2,6 +2,9 @@
 // 直接请求 API，交叉验证 selected/all 数据契约和扩展容错逻辑
 // 运行: node test-e2e.js
 
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0';
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -234,20 +237,16 @@ function simulateResetAndPoll(apiItems, historyDays) {
     if (apiTodayItems.length === 0) console.warn('  ⚠ API 当前没有今日条目');
 
     console.log('\n[扩展展示逻辑验证]');
-    // 模拟扩展 popup.js 的 formatTime 和 getDateLabel
-    function formatTime(isoStr) {
-      const d = new Date(isoStr);
-      return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-    }
-    function getDateLabel(isoStr) {
-      const d = new Date(isoStr);
-      const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      if (d.toDateString() === today.toDateString()) return '今天';
-      if (d.toDateString() === yesterday.toDateString()) return '昨天';
-      return `${d.getMonth() + 1}月${d.getDate()}日`;
-    }
+    // 执行当前弹窗的纯格式化函数，避免测试副本滞后于界面。
+    const popupSource = fs.readFileSync(path.join(__dirname, 'popup.js'), 'utf8');
+    const formatterSource = ['formatTime', 'getDateLabel'].map(name => {
+      const source = popupSource.match(new RegExp(`function ${name}\\(isoStr\\) \\{[\\s\\S]*?\\n\\}`));
+      if (!source) throw new Error(`Missing popup formatter: ${name}`);
+      return source[0];
+    }).join('\n');
+    const { formatTime, getDateLabel } = vm.runInNewContext(
+      `${formatterSource}\n({ formatTime, getDateLabel });`, { Date }
+    );
     // 展示顺序只验证扩展自身的排序结果，而不依赖 v1 原始响应顺序。
     const top5 = histSelected.slice(0, 5);
     console.log('  扩展中将展示为:');
@@ -257,10 +256,12 @@ function simulateResetAndPoll(apiItems, historyDays) {
       console.log(`    ${idx + 1}. [${label} ${time}] ${item.title.slice(0, 35)}...`);
     });
     // 验证日期分组正确性
-    const todayLabel = getDateLabel(new Date().toISOString());
-    assert(todayLabel === '今天', '当前时间 getDateLabel 返回"今天"');
-    const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    assert(getDateLabel(yesterdayDate) === '昨天', '24h 前 getDateLabel 返回"昨天"');
+    const calendarFormat = new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit' });
+    const todayDate = new Date();
+    assert(getDateLabel(todayDate.toISOString()) === calendarFormat.format(todayDate), '当前时间使用本地 MM/DD 日期');
+    const yesterdayDate = new Date(todayDate);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    assert(getDateLabel(yesterdayDate.toISOString()) === calendarFormat.format(yesterdayDate), '前一天也使用本地 MM/DD 日期');
     // 验证排列顺序：扩展中时间应该递减
     let orderCorrect = true;
     for (let i = 1; i < top5.length; i++) {
