@@ -68,6 +68,7 @@ function createPopup(savedStorage = new Map()) {
   getElement('historyDays').value = '1';
   getElement('openPositionMode').value = 'free';
   const data = {
+    enabled: true, interval: 5, theme: 'slate-night', fontFamily: 'noto-serif', fontSize: 'large',
     feedMode: 'all', historyDays: 1, openPositionMode: 'free', readIds: [],
     history: Array.from({ length: 10 }, (_, index) => ({
       id: `item-${index}`, url: `https://example.com/${index}`, title: `Item ${index}`,
@@ -85,7 +86,11 @@ function createPopup(savedStorage = new Map()) {
     storage: {
       local: {
         // Hold initialization while tests drive the actual render/load entry points.
-        get: async () => booting ? new Promise(() => {}) : { ...data }
+        get: async keys => {
+          if (booting) return new Promise(() => {});
+          const requested = Array.isArray(keys) ? keys : Object.keys(data);
+          return Object.fromEntries(requested.filter(key => key in data).map(key => [key, data[key]]));
+        }
       },
       onChanged: { addListener() {} }
     }
@@ -132,6 +137,28 @@ test('refresh without new items preserves the saved position for reopening', asy
   const reopened = createPopup(popup.savedStorage);
   reopened.sandbox.applyInitialPosition(reopened.data);
   assert.equal(reopened.list.scrollTop, 125);
+});
+
+test('refresh keeps non-default font and size in the warm popup cache', async () => {
+  const popup = createPopup();
+  popup.sandbox.writePopupCache({
+    enabled: true,
+    interval: 5,
+    theme: 'slate-night',
+    fontFamily: 'noto-serif',
+    fontSize: 'large',
+    feedMode: 'all',
+    historyDays: 1,
+    history: popup.data.history
+  });
+
+  await popup.sandbox.loadHistory();
+
+  const cached = popup.sandbox.readPopupCache();
+  assert.equal(cached.fontFamily, 'noto-serif');
+  assert.equal(cached.fontSize, 'large');
+  assert.equal(cached.theme, 'slate-night');
+  assert.equal(cached.interval, 5);
 });
 
 test('refresh saves immediately even while the scroll debounce and request are pending', async () => {

@@ -977,6 +977,7 @@ function saveConfigWithStatus(options = {}) {
 }
 
 const POPUP_HISTORY_STORAGE_KEYS = [
+  'enabled', 'interval', 'theme', 'fontFamily', 'fontSize',
   'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays',
   'feedMode', 'openPositionMode', 'watchRules', 'allFeedContinuation'
 ];

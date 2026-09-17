@@ -998,7 +998,8 @@
       font-weight: 500;
       font-variant-numeric: tabular-nums;
       color: var(--accent);
-      background: color-mix(in srgb, var(--accent) 8%, var(--bg-sub));
+      /* Keep the original 8:92 tint; weights totaling 25% make the background translucent. */
+      background: color-mix(in srgb, var(--accent) 2%, var(--bg-sub) 23%);
       border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
       padding: 2px 6px;
       border-radius: 10px;
@@ -1007,7 +1008,7 @@
     .date-label--watch {
       color: var(--accent);
       border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-      background: color-mix(in srgb, var(--accent) 8%, var(--bg-sub));
+      background: color-mix(in srgb, var(--accent) 2%, var(--bg-sub) 23%);
     }
 
     /* Items */
