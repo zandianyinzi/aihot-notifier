@@ -46,7 +46,7 @@
       --rule-author: #d4a96a;
       --brand-hot: #e85500;
       --brand-hot-dot: #e40012;
-      --brand-hot-glow: rgba(228,0,18,0.45);
+      --brand-hot-glow: rgba(228,0,18,0.30);
     }
 
     [data-theme="green-dark"] {
@@ -90,7 +90,7 @@
       --rule-author: #d4bc8a;
       --brand-hot: #e85500;
       --brand-hot-dot: #e40012;
-      --brand-hot-glow: rgba(228,0,18,0.45);
+      --brand-hot-glow: rgba(228,0,18,0.30);
     }
 
     [data-theme="chrome-dark"] {
@@ -134,7 +134,7 @@
       --rule-author: #b8d48c;
       --brand-hot: #e85500;
       --brand-hot-dot: #e40012;
-      --brand-hot-glow: rgba(228,0,18,0.45);
+      --brand-hot-glow: rgba(228,0,18,0.30);
     }
 
     [data-theme="slate-night"] {
@@ -178,7 +178,7 @@
       --rule-author: #d4b870;
       --brand-hot: #e85500;
       --brand-hot-dot: #e40012;
-      --brand-hot-glow: rgba(228,0,18,0.45);
+      --brand-hot-glow: rgba(228,0,18,0.30);
     }
     [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --item-pad: 12px; --skeleton-title-h: 13px; --skeleton-summary-h: 12px; --skeleton-meta-h: 10px; }
     [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --item-pad: 14px; --skeleton-title-h: 14px; --skeleton-summary-h: 13px; --skeleton-meta-h: 10px; }
@@ -285,12 +285,14 @@
       filter: drop-shadow(0 0 3px var(--brand-hot-glow));
       transform-box: fill-box;
       transform-origin: center;
-      animation: logo-dot-breathe 2.2s ease-in-out infinite;
+      opacity: 0.8;
+      transform: scale(0.8);
+      animation: logo-dot-breathe 3.2s ease-in-out infinite;
     }
 
     @keyframes logo-dot-breathe {
-      0%, 100% { opacity: 1; transform: scale(1); filter: drop-shadow(0 0 3px var(--brand-hot-glow)); }
-      50% { opacity: 0.52; transform: scale(0.72); filter: drop-shadow(0 0 3px var(--brand-hot-glow)); }
+      0%, 100% { opacity: 0.8; transform: scale(0.8); filter: drop-shadow(0 0 3px var(--brand-hot-glow)); }
+      50% { opacity: 0.6; transform: scale(0.6); filter: drop-shadow(0 0 3px var(--brand-hot-glow)); }
     }
 
     @media (prefers-reduced-motion: reduce) {

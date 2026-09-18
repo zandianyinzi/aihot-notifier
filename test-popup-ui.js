@@ -167,12 +167,12 @@ const brandLogoSvgScale = Math.min(
   brandLogoWidth / brandLogoViewBox[2],
   brandLogoHeight / brandLogoViewBox[3]
 );
-const brandLogoDotMinimumDiameter = brandLogoDotRadius * 2 * brandLogoSvgScale * 0.72;
+const brandLogoDotMinimumDiameter = brandLogoDotRadius * 2 * brandLogoSvgScale * 0.6;
 assert(hasDeclaration(brandLogoMarkRule, 'stroke', /var\(--brand-hot\)/), 'Logo 线条颜色使用品牌热源 token');
 assert(hasDeclaration(brandLogoDotRule, 'fill', /var\(--brand-hot-dot\)/), 'Logo 红点颜色使用品牌热源红点 token');
 assert(hasDeclaration(brandLogoDotRule, 'filter', /drop-shadow\(0 0 3px var\(--brand-hot-glow\)\)/), 'Logo 红点光晕使用品牌热源光晕 token');
-assert(/@keyframes\s+logo-dot-breathe\s*{[\s\S]*?50%\s*{\s*opacity:\s*0\.52;\s*transform:\s*scale\(0\.72\);\s*filter:\s*drop-shadow\(0 0 3px var\(--brand-hot-glow\)\);\s*}/.test(popupHtml), 'Logo 红点最小帧使用指定尺寸、透明度与光晕');
-assert(Math.abs(brandLogoDotMinimumDiameter - 3) < 0.01, 'Logo 红点最小帧实际直径约为 3px');
+assert(/@keyframes\s+logo-dot-breathe\s*{[\s\S]*?50%\s*{\s*opacity:\s*0\.6;\s*transform:\s*scale\(0\.6\);\s*filter:\s*drop-shadow\(0 0 3px var\(--brand-hot-glow\)\);\s*}/.test(popupHtml), 'Logo 红点最小帧使用指定尺寸、透明度与光晕');
+assert(Math.abs(brandLogoDotMinimumDiameter - 2.5) < 0.01, 'Logo 红点最小帧实际直径约为 2.50px');
 
 
 console.log('\n[主题列表/石青主题]');
