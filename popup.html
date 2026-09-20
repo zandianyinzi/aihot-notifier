@@ -982,37 +982,6 @@
       50% { opacity: 0.62; }
     }
 
-    /* Floating date badge */
-    .history-group {
-      position: relative;
-    }
-
-    .date-label {
-      position: sticky;
-      top: 6px;
-      z-index: 2;
-      display: block;
-      width: max-content;
-      margin-left: auto;
-      margin-right: 6px;
-      margin-bottom: -24px;
-      font-size: 10px;
-      font-weight: 500;
-      font-variant-numeric: tabular-nums;
-      color: var(--accent);
-      /* Keep the original 8:92 tint; weights totaling 25% make the background translucent. */
-      background: color-mix(in srgb, var(--accent) 2%, var(--bg-sub) 23%);
-      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-      padding: 2px 6px;
-      border-radius: 10px;
-    }
-
-    .date-label--watch {
-      color: var(--accent);
-      border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-      background: color-mix(in srgb, var(--accent) 2%, var(--bg-sub) 23%);
-    }
-
     /* Items */
     .item {
       display: flex;
@@ -1132,6 +1101,18 @@
       display: flex;
       align-items: center;
       gap: 6px;
+    }
+
+    .item-source {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .item-datetime {
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     }
 
     .item-meta .sep {

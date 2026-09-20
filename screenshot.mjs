@@ -168,7 +168,7 @@ function buildWrapperHtml(theme) {
           div.className = `item ${isUnread ? 'unread' : 'read'}`;
 
           const time = new Date(now - item.minutesAgo * 60 * 1000);
-          const timeStr = `${time.getHours().toString().padStart(2,'0')}:${time.getMinutes().toString().padStart(2,'0')}`;
+          const timeStr = `${String(time.getMonth() + 1).padStart(2, '0')}/${String(time.getDate()).padStart(2, '0')} ${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
           const cls = catClass[item.category] || 'cat-default';
 
           div.innerHTML = `
@@ -178,7 +178,7 @@ function buildWrapperHtml(theme) {
               <div class="item-meta">
                 <span class="cat-tag ${cls}">${item.category}</span>
                 <span class="sep"></span>
-                <span>${timeStr}</span>
+                <span class="item-datetime">${timeStr}</span>
               </div>
             </div>
           `;
@@ -301,7 +301,7 @@ function buildWrapperHtml(theme) {
         div.className = `item ${isUnread ? 'unread' : 'read'}`;
 
         const time = new Date(now - item.minutesAgo * 60 * 1000);
-        const timeStr = `${time.getHours().toString().padStart(2,'0')}:${time.getMinutes().toString().padStart(2,'0')}`;
+        const timeStr = `${String(time.getMonth() + 1).padStart(2, '0')}/${String(time.getDate()).padStart(2, '0')} ${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
         const cls = catClass[item.category] || 'cat-default';
 
         div.innerHTML = `
@@ -311,7 +311,7 @@ function buildWrapperHtml(theme) {
             <div class="item-meta">
               <span class="cat-tag ${cls}">${item.category}</span>
               <span class="sep"></span>
-              <span>${timeStr}</span>
+              <span class="item-datetime">${timeStr}</span>
             </div>
           </div>
         `;
@@ -472,7 +472,7 @@ function buildWrapperHtml(theme) {
         div.className = `item ${isUnread ? 'unread' : 'read'}`;
 
         const time = new Date(now - item.minutesAgo * 60 * 1000);
-        const timeStr = `${time.getHours().toString().padStart(2,'0')}:${time.getMinutes().toString().padStart(2,'0')}`;
+        const timeStr = `${String(time.getMonth() + 1).padStart(2, '0')}/${String(time.getDate()).padStart(2, '0')} ${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
         const cls = catClass[item.category] || 'cat-default';
 
         div.innerHTML = `
@@ -482,7 +482,7 @@ function buildWrapperHtml(theme) {
             <div class="item-meta">
               <span class="cat-tag ${cls}">${item.category}</span>
               <span class="sep"></span>
-              <span>${timeStr}</span>
+              <span class="item-datetime">${timeStr}</span>
             </div>
           </div>
         `;

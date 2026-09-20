@@ -216,9 +216,9 @@ function simulateResetAndPoll(apiItems, historyDays) {
     const tzOffset = -utcTime.getTimezoneOffset() / 60;
     console.log(`  API 最新: ${latestItem.publishedAt} → 本地 ${utcTime.toLocaleTimeString()} (UTC${tzOffset >= 0 ? '+' : ''}${tzOffset})`);
     assert(!isNaN(utcTime.getTime()), 'publishedAt 可正确解析为 Date');
-    // 扩展 popup.js 中 formatTime 使用 getHours/getMinutes（本地时间），验证转换正确
-    const expectedDisplay = `${utcTime.getHours().toString().padStart(2,'0')}:${utcTime.getMinutes().toString().padStart(2,'0')}`;
-    assert(expectedDisplay.match(/^\d{2}:\d{2}$/), `本地时间格式正确: ${expectedDisplay}`);
+    // 扩展 popup.js 使用本地月、日、时、分组合显示，验证转换正确。
+    const expectedDisplay = `${String(utcTime.getMonth() + 1).padStart(2, '0')}/${String(utcTime.getDate()).padStart(2, '0')} ${String(utcTime.getHours()).padStart(2, '0')}:${String(utcTime.getMinutes()).padStart(2, '0')}`;
+    assert(expectedDisplay.match(/^\d{2}\/\d{2} \d{2}:\d{2}$/), `本地日期时间格式正确: ${expectedDisplay}`);
     const ageMs = Date.now() - utcTime.getTime();
     console.log(`  最新条目 ${(ageMs / 3600000).toFixed(1)}h 前（诊断信息）`);
     if (ageMs < 0) console.warn('  ⚠ API 最新条目时间在未来');
@@ -239,29 +239,24 @@ function simulateResetAndPoll(apiItems, historyDays) {
     console.log('\n[扩展展示逻辑验证]');
     // 执行当前弹窗的纯格式化函数，避免测试副本滞后于界面。
     const popupSource = fs.readFileSync(path.join(__dirname, 'popup.js'), 'utf8');
-    const formatterSource = ['formatTime', 'getDateLabel'].map(name => {
-      const source = popupSource.match(new RegExp(`function ${name}\\(isoStr\\) \\{[\\s\\S]*?\\n\\}`));
-      if (!source) throw new Error(`Missing popup formatter: ${name}`);
-      return source[0];
-    }).join('\n');
-    const { formatTime, getDateLabel } = vm.runInNewContext(
-      `${formatterSource}\n({ formatTime, getDateLabel });`, { Date }
+    const formatterSource = popupSource.match(/function formatDateTime\(isoStr\) \{[\s\S]*?\n\}/);
+    if (!formatterSource) throw new Error('Missing popup formatter: formatDateTime');
+    const formatDateTime = vm.runInNewContext(
+      `${formatterSource[0]}\nformatDateTime;`, { Date }
     );
     // 展示顺序只验证扩展自身的排序结果，而不依赖 v1 原始响应顺序。
     const top5 = histSelected.slice(0, 5);
     console.log('  扩展中将展示为:');
     top5.forEach((item, idx) => {
-      const label = getDateLabel(item.time);
-      const time = formatTime(item.time);
-      console.log(`    ${idx + 1}. [${label} ${time}] ${item.title.slice(0, 35)}...`);
+      console.log(`    ${idx + 1}. [${formatDateTime(item.time)}] ${item.title.slice(0, 35)}...`);
     });
-    // 验证日期分组正确性
-    const calendarFormat = new Intl.DateTimeFormat('en-US', { month: '2-digit', day: '2-digit' });
+    // 验证每条资讯使用本地 MM/DD HH:mm 日期时间。
+    const expectedLocalDateTime = date => `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
     const todayDate = new Date();
-    assert(getDateLabel(todayDate.toISOString()) === calendarFormat.format(todayDate), '当前时间使用本地 MM/DD 日期');
+    assert(formatDateTime(todayDate.toISOString()) === expectedLocalDateTime(todayDate), '当前时间使用本地 MM/DD HH:mm 日期时间');
     const yesterdayDate = new Date(todayDate);
     yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    assert(getDateLabel(yesterdayDate.toISOString()) === calendarFormat.format(yesterdayDate), '前一天也使用本地 MM/DD 日期');
+    assert(formatDateTime(yesterdayDate.toISOString()) === expectedLocalDateTime(yesterdayDate), '前一天也使用本地 MM/DD HH:mm 日期时间');
     // 验证排列顺序：扩展中时间应该递减
     let orderCorrect = true;
     for (let i = 1; i < top5.length; i++) {

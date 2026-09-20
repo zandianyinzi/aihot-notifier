@@ -262,18 +262,14 @@ function writePopupCache(partialData) {
   }
 }
 
-function formatTime(isoStr) {
-  const d = new Date(isoStr || Date.now());
-  if (!Number.isFinite(d.getTime())) return '';
-  return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-}
-
-function getDateLabel(isoStr) {
+function formatDateTime(isoStr) {
   const d = new Date(isoStr || Date.now());
   if (!Number.isFinite(d.getTime())) return '';
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
-  return `${month}/${day}`;
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${month}/${day} ${hours}:${minutes}`;
 }
 
 
@@ -436,9 +432,9 @@ function renderItemHtml(item, isUnread, options = {}) {
       <div class="item-meta">
         ${watchTagHtml}
         ${tagHtml}
-        <span>${source}</span>
+        <span class="item-source">${source}</span>
         <span class="sep"></span>
-        <span>${formatTime(item.time)}</span>
+        <span class="item-datetime">${formatDateTime(item.time)}</span>
       </div>
     </div>
   </div>`;
@@ -766,7 +762,6 @@ function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) 
       item.category || '',
       item.summary || '',
       item.watchMatched ? '1' : '',
-      getDateLabel(item.time),
       item.discoveredAt || '',
       isReadFast(item, readIdSet, readAllBeforeTime) ? 1 : 0
     ])
@@ -844,34 +839,13 @@ function renderHistory(data, options = {}) {
   const displayHistory = [...pinnedWatch, ...history.filter(item => !pinnedKeys.has(getItemStateKey(item)))];
 
   let html = '';
-  const pinnedGroups = {};
   pinnedWatch.forEach(item => {
-    const label = getDateLabel(item.time);
-    if (!pinnedGroups[label]) pinnedGroups[label] = [];
-    pinnedGroups[label].push(item);
-  });
-  Object.entries(pinnedGroups).forEach(([dateLabel, items]) => {
-    html += `<section class="history-group"><div class="date-label date-label--watch">${dateLabel}</div>`;
-    items.forEach(item => {
-      html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime), { watchPinned: true });
-    });
-    html += '</section>';
+    html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime), { watchPinned: true });
   });
 
-  const groups = {};
   displayHistory.filter(item => !pinnedKeys.has(getItemStateKey(item))).forEach(item => {
-    const label = getDateLabel(item.time);
-    if (!groups[label]) groups[label] = [];
-    groups[label].push(item);
-  });
-
-  Object.entries(groups).forEach(([dateLabel, items]) => {
-    html += `<section class="history-group"><div class="date-label">${dateLabel}</div>`;
-    items.forEach(item => {
-      const isUnread = !isReadFast(item, cachedReadIds, readAllBeforeTime);
-      html += renderItemHtml(item, isUnread);
-    });
-    html += '</section>';
+    const isUnread = !isReadFast(item, cachedReadIds, readAllBeforeTime);
+    html += renderItemHtml(item, isUnread);
   });
 
   historyList.innerHTML = html;
