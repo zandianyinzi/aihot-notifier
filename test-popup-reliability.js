@@ -14,6 +14,9 @@ const {
   createAllFeedContinuationStatusController,
   createPopupStorageChangeHandler,
   createSessionWatchPinTracker,
+  hasActiveWatchRuleMatch,
+  captureWatchRuleActionFocus,
+  restoreWatchRuleActionFocus,
   captureScrollAnchor,
   buildScrollPosition,
   restoreScrollAnchor,
@@ -22,6 +25,9 @@ const {
   runOpenItemMutation,
   createConfigMutationController,
   removeOptimisticReadAliases,
+  moveWatchRule,
+  sortWatchItemsByRulePriority,
+  buildHistoryRenderSignature,
   getSafeHttpsUrl,
   openHttpsUrl
 } = require('./popup-reliability.js');
@@ -287,6 +293,8 @@ async function testPendingModeStorageChanges() {
   handleStorageChange({ history: { newValue: [] }, feedMode: { newValue: 'selected' } }, 'local');
   assert.strictEqual(scheduled[0].mode, 'all', 'storage changes keep rendering the pending mode during a switch');
   assert.strictEqual(scheduled[0].switchRequestId, 1, 'storage load is fenced by the active switch request');
+  handleStorageChange({ watchRules: { newValue: [{ id: 'high' }] } }, 'local');
+  assert.strictEqual(scheduled.length, 2, '特关顺序变化触发资讯列表重新渲染');
   requests[0].resolve({ ok: true });
   await switching;
 }
@@ -894,6 +902,134 @@ function testSessionWatchPinsStayStableAcrossReadTransitions() {
     [],
     'items stop being pinned when they are no longer watch matches'
   );
+
+  let activeRules = [{ id: 'active', enabled: true }];
+  const isActiveWatchMatch = item => hasActiveWatchRuleMatch(item, activeRules);
+  const activeRuleTracker = createSessionWatchPinTracker();
+  const activeMatch = { id: 'active-match', watchMatched: true, watchRuleIds: ['active'] };
+  assert.deepStrictEqual(
+    activeRuleTracker.getPinnedItems(
+      [activeMatch],
+      () => true,
+      getKey,
+      { isWatchMatch: isActiveWatchMatch }
+    ).map(getKey),
+    ['active-match'],
+    'matching an enabled rule pins an unread item'
+  );
+  activeRules = [{ id: 'active', enabled: false }];
+  assert.deepStrictEqual(
+    activeRuleTracker.getPinnedItems(
+      [activeMatch],
+      () => false,
+      getKey,
+      { isWatchMatch: isActiveWatchMatch }
+    ),
+    [],
+    'disabling the only matching rule removes the session pin'
+  );
+  assert.strictEqual(
+    hasActiveWatchRuleMatch({ id: 'legacy', watchMatched: true }, activeRules),
+    true,
+    'legacy watch matches without rule ids remain compatible'
+  );
+}
+
+function testWatchRuleOrderingHelpers() {
+  const rules = [
+    { id: 'high', enabled: true },
+    { id: 'middle', enabled: true },
+    { id: 'low', enabled: true }
+  ];
+  assert.deepStrictEqual(moveWatchRule(rules, 'middle', -1).map(rule => rule.id), ['middle', 'high', 'low'], '上移与前一条规则交换');
+  assert.deepStrictEqual(moveWatchRule(rules, 'middle', 1).map(rule => rule.id), ['high', 'low', 'middle'], '下移与后一条规则交换');
+  assert.deepStrictEqual(moveWatchRule(rules, 'high', -1).map(rule => rule.id), ['high', 'middle', 'low'], '首条规则上移保持不变');
+  assert.deepStrictEqual(moveWatchRule(rules, 'low', 1).map(rule => rule.id), ['high', 'middle', 'low'], '末条规则下移保持不变');
+
+  const items = [
+    { id: 'low-new', watchRuleIds: ['low'], time: '2026-09-20T12:00:00Z' },
+    { id: 'high-old', watchRuleIds: ['high'], time: '2026-09-20T09:00:00Z' },
+    { id: 'multi', watchRuleIds: ['low', 'high'], time: '2026-09-20T08:00:00Z' },
+    { id: 'high-new', watchRuleIds: ['high'], time: '2026-09-20T11:00:00Z' }
+  ];
+  assert.deepStrictEqual(
+    sortWatchItemsByRulePriority(items, rules, item => new Date(item.time).getTime()).map(item => item.id),
+    ['high-new', 'high-old', 'multi', 'low-new'],
+    '特关消息按命中规则最高优先级排序，同优先级按时间倒序'
+  );
+}
+
+function testWatchRuleFocusRestoration() {
+  const focused = [];
+  const createButton = (action, disabled = false) => ({
+    dataset: { action },
+    disabled,
+    focus: options => focused.push({ action, options })
+  });
+  const moveDown = createButton('move-down');
+  const moveUp = createButton('move-up');
+  const toggle = createButton('toggle');
+  const card = {
+    dataset: { ruleId: 'rule-1' },
+    querySelector(selector) {
+      if (selector === '[data-action="move-down"]:not(:disabled)') return moveDown;
+      if (selector === '.watch-rule-move:not(:disabled)') return moveUp;
+      if (selector === '[data-action="toggle"]') return toggle;
+      return null;
+    }
+  };
+  const activeButton = {
+    dataset: { action: 'move-down' },
+    closest: selector => selector === '.watch-rule-btn' ? activeButton : card
+  };
+  const container = {
+    contains: element => element === activeButton,
+    querySelectorAll: () => [card]
+  };
+
+  assert.deepStrictEqual(
+    captureWatchRuleActionFocus(container, activeButton),
+    { ruleId: 'rule-1', action: 'move-down' },
+    '后续 storage 重渲染前捕获当前规则按钮焦点'
+  );
+  assert.strictEqual(captureWatchRuleActionFocus(container, null), null, '没有活动按钮时不制造焦点状态');
+
+  assert.strictEqual(restoreWatchRuleActionFocus(container, 'rule-1', 'move-down'), true, '排序后恢复到同一规则的同向移动按钮');
+  assert.deepStrictEqual(focused, [{ action: 'move-down', options: { preventScroll: true } }], '恢复焦点时不改变规则列表滚动位置');
+
+  focused.length = 0;
+  moveDown.disabled = true;
+  card.querySelector = selector => {
+    if (selector === '[data-action="move-down"]:not(:disabled)') return null;
+    if (selector === '.watch-rule-move:not(:disabled)') return moveUp;
+    if (selector === '[data-action="toggle"]') return toggle;
+    return null;
+  };
+  assert.strictEqual(restoreWatchRuleActionFocus(container, 'rule-1', 'move-down'), true, '到达边界后聚焦仍可用的反向移动按钮');
+  assert.strictEqual(focused[0].action, 'move-up', '边界焦点回退到反向移动按钮');
+  assert.strictEqual(restoreWatchRuleActionFocus(container, 'missing', 'move-down'), false, '规则已删除时不尝试恢复失效焦点');
+}
+
+function testHistoryRenderSignatureIncludesWatchRuleMembership() {
+  assert.strictEqual(typeof buildHistoryRenderSignature, 'function', 'history render signature helper is exported');
+  const item = {
+    id: 'item-1',
+    url: 'https://example.com/item-1',
+    time: '2026-09-20T12:00:00Z',
+    title: 'AI news',
+    watchMatched: true,
+    watchRuleIds: ['low']
+  };
+  const args = [1, [{ id: 'high', enabled: true }, { id: 'low', enabled: true }], () => false];
+  const lowOnly = buildHistoryRenderSignature([item], ...args);
+  const highAndLow = buildHistoryRenderSignature([{ ...item, watchRuleIds: ['low', 'high'] }], ...args);
+  const sameMembershipDifferentOrder = buildHistoryRenderSignature([{ ...item, watchRuleIds: ['high', 'low'] }], ...args);
+  const legacyWithoutRuleIds = buildHistoryRenderSignature([{ ...item, watchRuleIds: undefined }], ...args);
+  const explicitNoMatches = buildHistoryRenderSignature([{ ...item, watchRuleIds: [] }], ...args);
+
+  assert.notStrictEqual(lowOnly, highAndLow, 'changing matched watch-rule membership invalidates the cached render');
+  assert.strictEqual(highAndLow, sameMembershipDifferentOrder, 'watch-rule membership order does not cause a redundant render');
+  assert.notStrictEqual(legacyWithoutRuleIds, explicitNoMatches, 'legacy fallback and an explicit empty match set produce different renders');
 }
 
 async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
@@ -949,6 +1085,9 @@ async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {
   testPersistedScrollPositionKeepsStableAnchorKey();
   testOptimisticReadStateRollback();
   testSessionWatchPinsStayStableAcrossReadTransitions();
+  testWatchRuleOrderingHelpers();
+  testWatchRuleFocusRestoration();
+  testHistoryRenderSignatureIncludesWatchRuleMembership();
   await testMarkAllReadMutationSeparatesCommitAndReloadFailure();
   console.log('结果: popup reliability tests passed');
 })().catch(error => {

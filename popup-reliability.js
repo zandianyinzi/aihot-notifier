@@ -291,10 +291,11 @@
     const pinnedKeys = new Set();
 
     function getPinnedItems(history, isUnread, getKey, options = {}) {
+      const isWatchMatch = options.isWatchMatch || (item => item?.watchMatched);
       return (history || []).filter(item => {
         const key = getKey(item);
         if (!key) return false;
-        if (!item.watchMatched) {
+        if (!isWatchMatch(item)) {
           pinnedKeys.delete(key);
           return false;
         }
@@ -305,6 +306,96 @@
     }
 
     return { getPinnedItems };
+  }
+
+  function hasActiveWatchRuleMatch(item, rules) {
+    if (!Array.isArray(item?.watchRuleIds)) return item?.watchMatched === true;
+    const activeRuleIds = new Set(
+      (Array.isArray(rules) ? rules : [])
+        .filter(rule => rule?.enabled !== false)
+        .map(rule => String(rule?.id || ''))
+    );
+    return item.watchRuleIds.some(ruleId => activeRuleIds.has(String(ruleId)));
+  }
+
+  function moveWatchRule(rules, ruleId, direction) {
+    const next = Array.isArray(rules) ? rules.map(rule => ({ ...rule })) : [];
+    const index = next.findIndex(rule => String(rule?.id || '') === String(ruleId || ''));
+    const target = index + (direction < 0 ? -1 : 1);
+    if (index < 0 || target < 0 || target >= next.length) return next;
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  }
+
+  function captureWatchRuleActionFocus(container, activeElement) {
+    if (!container || !activeElement || !container.contains(activeElement)) return null;
+    const button = typeof activeElement.closest === 'function'
+      ? activeElement.closest('.watch-rule-btn')
+      : null;
+    const card = button?.closest('.watch-rule-card');
+    const ruleId = card?.dataset?.ruleId;
+    const action = button?.dataset?.action;
+    return ruleId && action ? { ruleId, action } : null;
+  }
+
+  function restoreWatchRuleActionFocus(container, ruleId, action) {
+    if (!container || !ruleId) return false;
+    const card = Array.from(container.querySelectorAll('.watch-rule-card'))
+      .find(element => String(element?.dataset?.ruleId || '') === String(ruleId));
+    if (!card) return false;
+
+    const focusableActions = new Set(['toggle', 'move-up', 'move-down']);
+    const actionButton = focusableActions.has(action)
+      ? card.querySelector(`[data-action="${action}"]:not(:disabled)`)
+      : null;
+    const target = actionButton ||
+      card.querySelector('.watch-rule-move:not(:disabled)') ||
+      card.querySelector('[data-action="toggle"]');
+    if (!target || typeof target.focus !== 'function') return false;
+    target.focus({ preventScroll: true });
+    return true;
+  }
+
+  function sortWatchItemsByRulePriority(items, rules, getTime = item => new Date(item?.time || 0).getTime()) {
+    const priorityByRuleId = new Map(
+      (Array.isArray(rules) ? rules : [])
+        .filter(rule => rule?.enabled !== false)
+        .map((rule, index) => [String(rule?.id || ''), index])
+    );
+    return (Array.isArray(items) ? items : [])
+      .map((item, index) => {
+        const priority = (Array.isArray(item?.watchRuleIds) ? item.watchRuleIds : [])
+          .map(ruleId => priorityByRuleId.get(String(ruleId)))
+          .filter(value => Number.isInteger(value))
+          .reduce((best, value) => Math.min(best, value), Number.POSITIVE_INFINITY);
+        return { item, index, priority, time: Number(getTime(item)) || 0 };
+      })
+      .sort((a, b) => a.priority - b.priority || b.time - a.time || a.index - b.index)
+      .map(entry => entry.item);
+  }
+
+  function buildHistoryRenderSignature(history, historyDays, watchRules, isRead = () => false) {
+    return JSON.stringify({
+      historyDays,
+      watchRuleOrder: (Array.isArray(watchRules) ? watchRules : [])
+        .map(rule => `${rule?.id || ''}:${rule?.enabled !== false ? 1 : 0}`),
+      items: (Array.isArray(history) ? history : []).map(item => [
+        item?.url,
+        item?.id || '',
+        item?.permalink || '',
+        item?.time,
+        item?.title,
+        item?.source || '',
+        item?.category || '',
+        item?.summary || '',
+        item?.watchMatched ? '1' : '',
+        Array.isArray(item?.watchRuleIds)
+          ? [...new Set(item.watchRuleIds.map(ruleId => String(ruleId)))].sort()
+          : null,
+        item?.discoveredAt || '',
+        isRead(item) ? 1 : 0
+      ])
+    });
   }
 
   function createFeedModeSwitchController(deps) {
@@ -379,6 +470,7 @@
     'readAllBefore',
     'readAllBeforeByMode',
     'historyDays',
+    'watchRules',
     'allFeedContinuation'
   ]);
 
@@ -522,7 +614,7 @@
       const preparedData = deps.prepareStorage(storageData, cachedData);
       if (!isCurrent()) return { stale: true };
       deps.applyStorage(preparedData, committedMode);
-      // Cache-miss: let browser paint skeleton before rendering heavy content
+      // Cache-miss: let browser paint the skeleton before rendering heavy content.
       if (!cachedData) {
         await deps.waitForPaint();
         if (!isCurrent()) return { stale: true };
@@ -601,6 +693,12 @@
     applyOptimisticReadState,
     runMarkAllReadMutation,
     createSessionWatchPinTracker,
+    hasActiveWatchRuleMatch,
+    moveWatchRule,
+    captureWatchRuleActionFocus,
+    restoreWatchRuleActionFocus,
+    sortWatchItemsByRulePriority,
+    buildHistoryRenderSignature,
     getSafeHttpsUrl,
     openHttpsUrl,
     runOpenItemMutation,

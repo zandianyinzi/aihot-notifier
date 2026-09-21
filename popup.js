@@ -36,7 +36,7 @@ const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
 const { normalizeFeedMode, projectHistory } = window.FeedState;
-const { getSafeHttpsUrl, openHttpsUrl, runOpenItemMutation, removeOptimisticReadAliases, createConfigMutationController, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
+const { getSafeHttpsUrl, openHttpsUrl, runOpenItemMutation, removeOptimisticReadAliases, createConfigMutationController, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, hasActiveWatchRuleMatch, moveWatchRule, captureWatchRuleActionFocus, restoreWatchRuleActionFocus, sortWatchItemsByRulePriority, buildHistoryRenderSignature, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
 const sessionWatchPinTracker = createSessionWatchPinTracker();
 
 const CATEGORY_MAP = {
@@ -376,29 +376,46 @@ function scrollHistoryTo(top) {
   historyList.scrollTo({ top, behavior: 'auto' });
 }
 
-function renderWatchRules(rules) {
+function renderWatchRules(rules, options = {}) {
   if (!watchRulesList) return;
+  const capturedFocus = captureWatchRuleActionFocus(watchRulesList, document.activeElement);
   const normalized = normalizeWatchRules(rules);
   if (normalized.length === 0) {
     watchRulesList.innerHTML = '';
     updateWatchRulesScrollHint();
     return;
   }
-  watchRulesList.innerHTML = normalized.map(rule => `
-    <div class="watch-rule-card ${rule.enabled ? '' : 'disabled'}" data-rule-id="${escapeHtml(rule.id)}">
+  watchRulesList.innerHTML = normalized.map((rule, ruleIndex) => {
+    const ruleLabel = escapeHtml(getWatchRuleLabel(rule));
+    return `
+    <div class="watch-rule-card ${rule.enabled ? '' : 'disabled'} ${rule.id === options.movedRuleId ? 'is-moved' : ''}" data-rule-id="${escapeHtml(rule.id)}">
       <div class="watch-rule-content" title="${escapeHtml(getWatchRuleLabel(rule))}">
         <div class="watch-rule-head">
           <span class="watch-rule-source">${escapeHtml(rule.source || '任意来源')}</span>
           <span class="watch-rule-author">${escapeHtml(rule.author || '任意作者')}</span>
           <div class="watch-rule-actions">
             <button class="btn-mini watch-rule-btn" data-action="toggle">${rule.enabled ? '停用' : '启用'}</button>
-            <button class="btn-mini watch-rule-btn" data-action="delete" title="删除" aria-label="删除特关规则">×</button>
+            <button class="btn-mini watch-rule-btn" data-action="delete" title="删除" aria-label="删除 ${ruleLabel}">×</button>
+            <span class="watch-rule-move-group">
+              <button class="btn-mini watch-rule-btn watch-rule-move" data-action="move-up" title="上移" aria-label="上移 ${ruleLabel}" ${ruleIndex === 0 ? 'disabled' : ''}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 6-6 6 6"/></svg>
+              </button>
+              <button class="btn-mini watch-rule-btn watch-rule-move" data-action="move-down" title="下移" aria-label="下移 ${ruleLabel}" ${ruleIndex === normalized.length - 1 ? 'disabled' : ''}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 10 6 6 6-6"/></svg>
+              </button>
+            </span>
           </div>
         </div>
         ${rule.keywords.length > 0 ? `<div class="watch-keyword-tags">${rule.keywords.map((keyword, index) => `<span class="watch-keyword-tag"><span class="watch-keyword-text">${escapeHtml(keyword)}</span><button class="watch-keyword-remove" data-keyword-index="${index}" title="删除关键词" aria-label="删除关键词 ${escapeHtml(keyword)}">×</button></span>`).join('')}</div>` : ''}
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
+  const focusRuleId = options.focusRuleId || capturedFocus?.ruleId;
+  const focusAction = options.focusAction || capturedFocus?.action;
+  if (focusRuleId && focusAction) {
+    restoreWatchRuleActionFocus(watchRulesList, focusRuleId, focusAction);
+  }
   updateWatchRulesScrollHint();
   requestAnimationFrame(updateSettingsScrollHint);
 }
@@ -407,7 +424,7 @@ async function saveWatchRules(rules, options = {}) {
   const normalized = normalizeWatchRules(rules);
   const response = await chrome.runtime.sendMessage({ type: 'saveWatchRules', watchRules: normalized });
   if (!response?.ok) throw new Error(response?.error || 'Failed to save watch rules');
-  renderWatchRules(normalized);
+  renderWatchRules(normalized, options);
   if (options.scrollToEnd && watchRulesList) {
     watchRulesList.scrollTop = watchRulesList.scrollHeight;
   }
@@ -749,25 +766,6 @@ function applyConfig(data, options = {}) {
   renderWatchRules(data.watchRules || []);
 }
 
-function getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays) {
-  return JSON.stringify({
-    historyDays,
-    items: history.map(item => [
-      item.url,
-      item.id || '',
-      item.permalink || '',
-      item.time,
-      item.title,
-      item.source || '',
-      item.category || '',
-      item.summary || '',
-      item.watchMatched ? '1' : '',
-      item.discoveredAt || '',
-      isReadFast(item, readIdSet, readAllBeforeTime) ? 1 : 0
-    ])
-  });
-}
-
 function applyRenderPosition(data, options = {}) {
   if (options.scrollAnchor) {
     restoreScrollAnchor(historyList, options.scrollAnchor);
@@ -782,6 +780,7 @@ function renderHistory(data, options = {}) {
   const readIds = data.readIds || [];
   const readAllBefore = getReadAllBefore(data);
   const historyDays = data.historyDays || DEFAULT_HISTORY_DAYS;
+  const watchRules = normalizeWatchRules(data.watchRules || []);
 
   const readIdSet = new Set(readIds);
   cachedReadIds = readIdSet;
@@ -789,21 +788,27 @@ function renderHistory(data, options = {}) {
 
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const history = rawHistory.filter(i => isWithinDisplayWindow(i, cutoff));
-  const signature = getRenderSignature(history, readIdSet, readAllBeforeTime, historyDays);
+  const signature = buildHistoryRenderSignature(
+    history,
+    historyDays,
+    watchRules,
+    item => isReadFast(item, readIdSet, readAllBeforeTime)
+  );
   logPerf('render-start', { items: history.length, cached: signature === lastRenderSignature });
 
-  // Seed the session watch-pin tracker before the skip-unchanged guard. When the
-  // warm cache and authoritative storage produce an identical signature, the guard
-  // below returns early; if seeding lived after it, currently-unread watch keys
-  // would never enter the session set and would drop out of 特关 once read.
-  const pinnedWatch = sessionWatchPinTracker
+  // Seed the session watch-pin tracker before the skip-unchanged guard. When a
+  // later storage read has the same signature, currently-unread watch keys still
+  // need to enter the session set so they remain pinned after becoming read.
+  const pinnedWatch = sortWatchItemsByRulePriority(sessionWatchPinTracker
     .getPinnedItems(
       history,
       item => !isReadFast(item, readIdSet, readAllBeforeTime),
       getItemStateKey,
-      { persistUnread: options.persistWatchPins !== false }
-    )
-    .sort((a, b) => getItemTime(b) - getItemTime(a));
+      {
+        persistUnread: options.persistWatchPins !== false,
+        isWatchMatch: item => hasActiveWatchRuleMatch(item, watchRules)
+      }
+    ), watchRules, getItemTime);
 
   if (skipUnchanged && signature === lastRenderSignature) {
     applyRenderPosition(data, options);
@@ -1241,8 +1246,18 @@ if (watchRulesList) {
         const action = button.dataset.action;
         const nextRules = action === 'delete'
           ? rules.filter(rule => rule.id !== ruleId)
-          : rules.map(rule => rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule);
-        await saveWatchRules(nextRules);
+          : action === 'move-up'
+            ? moveWatchRule(rules, ruleId, -1)
+            : action === 'move-down'
+              ? moveWatchRule(rules, ruleId, 1)
+              : rules.map(rule => rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule);
+        const preservesFocus = action !== 'delete';
+        const isMove = action === 'move-up' || action === 'move-down';
+        await saveWatchRules(nextRules, {
+          focusRuleId: preservesFocus ? ruleId : undefined,
+          focusAction: preservesFocus ? action : undefined,
+          movedRuleId: isMove ? ruleId : undefined
+        });
       });
     } catch (_e) {
       showPopupStatus('更新特关规则失败，请重试。');
@@ -1335,7 +1350,8 @@ pollBtn.addEventListener('click', async () => {
   pollBtn.disabled = false;
 });
 
-// Keep cold start on the skeleton; only use cached content after this browser session has warmed.
+// Cold starts paint the skeleton; warm starts preview cached content while
+// authoritative storage loads, without holding the popup on a loading state.
 logPerf('init-start');
 const popupInitializationController = createPopupInitializationController({
   getLoadVersion: historyLoadController.getVersion,
