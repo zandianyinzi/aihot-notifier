@@ -539,6 +539,8 @@ assert(hasDeclaration(watchRuleActionsRule, 'margin-left', 'auto'), '停用和�
 assert(hasDeclaration(watchRuleActionsRule, 'flex', /0\s+0\s+auto/), '规则操作按钮不被作者挤压');
 const watchRuleButtonRule = popupHtml.match(/\.watch-rule-actions \.watch-rule-btn\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(watchRuleButtonRule, 'height', '24px'), '规则操作统一使用 24px 高度');
+const watchRuleToggleRule = popupHtml.match(/\.watch-rule-actions \.watch-rule-btn\[data-action="toggle"\]\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(watchRuleToggleRule, 'width', '24px') && hasDeclaration(watchRuleToggleRule, 'min-width', '24px'), '启停按钮与其它规则操作统一为 24px 方形');
 assert(/<span class="watch-rule-move-group">[\s\S]*?data-action="move-up"[\s\S]*?data-action="move-down"[\s\S]*?<\/span>/.test(popupJs), '上下移动收纳在独立排序组中');
 const watchRuleMoveGroupRule = popupHtml.match(/\.watch-rule-move-group\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(watchRuleMoveGroupRule, 'border-left', /1px\s+solid\s+var\(--border-light\)/), '排序组使用低对比分隔线区分规则操作');
