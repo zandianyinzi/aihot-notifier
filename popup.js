@@ -20,6 +20,7 @@ const fontFamilyEl = document.getElementById('fontFamily');
 const fontSizeEl = document.getElementById('fontSize');
 const openPositionModeEl = document.getElementById('openPositionMode');
 const historyDaysEl = document.getElementById('historyDays');
+const jumpToUnreadBtn = document.getElementById('jumpToUnread');
 const markAllReadBtn = document.getElementById('markAllRead');
 const scrollToTopBtn = document.getElementById('scrollToTop');
 const scrollToBottomBtn = document.getElementById('scrollToBottom');
@@ -67,6 +68,7 @@ const VALID_FONTS = new Set(['system', 'noto-serif', 'lxgw']);
 const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
 
 let cachedReadIds = new Set();
+let unreadJumpTimer = 0;
 let lastRenderSignature = '';
 let scrollSaveTimer = 0;
 let scrollPersistenceSuppressed = false;
@@ -825,6 +827,7 @@ function renderHistory(data, options = {}) {
     if (!markAllReadBtn.classList.contains('is-confirmed')) {
       markAllReadBtn.classList.remove('visible');
     }
+    updateUnreadNavigator(0);
     applyRenderPosition(data, options);
     updateHistoryScrollControls();
     lastRenderSignature = signature;
@@ -833,6 +836,7 @@ function renderHistory(data, options = {}) {
   }
 
   const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
+  updateUnreadNavigator(unread);
   if (unread > 0) {
     markAllReadBtn.classList.add('visible');
   } else if (!markAllReadBtn.classList.contains('is-confirmed')) {
@@ -864,6 +868,53 @@ function scrollToFirstUnread() {
   const firstUnread = historyList.querySelector('.item.unread');
   if (!firstUnread) return;
   historyList.scrollTop = Math.max(firstUnread.offsetTop - historyList.offsetTop - 6, 0);
+}
+
+function updateUnreadNavigator(count) {
+  const unread = Math.max(Number(count) || 0, 0);
+  if (!jumpToUnreadBtn) return;
+  jumpToUnreadBtn.classList.toggle('visible', unread > 0);
+  jumpToUnreadBtn.title = '跳到未读';
+  jumpToUnreadBtn.setAttribute('aria-label', '跳到未读');
+}
+
+function refreshUnreadNavigatorFromDom() {
+  updateUnreadNavigator(historyList.querySelectorAll('.item.unread').length);
+}
+
+function jumpToUnread() {
+  const unreadItems = Array.from(historyList.querySelectorAll('.item.unread'));
+  if (unreadItems.length === 0) {
+    updateUnreadNavigator(0);
+    return null;
+  }
+  const listRect = historyList.getBoundingClientRect();
+  const hasVisibleUnread = unreadItems.some(item => {
+    const rect = item.getBoundingClientRect();
+    return rect.bottom > listRect.top && rect.top < listRect.bottom;
+  });
+  if (hasVisibleUnread) return null;
+  const getItemTop = item => Number(item.offsetTop) - Number(historyList.offsetTop || 0);
+  const next = unreadItems[0];
+  const targetTop = Math.max(getItemTop(next) - 6, 0);
+  if (typeof historyList.scrollTo === 'function') {
+    historyList.scrollTo({ top: targetTop, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  } else {
+    historyList.scrollTop = targetTop;
+  }
+  historyList.querySelectorAll('.item.is-jump-target').forEach(item => item.classList.remove('is-jump-target'));
+  next.classList.add('is-jump-target');
+  if (unreadJumpTimer) clearTimeout(unreadJumpTimer);
+  unreadJumpTimer = setTimeout(() => {
+    next.classList.remove('is-jump-target');
+    unreadJumpTimer = 0;
+  }, 750);
+  return next.dataset.key || next.dataset.url || null;
+}
+
+function prefersReducedMotion() {
+  return typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches === true;
 }
 
 function cacheLoadedPopupData(data) {
@@ -1052,6 +1103,7 @@ async function openHistoryItem(item) {
       el.classList.add('read');
     });
     const unreadEls = document.querySelectorAll('.item.unread');
+    refreshUnreadNavigatorFromDom();
     if (unreadEls.length > 0) markAllReadBtn.classList.add('visible');
     else if (!markAllReadBtn.classList.contains('is-confirmed')) markAllReadBtn.classList.remove('visible');
   };
@@ -1068,6 +1120,7 @@ async function openHistoryItem(item) {
     if (Array.from(previousUnread.values()).some(Boolean)) {
       markAllReadBtn.classList.add('visible');
     }
+    refreshUnreadNavigatorFromDom();
   };
 
   const result = await runOpenItemMutation({
@@ -1106,6 +1159,7 @@ markAllReadBtn.addEventListener('click', async () => {
   const rollbackOptimisticReadState = applyOptimisticReadState(historyList.querySelectorAll('.item'), markAllReadBtn);
   restoreScrollAnchor(historyList, scrollAnchor);
   const now = new Date().toISOString();
+  refreshUnreadNavigatorFromDom();
   try {
     await runMarkAllReadMutation({
       send: () => chrome.runtime.sendMessage({ type: 'markAllRead', readAllBefore: now }),
@@ -1119,6 +1173,7 @@ markAllReadBtn.addEventListener('click', async () => {
         clearScrollPosition();
       },
       onFailure: ({ committed, recovered }) => {
+        refreshUnreadNavigatorFromDom();
         if (committed && recovered) return;
         showButtonResult(markAllReadBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
         showPopupStatus(committed
@@ -1327,6 +1382,7 @@ historyList.addEventListener('scroll', event => {
 
 scrollToTopBtn.addEventListener('click', () => scrollHistoryTo(0));
 scrollToBottomBtn.addEventListener('click', () => scrollHistoryTo(historyList.scrollHeight));
+jumpToUnreadBtn.addEventListener('click', jumpToUnread);
 
 pollBtn.addEventListener('click', async () => {
   const feedbackStartedAt = Date.now();

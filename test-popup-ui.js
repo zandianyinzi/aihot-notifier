@@ -671,6 +671,10 @@ assert(/feedModeEl\.value\s*=\s*normalizeFeedMode\(data\.feedMode\)/.test(popupJ
 
 console.log('\n[可访问性]');
 assert(/<button\s+class="btn-icon btn-mark-read"\s+id="markAllRead"\s+title="全部已读"\s+aria-label="全部已读">/.test(popupHtml), '全部已读图标按钮有 aria-label');
+assert(/<button\s+class="btn-icon btn-unread-nav"\s+id="jumpToUnread"\s+title="跳到未读"\s+aria-label="跳到未读">/.test(popupHtml), '跳到未读图标按钮有 aria-label');
+assert(/id="jumpToUnread"[\s\S]*?<circle cx="12" cy="12" r="2\.5"\/>/.test(popupHtml), '跳到未读图标沿用眼睛轮廓并带瞳孔');
+assert(!/class="unread-count"|id="unreadCount"/.test(popupHtml), '跳到未读不显示数量角标，保持按钮固定尺寸');
+assert(!/unreadCountEl|unreadCount/.test(popupJs), '跳到未读逻辑不维护角标状态');
 assert(/<button\s+class="btn-icon"\s+id="pollNow"\s+title="刷新"\s+aria-label="刷新">/.test(popupHtml), '刷新图标按钮有 aria-label');
 assert(/<button\s+class="btn-icon"\s+id="settingsBtn"\s+title="设置"\s+aria-label="设置"[^>]*>/.test(popupHtml), '设置图标按钮有 aria-label');
 assert(/id="settingsBtn"[^>]*aria-controls="settingsPanel"[^>]*aria-expanded="false"/.test(popupHtml), '设置按钮声明受控面板且默认折叠');

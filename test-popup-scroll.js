@@ -31,7 +31,7 @@ function createElement() {
     setAttribute() {},
     querySelector: () => null,
     querySelectorAll: () => [],
-    getBoundingClientRect: () => ({ top: 0 }),
+    getBoundingClientRect: () => ({ top: 0, bottom: 200 }),
     addEventListener: (type, listener) => listeners.set(type, listener),
     dispatch: type => listeners.get(type)?.({ isTrusted: true })
   };
@@ -44,14 +44,23 @@ function createPopup(savedStorage = new Map()) {
     return elements.get(id);
   };
   const list = getElement('historyList');
+  list.scrollTo = ({ top, behavior }) => {
+    list.scrollTop = top;
+    list.lastScrollBehavior = behavior;
+  };
   let items = [];
   Object.defineProperty(list, 'innerHTML', {
     set(html) {
       items = [...html.matchAll(/class="(item [^"]*)" data-key="([^"]*)" data-url="([^"]*)"(?: data-watch-pinned="([^"]*)")?/g)]
         .map(([, classes, key, url, watchPinned], index) => ({
           dataset: { key, url, watchPinned },
-          offsetTop: index * 100,
-          classList: { contains: value => classes.split(/\s+/).includes(value) },
+          offsetTop: index * 100 + list.offsetTop,
+          classList: {
+            active: new Set(classes.split(/\s+/)),
+            contains(value) { return this.active.has(value); },
+            add(...values) { values.forEach(value => this.active.add(value)); },
+            remove(...values) { values.forEach(value => this.active.delete(value)); }
+          },
           getBoundingClientRect: () => ({
             top: index * 100 - list.scrollTop,
             bottom: (index + 1) * 100 - list.scrollTop
@@ -60,7 +69,9 @@ function createPopup(savedStorage = new Map()) {
       list.scrollHeight = items.length * 100;
     }
   });
-  list.querySelectorAll = () => items;
+  list.querySelectorAll = selector => selector === '.item.unread'
+    ? items.filter(item => item.classList.contains('unread'))
+    : selector === '.item.is-jump-target' ? items.filter(item => item.classList.contains('is-jump-target')) : items;
   list.querySelector = selector => selector === '.item.unread'
     ? items.find(item => item.classList.contains('unread')) || null
     : null;
@@ -99,7 +110,8 @@ function createPopup(savedStorage = new Map()) {
     console, URL, chrome, performance,
     window: {
       PopupReliability: require('./popup-reliability.js'),
-      FeedState: require('./feed-state.js')
+      FeedState: require('./feed-state.js'),
+      matchMedia: () => ({ matches: false })
     },
     document: { getElementById: getElement, documentElement: createElement() },
     localStorage: {
@@ -235,6 +247,30 @@ test('unread positioning and failed refresh keep their existing behavior', async
   assert.equal(popup.position()?.scrollTop, 125);
   assert.equal(popup.getElement('pollNow').disabled, false);
   assert.equal(popup.getElement('popupStatus').textContent, '刷新失败，请重试。');
+});
+
+test('unread jump locates the first unread once and does not advance on repeated clicks', () => {
+  const popup = createPopup();
+  popup.data.readIds = ['item-0', 'item-2', 'item-3', 'item-4', 'item-5', 'item-6', 'item-7', 'item-8', 'item-9'];
+  popup.sandbox.renderHistory(popup.data);
+
+  popup.list.scrollTop = 500;
+  assert.equal(popup.sandbox.jumpToUnread(), 'item-1');
+  assert.equal(popup.list.scrollTop, 94);
+  assert.equal(popup.list.lastScrollBehavior, 'smooth');
+  assert.equal(popup.sandbox.jumpToUnread(), null);
+  assert.equal(popup.list.scrollTop, 94);
+  assert.equal(popup.data.readIds.includes('item-1'), false);
+});
+
+test('unread navigator uses instant scrolling when reduced motion is preferred', () => {
+  const popup = createPopup();
+  popup.data.readIds = ['item-0', 'item-2', 'item-3', 'item-4', 'item-5', 'item-6', 'item-7', 'item-8', 'item-9'];
+  popup.sandbox.renderHistory(popup.data);
+  popup.list.scrollTop = 500;
+  popup.sandbox.window.matchMedia = () => ({ matches: true });
+  popup.sandbox.jumpToUnread();
+  assert.equal(popup.list.lastScrollBehavior, 'auto');
 });
 
 test('persisted unread watch anchors do not jump when they leave the pinned group', () => {

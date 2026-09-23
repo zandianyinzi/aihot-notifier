@@ -308,7 +308,8 @@
       .btn-icon.is-loading svg,
       .btn-icon.is-result-ok,
       #pollNow.is-result-accent,
-      .btn-icon.is-result-danger {
+      .btn-icon.is-result-danger,
+      .item.is-jump-target {
         animation: none;
       }
     }
@@ -359,6 +360,12 @@
     }
 
     .btn-mark-read.visible {
+      display: flex;
+    }
+
+    .btn-unread-nav { display: none; }
+
+    .btn-unread-nav.visible {
       display: flex;
     }
 
@@ -458,6 +465,15 @@
       45% { background: var(--state-fail-softer); color: var(--state-fail); }
       82% { background: transparent; color: var(--text-3); }
       100% { background: transparent; color: var(--text-3); }
+    }
+
+    .item.is-jump-target {
+      animation: unread-jump-target 0.75s ease-out;
+    }
+
+    @keyframes unread-jump-target {
+      0%, 65% { background: color-mix(in srgb, var(--accent-soft) 90%, var(--bg-unread)); }
+      100% { background: var(--bg-unread); }
     }
 
     /* ---- Settings ---- */
@@ -1257,6 +1273,9 @@
       </a>
     </div>
     <div class="actions">
+      <button class="btn-icon btn-unread-nav" id="jumpToUnread" title="跳到未读" aria-label="跳到未读">
+        <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+      </button>
       <button class="btn-icon btn-mark-read" id="markAllRead" title="全部已读" aria-label="全部已读">
         <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><path d="M4 20L20 4"/></svg>
       </button>
