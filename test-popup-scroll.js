@@ -110,8 +110,7 @@ function createPopup(savedStorage = new Map()) {
     console, URL, chrome, performance,
     window: {
       PopupReliability: require('./popup-reliability.js'),
-      FeedState: require('./feed-state.js'),
-      matchMedia: () => ({ matches: false })
+      FeedState: require('./feed-state.js')
     },
     document: { getElementById: getElement, documentElement: createElement() },
     localStorage: {
@@ -257,18 +256,17 @@ test('unread jump locates the first unread once and does not advance on repeated
   popup.list.scrollTop = 500;
   assert.equal(popup.sandbox.jumpToUnread(), 'item-1');
   assert.equal(popup.list.scrollTop, 94);
-  assert.equal(popup.list.lastScrollBehavior, 'smooth');
+  assert.equal(popup.list.lastScrollBehavior, 'auto');
   assert.equal(popup.sandbox.jumpToUnread(), null);
   assert.equal(popup.list.scrollTop, 94);
   assert.equal(popup.data.readIds.includes('item-1'), false);
 });
 
-test('unread navigator uses instant scrolling when reduced motion is preferred', () => {
+test('unread jump uses instant scrolling regardless of motion preference', () => {
   const popup = createPopup();
   popup.data.readIds = ['item-0', 'item-2', 'item-3', 'item-4', 'item-5', 'item-6', 'item-7', 'item-8', 'item-9'];
   popup.sandbox.renderHistory(popup.data);
   popup.list.scrollTop = 500;
-  popup.sandbox.window.matchMedia = () => ({ matches: true });
   popup.sandbox.jumpToUnread();
   assert.equal(popup.list.lastScrollBehavior, 'auto');
 });

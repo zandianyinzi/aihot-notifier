@@ -898,7 +898,7 @@ function jumpToUnread() {
   const next = unreadItems[0];
   const targetTop = Math.max(getItemTop(next) - 6, 0);
   if (typeof historyList.scrollTo === 'function') {
-    historyList.scrollTo({ top: targetTop, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    historyList.scrollTo({ top: targetTop, behavior: 'auto' });
   } else {
     historyList.scrollTop = targetTop;
   }
@@ -910,11 +910,6 @@ function jumpToUnread() {
     unreadJumpTimer = 0;
   }, 750);
   return next.dataset.key || next.dataset.url || null;
-}
-
-function prefersReducedMotion() {
-  return typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches === true;
 }
 
 function cacheLoadedPopupData(data) {
