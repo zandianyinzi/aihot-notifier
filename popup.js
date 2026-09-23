@@ -890,7 +890,7 @@ function isHistoryItemVisible(item) {
 
 function refreshUnreadNavigatorFromDom() {
   const unreadItems = Array.from(historyList.querySelectorAll('.item.unread'));
-  updateUnreadNavigator(unreadItems.length, unreadItems.length > 0 && isHistoryItemVisible(unreadItems[0]));
+  updateUnreadNavigator(unreadItems.length, unreadItems.some(isHistoryItemVisible));
 }
 
 function jumpToUnread() {
@@ -899,12 +899,13 @@ function jumpToUnread() {
     updateUnreadNavigator(0);
     return null;
   }
-  const next = unreadItems[0];
-  if (isHistoryItemVisible(next)) {
+  if (unreadItems.some(isHistoryItemVisible)) {
     refreshUnreadNavigatorFromDom();
     return null;
   }
   const getItemTop = item => Number(item.offsetTop) - Number(historyList.offsetTop || 0);
+  const listRect = historyList.getBoundingClientRect();
+  const next = unreadItems.find(item => item.getBoundingClientRect().top >= listRect.bottom) || unreadItems[0];
   const targetTop = Math.max(getItemTop(next) - 6, 0);
   if (typeof historyList.scrollTo === 'function') {
     historyList.scrollTo({ top: targetTop, behavior: 'auto' });
