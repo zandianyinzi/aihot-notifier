@@ -316,6 +316,7 @@ assert(hasDeclaration(selectMiniHoverRule, 'color', /var\(--accent\)/), '下拉�
 assert(/border-color\s*:\s*color-mix\(in srgb, var\(--accent\) 35%, var\(--border\)\)/.test(selectMiniHoverRule), '下拉控件悬停使用轻量主题色边框');
 assert(/class="btn-mini watch-add-btn" id="addWatchRule"/.test(popupHtml), '添加按钮使用统一文字按钮基类');
 assert(/class="btn-mini watch-rule-btn"/.test(popupJs), '规则操作按钮使用统一文字按钮基类');
+assert(/data-action="toggle">\$\{rule\.enabled \? '停' : '启'\}<\/button>/.test(popupJs), '规则启停按钮使用简洁启停文案');
 
 console.log('\n[右上角按钮布局]');
 const actionsRule = popupHtml.match(/\.actions\s*{([\s\S]*?)}/i)?.[1] || '';

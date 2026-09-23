@@ -396,7 +396,7 @@ function renderWatchRules(rules, options = {}) {
           <span class="watch-rule-source">${escapeHtml(rule.source || '任意来源')}</span>
           <span class="watch-rule-author">${escapeHtml(rule.author || '任意作者')}</span>
           <div class="watch-rule-actions">
-            <button class="btn-mini watch-rule-btn" data-action="toggle">${rule.enabled ? '停用' : '启用'}</button>
+            <button class="btn-mini watch-rule-btn" data-action="toggle">${rule.enabled ? '停' : '启'}</button>
             <button class="btn-mini watch-rule-btn" data-action="delete" title="删除" aria-label="删除 ${ruleLabel}">×</button>
             <span class="watch-rule-move-group">
               <button class="btn-mini watch-rule-btn watch-rule-move" data-action="move-up" title="上移" aria-label="上移 ${ruleLabel}" ${ruleIndex === 0 ? 'disabled' : ''}>
