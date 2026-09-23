@@ -363,10 +363,16 @@
       display: flex;
     }
 
-    .btn-unread-nav { display: none; }
+    .btn-unread-nav {
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+    }
 
     .btn-unread-nav.visible {
-      display: flex;
+      visibility: visible;
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .scroll-nav-btn {

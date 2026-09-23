@@ -675,6 +675,12 @@ assert(/<button\s+class="btn-icon btn-unread-nav"\s+id="jumpToUnread"\s+title="�
 assert(/id="jumpToUnread"[\s\S]*?<circle cx="12" cy="12" r="2\.5"\/>/.test(popupHtml), '跳到未读图标沿用眼睛轮廓并带瞳孔');
 assert(!/class="unread-count"|id="unreadCount"/.test(popupHtml), '跳到未读不显示数量角标，保持按钮固定尺寸');
 assert(!/unreadCountEl|unreadCount/.test(popupJs), '跳到未读逻辑不维护角标状态');
+const unreadNavigatorRule = popupHtml.match(/\.btn-unread-nav\s*{([\s\S]*?)}/i)?.[1] || '';
+const unreadNavigatorVisibleRule = popupHtml.match(/\.btn-unread-nav\.visible\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(unreadNavigatorRule, 'visibility', /hidden/), '跳到未读隐藏时保留按钮槽位');
+assert(hasDeclaration(unreadNavigatorRule, 'pointer-events', /none/), '跳到未读隐藏时不可交互');
+assert(hasDeclaration(unreadNavigatorVisibleRule, 'visibility', /visible/), '跳到未读目标在屏外时恢复可见');
+assert(/refreshUnreadNavigatorFromDom\(\);/.test(popupJs) && /historyList\.addEventListener\('scroll'/.test(popupJs), '跳到未读随列表滚动刷新可见性');
 assert(/<button\s+class="btn-icon"\s+id="pollNow"\s+title="刷新"\s+aria-label="刷新">/.test(popupHtml), '刷新图标按钮有 aria-label');
 assert(/<button\s+class="btn-icon"\s+id="settingsBtn"\s+title="设置"\s+aria-label="设置"[^>]*>/.test(popupHtml), '设置图标按钮有 aria-label');
 assert(/id="settingsBtn"[^>]*aria-controls="settingsPanel"[^>]*aria-expanded="false"/.test(popupHtml), '设置按钮声明受控面板且默认折叠');

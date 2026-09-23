@@ -271,6 +271,20 @@ test('unread jump uses instant scrolling', () => {
   assert.equal(popup.list.lastScrollBehavior, 'auto');
 });
 
+test('unread navigator follows the first unread visibility', () => {
+  const popup = createPopup();
+  popup.data.readIds = ['item-0', 'item-3', 'item-4', 'item-5', 'item-6', 'item-7', 'item-8', 'item-9'];
+  popup.sandbox.renderHistory(popup.data);
+  const button = popup.getElement('jumpToUnread');
+  assert.equal(button.classList.contains('visible'), false);
+
+  popup.list.scrollTop = 200;
+  popup.list.dispatch('scroll');
+  assert.equal(button.classList.contains('visible'), true);
+  assert.equal(popup.sandbox.jumpToUnread(), 'item-1');
+  assert.equal(button.classList.contains('visible'), false);
+});
+
 test('persisted unread watch anchors do not jump when they leave the pinned group', () => {
   const popup = createPopup();
   popup.data.history[8].watchMatched = true;

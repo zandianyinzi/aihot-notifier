@@ -814,6 +814,7 @@ function renderHistory(data, options = {}) {
 
   if (skipUnchanged && signature === lastRenderSignature) {
     applyRenderPosition(data, options);
+    refreshUnreadNavigatorFromDom();
     updateHistoryScrollControls();
     logPerf('render-skip', { items: history.length });
     return;
@@ -836,7 +837,6 @@ function renderHistory(data, options = {}) {
   }
 
   const unread = history.filter(i => !isReadFast(i, readIdSet, readAllBeforeTime)).length;
-  updateUnreadNavigator(unread);
   if (unread > 0) {
     markAllReadBtn.classList.add('visible');
   } else if (!markAllReadBtn.classList.contains('is-confirmed')) {
@@ -859,6 +859,7 @@ function renderHistory(data, options = {}) {
 
   historyList.innerHTML = html;
   applyRenderPosition(data, options);
+  refreshUnreadNavigatorFromDom();
   updateHistoryScrollControls();
   lastRenderSignature = signature;
   logPerf('render-end', { items: history.length, unread });
@@ -870,16 +871,26 @@ function scrollToFirstUnread() {
   historyList.scrollTop = Math.max(firstUnread.offsetTop - historyList.offsetTop - 6, 0);
 }
 
-function updateUnreadNavigator(count) {
+function updateUnreadNavigator(count, targetVisible = false) {
   const unread = Math.max(Number(count) || 0, 0);
   if (!jumpToUnreadBtn) return;
-  jumpToUnreadBtn.classList.toggle('visible', unread > 0);
+  const isAvailable = unread > 0 && !targetVisible;
+  jumpToUnreadBtn.classList.toggle('visible', isAvailable);
+  jumpToUnreadBtn.setAttribute('aria-hidden', String(!isAvailable));
+  jumpToUnreadBtn.tabIndex = isAvailable ? 0 : -1;
   jumpToUnreadBtn.title = '跳到未读';
   jumpToUnreadBtn.setAttribute('aria-label', '跳到未读');
 }
 
+function isHistoryItemVisible(item) {
+  const listRect = historyList.getBoundingClientRect();
+  const rect = item.getBoundingClientRect();
+  return rect.bottom > listRect.top && rect.top < listRect.bottom;
+}
+
 function refreshUnreadNavigatorFromDom() {
-  updateUnreadNavigator(historyList.querySelectorAll('.item.unread').length);
+  const unreadItems = Array.from(historyList.querySelectorAll('.item.unread'));
+  updateUnreadNavigator(unreadItems.length, unreadItems.length > 0 && isHistoryItemVisible(unreadItems[0]));
 }
 
 function jumpToUnread() {
@@ -888,20 +899,19 @@ function jumpToUnread() {
     updateUnreadNavigator(0);
     return null;
   }
-  const listRect = historyList.getBoundingClientRect();
-  const hasVisibleUnread = unreadItems.some(item => {
-    const rect = item.getBoundingClientRect();
-    return rect.bottom > listRect.top && rect.top < listRect.bottom;
-  });
-  if (hasVisibleUnread) return null;
-  const getItemTop = item => Number(item.offsetTop) - Number(historyList.offsetTop || 0);
   const next = unreadItems[0];
+  if (isHistoryItemVisible(next)) {
+    refreshUnreadNavigatorFromDom();
+    return null;
+  }
+  const getItemTop = item => Number(item.offsetTop) - Number(historyList.offsetTop || 0);
   const targetTop = Math.max(getItemTop(next) - 6, 0);
   if (typeof historyList.scrollTo === 'function') {
     historyList.scrollTo({ top: targetTop, behavior: 'auto' });
   } else {
     historyList.scrollTop = targetTop;
   }
+  refreshUnreadNavigatorFromDom();
   historyList.querySelectorAll('.item.is-jump-target').forEach(item => item.classList.remove('is-jump-target'));
   next.classList.add('is-jump-target');
   if (unreadJumpTimer) clearTimeout(unreadJumpTimer);
@@ -1367,6 +1377,7 @@ historyList.addEventListener('scroll', event => {
     trusted: event?.isTrusted === true,
     mode: normalizeOpenPositionMode(openPositionModeEl.value)
   });
+  refreshUnreadNavigatorFromDom();
   updateHistoryScrollControls();
   const data = {
     feedMode: feedModeEl.value,
