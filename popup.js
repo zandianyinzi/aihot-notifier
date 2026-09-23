@@ -871,10 +871,10 @@ function scrollToFirstUnread() {
   historyList.scrollTop = Math.max(firstUnread.offsetTop - historyList.offsetTop - 6, 0);
 }
 
-function updateUnreadNavigator(count, targetVisible = false) {
+function updateUnreadNavigator(count, hasVisibleUnread = false) {
   const unread = Math.max(Number(count) || 0, 0);
   if (!jumpToUnreadBtn) return;
-  const isAvailable = unread > 0 && !targetVisible;
+  const isAvailable = unread > 0 && !hasVisibleUnread;
   jumpToUnreadBtn.classList.toggle('visible', isAvailable);
   jumpToUnreadBtn.setAttribute('aria-hidden', String(!isAvailable));
   jumpToUnreadBtn.tabIndex = isAvailable ? 0 : -1;
