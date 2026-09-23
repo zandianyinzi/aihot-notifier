@@ -262,7 +262,7 @@ test('unread jump locates the first unread once and does not advance on repeated
   assert.equal(popup.data.readIds.includes('item-1'), false);
 });
 
-test('unread jump uses instant scrolling regardless of motion preference', () => {
+test('unread jump uses instant scrolling', () => {
   const popup = createPopup();
   popup.data.readIds = ['item-0', 'item-2', 'item-3', 'item-4', 'item-5', 'item-6', 'item-7', 'item-8', 'item-9'];
   popup.sandbox.renderHistory(popup.data);
