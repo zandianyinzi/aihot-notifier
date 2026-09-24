@@ -1,7 +1,6 @@
 tasks/
 node_modules/
 package-lock.json
-*.zip
 _wrapper_*.html
 *-preview.html
 preview/

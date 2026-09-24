@@ -83,7 +83,7 @@ node screenshot.mjs
 发布时按顺序执行：
 1. 按发布语义升级 `manifest.json` 中的版本号
 2. 打包（`bash pack.sh` 或 PowerShell `Compress-Archive`）
-3. commit + push 源码；ZIP 仅保留本地，上传商店及审核是独立步骤
+3. commit + push 源码与发布 ZIP；上传商店及审核是独立步骤
 
 ## 提交与 Pull Request 规范
 
@@ -93,7 +93,7 @@ PR 需包含变更摘要、已运行的测试命令。涉及界面变化时附�
 
 ## 安全与配置提示
 
-保持 `host_permissions` 限定为 `https://aihot.news/*`。不要提交 `node_modules/`、生成的 zip、密钥或本地浏览器 profile。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。
+保持 `host_permissions` 限定为 `https://aihot.news/*`。不要提交 `node_modules/`、非发布生成物、密钥或本地浏览器 profile。明确发布时可提交白名单生成的 ZIP。变更存储 key 时，尽量兼容已有 `chrome.storage.local` 数据。
 
 Chrome 不允许扩展加载目录出现自建的下划线前缀文件（例如 `_click-check.mjs`）；临时产物优先放在项目外，`.gitignore` 不会让 Chrome 忽略文件。打包严格沿用 `pack.sh` 白名单。
 
