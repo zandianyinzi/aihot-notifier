@@ -1074,7 +1074,16 @@ function getItemTime(item) {
 }
 
 function getUnreadReferenceTime(item) {
-  return Math.max(getItemTime(item) || 0, new Date(item.discoveredAt || item.time).getTime() || 0);
+  const itemTime = getItemTime(item);
+  const discoveredAt = new Date(item.discoveredAt || item.time).getTime();
+  // A future publication time cannot make an item newer than its discovery.
+  const cappedItemTime = Number.isFinite(discoveredAt) && Number.isFinite(itemTime)
+    ? Math.min(itemTime, discoveredAt)
+    : itemTime;
+  return Math.max(
+    Number.isFinite(cappedItemTime) ? cappedItemTime : 0,
+    Number.isFinite(discoveredAt) ? discoveredAt : 0
+  );
 }
 
 function isWithinHistoryWindow(item, cutoff) {

@@ -1402,6 +1402,21 @@ async function runTests() {
   assert(atomicReadResponse.ok === true && storageData.readAllBefore === atomicReadAt && Boolean(storageData.watchNotifyState['atomic-watch']?.viewedAt), '全部已读在同一后台提交中同步推进水位与特关已查看状态');
   assert(storageData.watchNotifyState['future-watch']?.viewedAt === '', '全部已读不抑制水位生成后才匹配的新特关状态');
 
+  const futurePublishedAt = new Date(Date.now() + 60 * 1000).toISOString();
+  const futurePublishedReadAt = new Date().toISOString();
+  resetState({
+    history: [{
+      id: 'future-published-read',
+      url: 'https://example.com/future-published-read',
+      time: futurePublishedAt,
+      discoveredAt: new Date().toISOString()
+    }],
+    readAllBefore: futurePublishedReadAt
+  });
+  onStorageChangedHandler({ readAllBefore: { oldValue: '', newValue: futurePublishedReadAt } });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(badgeTexts.at(-1) === '', '全部已读覆盖当前列表中发布时间略超前的条目');
+
   const badgeFailureReadAt = new Date(Date.now() + 45 * 1000).toISOString();
   resetState();
   badgeTextImpl = () => Promise.reject(new Error('mock mark-all-read badge failed'));

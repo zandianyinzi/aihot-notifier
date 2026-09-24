@@ -60,7 +60,15 @@ function getItemTime(item) {
 }
 
 function getUnreadReferenceTime(item) {
-  return Math.max(getItemTime(item) || 0, new Date(item.discoveredAt || item.time).getTime() || 0);
+  const itemTime = getItemTime(item);
+  const discoveredAt = new Date(item.discoveredAt || item.time).getTime();
+  const cappedItemTime = Number.isFinite(discoveredAt) && Number.isFinite(itemTime)
+    ? Math.min(itemTime, discoveredAt)
+    : itemTime;
+  return Math.max(
+    Number.isFinite(cappedItemTime) ? cappedItemTime : 0,
+    Number.isFinite(discoveredAt) ? discoveredAt : 0
+  );
 }
 
 function isWithinHistoryWindow(item, cutoff) {
@@ -358,6 +366,21 @@ console.log('\n[新发现旧内容-旧全部已读不吞掉]');
   const isRead = getUnreadReferenceTime(item) <= readAllBeforeTime;
 
   assert(!isRead, '发现时间晚于全部已读时仍算未读');
+})();
+
+console.log('\n[未来发布时间-全部已读可收敛]');
+(function() {
+  const now = Date.now();
+  const item = {
+    title: '发布时间略超前',
+    url: 'u-future-published',
+    time: new Date(now + 60 * 1000).toISOString(),
+    discoveredAt: new Date(now).toISOString()
+  };
+  const readAllBeforeTime = now;
+  const isRead = getUnreadReferenceTime(item) <= readAllBeforeTime;
+
+  assert(isRead, '当前列表中发布时间略超前的条目可被全部已读覆盖');
 })();
 
 console.log('\n[回退时间-自动poll]');
