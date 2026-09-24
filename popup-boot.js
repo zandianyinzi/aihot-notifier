@@ -25,12 +25,12 @@
   document.documentElement.setAttribute('data-size', size);
 
   const themeBackgrounds = {
-    'dark': '#101010',
-    'green-dark': '#0c0f10',
-    'chrome-dark': '#111317',
-    'slate-night': '#0b1418'
+    'dark': '#111110',
+    'green-dark': '#101610',
+    'chrome-dark': '#13151a',
+    'slate-night': '#0e181b'
   };
-  document.documentElement.style.background = themeBackgrounds[theme] || '#101010';
+  document.documentElement.style.background = themeBackgrounds[theme] || '#111110';
   document.documentElement.style.colorScheme = 'dark';
   perfLog('boot-ready', { theme, font, size });
 })();
