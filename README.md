@@ -92,8 +92,12 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - 数据存储在浏览器本地存储中，主要使用 `chrome.storage.local`
 - 权限为 `alarms`、`notifications`、`storage`，API 的 `host_permissions` 仅为 `https://aihot.news/*`。弹窗品牌链接目前仍指向 `https://aihot.virxact.com/`，它不参与 API 请求。
 - 自动轮询和手动刷新直接请求 v1 items。首个完整 URL 使用 URL 级 `ETag` / `If-None-Match`，304 时跳过内容处理；当前不请求独立的 legacy fingerprint 端点，代码中的同名 helper/存储 key 是兼容命名。
-- API URL 为 `https://aihot.news/api/v1/items?mode=<selected|all>&window=7d&limit=100&cursor=<nextCursor>`（首页不带 cursor）。响应为 `{ items, page: { hasMore, nextCursor } }`，cursor 作为 opaque 值原样传回。请求固定使用 7 天窗口，不携带 `since`，单次请求含响应解码限时 15 秒。条目来源为 `source.name`，原文链接优先使用 HTTPS 的 `links.original`，否则回退到 HTTPS 的 `links.aihot`；发布时间无效时回退 `indexedAt`，二者均无效则跳过。
-- 手动刷新最多拉 3 页。切换到全部内容时先拉 1 页，后续通过可恢复的 `allFeedContinuation` 续拉；自动全部轮询达到单批页数上限时也保存续拉状态。只有分页未截断且 history 持久化成功，才提交新的 URL 级 ETag / `lastItemsPollAt`。
+- 首页 304 仅代表首页未变。距离上次完整拉取满 6 小时（或尚无完整拉取记录）时，自动轮询和手动刷新会省略 `If-None-Match`，重新按分页预算拉取；仅完整分页并成功持久化后推进 `lastItemsPollAt`，304、分页截断或失败不会推迟补拉。
+- `apiNormalizationVersion` 单独记录 API 归一化规则版本；旧版本首次启动时在同一次存储写入中清空所有模式的旧 ETag 和 `lastItemsPollAt`，使此前漏掉的条目能够重新拉取。迁移保留既有 history、已读和特关状态，写入失败可重试，worker 重启不重复清理。
+- API URL 为 `https://aihot.news/api/v1/items?mode=<selected|all>&window=7d&limit=100&cursor=<nextCursor>`（首页不带 cursor）。响应为 `{ items, page: { hasMore, nextCursor } }`，cursor 作为 opaque 值原样传回。请求固定使用 7 天窗口，不携带 `since`，单次请求含成功或错误响应解码限时 15 秒。条目来源为 `source.name`，原文链接优先使用 HTTPS 的 `links.original`，否则回退到 HTTPS 的 `links.aihot`。
+- 展示时间优先使用有效 `publishedAt`，为空或无效时回退 API 的 `discoveredAt`，最后兼容旧 `indexedAt`；全部无效则跳过。服务端收录时间单独存为 `sourceDiscoveredAt`，本地 `discoveredAt` 仍表示扩展首次获取时间，用于已读和提醒判定。请求沿用 API 默认 `by=timeline`，本地列表排序及显示天数按上述展示时间计算，不承诺与官网时间轴相同。
+- 非成功响应解析 Problem JSON 的 `code`、`detail`、`requestId`，非 JSON 响应仍保留 HTTP 状态和 `X-Request-Id`。主轮询/手动刷新/切源失败遵守 `Retry-After`；无该头的 5xx 按失败计数以 5 分钟为起点指数退避，上限 60 分钟，成功刷新后重置。后台续拉保留原有独立重试策略。
+- 手动刷新最多拉 3 页。切换到全部内容时先拉 1 页，后续通过可恢复的 `allFeedContinuation` 续拉；自动全部轮询达到单批页数上限时也保存续拉状态。只有分页未截断且 history 持久化成功，才提交新的 URL 级 ETag / `lastItemsPollAt`。首页 URL 只保存首页 ETag，不借用续页 ETag；首页未返回 ETag 时清除该 URL 的旧值。
 - 内容源切换先在弹窗内按目标模式投影已有缓存，再请求网络。后台合并 canonical history 并成功持久化后才提交新的 `feedMode`；失败保留旧 history 和旧模式，过期切换结果不能覆盖后来的选择。
 - 精选请求返回的条目标记为 `selected: true`；全部请求仅在响应明确给出 `selected` 时更新该字段。`SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT` 当前为 false，不能仅因某条目未出现在精选响应中就取消其精选标记。
 - 扩展保留 canonical history，不因内容源切换清空既有记录。存储保留 `Math.max(historyDays, 5)` 天窗口内的数据（同时考虑发布时间与发现时间），UI 和 badge 仅按发布时间过滤最近 `historyDays` 天。每次持久化最多保留 2500 条最新内容，并限制标题 500、来源 300、摘要 3000 字符。history、已读、特关提醒和最近条目的合计 JSON 使用 6 MiB UTF-8 预算，遇到 quota 会以更小 history 重试一次。

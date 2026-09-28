@@ -24,9 +24,11 @@ const ALL_CONTINUATION_MAX_429_RETRIES = 2;
 const ALL_CONTINUATION_STATUS_TTL_MS = 15 * 60 * 1000;
 const RETRY_AFTER_FALLBACK_MS = 45 * 1000;
 const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
+const MAX_FAILURE_BACKOFF_MS = 60 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 const CANONICAL_HISTORY_VERSION = 1;
+const API_NORMALIZATION_VERSION = 1;
 const MAX_HISTORY_ENTRIES = 2500;
 const MAX_MANAGED_STORAGE_BYTES = 6 * 1024 * 1024;
 const MAX_TITLE_LENGTH = 500;
@@ -76,9 +78,18 @@ function migrateCanonicalHistoryState(data = {}) {
 function ensureCanonicalHistoryMigration() {
   if (!canonicalHistoryMigrationPromise) {
     const migration = runStateMutation(async () => {
-      const data = await chrome.storage.local.get(['canonicalHistoryVersion', 'history', 'feedMode']);
-      if (Number(data.canonicalHistoryVersion || 0) >= CANONICAL_HISTORY_VERSION) return;
-      await chrome.storage.local.set(migrateCanonicalHistoryState(data));
+      const data = await chrome.storage.local.get(['canonicalHistoryVersion', 'apiNormalizationVersion', 'history', 'feedMode']);
+      const updates = Number(data.canonicalHistoryVersion || 0) < CANONICAL_HISTORY_VERSION
+        ? migrateCanonicalHistoryState(data) : {};
+      if (Number(data.apiNormalizationVersion || 0) < API_NORMALIZATION_VERSION) {
+        // Old ETags can hide items discarded by the previous normalizer.
+        Object.assign(updates, {
+          apiNormalizationVersion: API_NORMALIZATION_VERSION,
+          apiFingerprintEtags: {},
+          lastItemsPollAt: ''
+        });
+      }
+      if (Object.keys(updates).length > 0) await chrome.storage.local.set(updates);
     });
     canonicalHistoryMigrationPromise = migration;
     void migration.catch(() => {
@@ -220,7 +231,7 @@ function getResponseHeader(response, name) {
   return response.headers[name] || response.headers[name.toLowerCase()] || '';
 }
 
-function getRetryAfterMs(response, status) {
+function getRetryAfterMs(response, status, failureCount = 1) {
   const retryAfter = getResponseHeader(response, 'Retry-After');
   if (retryAfter) {
     const seconds = Number(retryAfter);
@@ -229,14 +240,17 @@ function getRetryAfterMs(response, status) {
     if (dateMs > Date.now()) return dateMs - Date.now();
   }
   if (status === 429) return RETRY_AFTER_FALLBACK_MS;
-  if (status === 567 || (status >= 500 && status < 600)) return TEMPORARY_FAILURE_BACKOFF_MS;
+  if (status >= 500 && status < 600) {
+    const exponent = Math.min(4, Math.max(0, Number(failureCount) - 1 || 0));
+    return Math.min(MAX_FAILURE_BACKOFF_MS, TEMPORARY_FAILURE_BACKOFF_MS * (2 ** exponent));
+  }
   return 0;
 }
 
 async function recordApiFailure(responseOrStatus) {
   const status = typeof responseOrStatus === 'number' ? responseOrStatus : responseOrStatus?.status;
-  await incrementFailCount();
-  const backoffMs = getRetryAfterMs(responseOrStatus, status);
+  const failureCount = await incrementFailCount();
+  const backoffMs = getRetryAfterMs(responseOrStatus, status, failureCount);
   if (backoffMs > 0) {
     await chrome.storage.local.set({ nextAllowedPollAt: new Date(Date.now() + backoffMs).toISOString() });
   }
@@ -339,16 +353,23 @@ async function saveFingerprintProbe(probe) {
 async function withRequestDeadline(url, options, handleResponse) {
   const controller = new AbortController();
   let timeoutId;
+  let response;
   const deadline = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms`));
+      const error = new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+      // Keep HTTP failure semantics even if decoding the error body stalls.
+      if (response?.status >= 400) Object.assign(error, { response, status: response.status });
+      reject(error);
       controller.abort();
     }, REQUEST_TIMEOUT_MS);
   });
 
   try {
     const request = fetch(url, { ...(options || {}), signal: controller.signal })
-      .then(handleResponse);
+      .then(res => {
+        response = res;
+        return handleResponse(res);
+      });
     return await Promise.race([request, deadline]);
   } finally {
     clearTimeout(timeoutId);
@@ -358,7 +379,20 @@ async function withRequestDeadline(url, options, handleResponse) {
 async function fetchItemsPageWithOptions(url, options) {
   return withRequestDeadline(url, options, async res => {
     if (res.status === 304) return { notModified: true, etag: getResponseHeader(res, 'ETag'), json: null };
-    if (!res.ok) throw Object.assign(new Error(`API returned ${res.status}`), { response: res, status: res.status });
+    if (!res.ok) {
+      let problem;
+      try {
+        problem = await res.json();
+      } catch (_error) {
+        // Edge failures can return HTML, an empty body, or malformed JSON.
+      }
+      const code = typeof problem?.code === 'string' ? problem.code.slice(0, 200) : '';
+      const detail = typeof problem?.detail === 'string' ? problem.detail.slice(0, 2000) : '';
+      const requestId = (typeof problem?.requestId === 'string' && problem.requestId
+        ? problem.requestId : getResponseHeader(res, 'X-Request-Id')).slice(0, 200);
+      const message = `API returned ${res.status}${code ? ` (${code})` : ''}${requestId ? ` [requestId: ${requestId}]` : ''}`;
+      throw Object.assign(new Error(message), { response: res, status: res.status, code, detail, requestId });
+    }
     return { notModified: false, etag: getResponseHeader(res, 'ETag'), json: await res.json() };
   });
 }
@@ -397,13 +431,15 @@ function normalizeV1Item(item) {
   const url = isHttpsUrl(original) ? original : (isHttpsUrl(permalink) ? permalink : '');
   if (!url) return null;
   const indexedAt = normalizeTimestamp(item.indexedAt);
-  const publishedAt = normalizeTimestamp(item.publishedAt) || indexedAt;
-  if (!publishedAt) return null;
+  const sourceDiscoveredAt = normalizeTimestamp(item.discoveredAt);
+  const publishedAt = normalizeTimestamp(item.publishedAt);
+  if (!publishedAt && !sourceDiscoveredAt && !indexedAt) return null;
 
   return {
     ...item,
     publishedAt,
     indexedAt,
+    sourceDiscoveredAt,
     selectedPresent: Object.prototype.hasOwnProperty.call(item, 'selected'),
     selected: item.selected === true,
     source: item.source.name,
@@ -434,7 +470,7 @@ function getV1Page(json) {
   return { items: json.items, hasMore: json.page.hasMore, nextCursor: nextCursor || '' };
 }
 
-async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '', supportsMonotonicOrder = false }) {
+async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mode), baseUrl = '', supportsMonotonicOrder = false, bypassEtag = false }) {
   const normalizedMode = normalizeFeedMode(mode);
   let allItems = [];
   let cursor = null;
@@ -450,14 +486,14 @@ async function fetchItems({ mode, cutoff = -Infinity, maxPages = getMaxPages(mod
     if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
 
     const { apiFingerprintEtags = {} } = page === 0 ? await chrome.storage.local.get('apiFingerprintEtags') : { apiFingerprintEtags: {} };
-    const requestOptions = page === 0 && apiFingerprintEtags[url] ? { headers: { 'If-None-Match': apiFingerprintEtags[url] } } : undefined;
+    const requestOptions = page === 0 && !bypassEtag && apiFingerprintEtags[url] ? { headers: { 'If-None-Match': apiFingerprintEtags[url] } } : undefined;
     const pageResult = await fetchItemsPageWithOptions(url, requestOptions);
     if (pageResult.notModified) {
       allItems.notModified = true;
-      allItems.etag = pageResult.etag || apiFingerprintEtags[url] || '';
+      etag = pageResult.etag || apiFingerprintEtags[url] || '';
       break;
     }
-    etag = pageResult.etag || etag;
+    if (page === 0) etag = pageResult.etag || '';
     const response = getV1Page(pageResult.json);
     const items = response.items.map(normalizeV1Item).filter(Boolean);
     skippedItems += response.items.length - items.length;
@@ -1012,7 +1048,7 @@ async function getPrunedStoredWatchNotifyState() {
 }
 
 function getNormalizedItemTime(item) {
-  return normalizeTimestamp(item.publishedAt) || normalizeTimestamp(item.indexedAt);
+  return normalizeTimestamp(item.publishedAt) || normalizeTimestamp(item.sourceDiscoveredAt) || normalizeTimestamp(item.indexedAt);
 }
 
 function getCycleWatchNotificationBudget(used = 0) {
@@ -1109,6 +1145,7 @@ function toHistoryEntry(item, discoveredAt, watchMatches = [], watchMatchedAt = 
     score: item.score ?? null,
     selected: item.selected === true,
     attribution: item.attribution || null,
+    sourceDiscoveredAt: normalizeTimestamp(item.sourceDiscoveredAt),
     time: normalizedTime,
     discoveredAt
   };
@@ -1155,7 +1192,7 @@ async function pollForUpdatesInternal() {
     }
 
     const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
-    const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff });
+    const allItems = await fetchItems({ mode: config.feedMode, sinceTime, cutoff, bypassEtag: safetyPollDue });
     if (allItems.notModified) {
       await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
       await runPostCommitSideEffect('poll 304 badge update', updateBadge);
@@ -1203,6 +1240,7 @@ async function incrementFailCount() {
     chrome.action.setBadgeText({ text: '!' });
     chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
   }
+  return newCount;
 }
 
 async function persistFetchedItems(items, options = {}) {
@@ -1363,10 +1401,11 @@ async function manualPollInternal() {
       return;
     }
 
-    const sinceTime = getAutoPollSinceTime({ interval: DEFAULT_INTERVAL, lastCheck: lastCheck || now }, false, lastItemsPollAt);
+    const safetyPollDue = isSafetyItemsPollDue(lastItemsPollAt);
+    const sinceTime = getAutoPollSinceTime({ interval: DEFAULT_INTERVAL, lastCheck: lastCheck || now }, safetyPollDue, lastItemsPollAt);
     console.log(`[AI HOT] manual poll since=${sinceTime}`);
     const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-    const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES });
+    const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES, bypassEtag: safetyPollDue });
     if (allItems.notModified) {
       await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
       await runPostCommitSideEffect('manual 304 badge update', updateBadge);
@@ -1754,7 +1793,7 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
         lastCheck: new Date().toISOString(),
         failCount: 0,
         nextAllowedPollAt: '',
-        ...(!allItems.truncated ? { lastItemsPollAt: new Date().toISOString() } : {})
+        ...(!allItems.notModified && !allItems.truncated ? { lastItemsPollAt: new Date().toISOString() } : {})
       });
       if (generation !== sourceSwitchGeneration) {
         await restoreStaleSourceSwitch(rollbackState);

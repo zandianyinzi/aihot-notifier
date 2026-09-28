@@ -574,6 +574,60 @@ async function runTests() {
   assert(timestampHistory.get('invalid-published-valid-indexed')?.time === '2026-06-04T19:04:05.000Z' && timestampHistory.get('missing-published-valid-indexed')?.time === '2026-06-05T04:05:06.000Z', '无效或缺失 publishedAt 回退到有效 indexedAt');
   assert(timestampHistory.get('old-but-newly-discovered')?.time === '2020-01-02T03:04:05.000Z', '合法旧内容保留原发布时间并按新发现条目入库');
 
+  console.log('\n[API 收录时间与本地发现时间隔离]');
+  resetState();
+  const localDiscoveryStart = Date.now();
+  const serverDiscoveredAt = '2026-06-05T03:04:05.000Z';
+  fetchImpl = async () => ({
+    ok: true,
+    json: async () => v1Page([
+      v1Item({ id: 'null-published', publishedAt: null, discoveredAt: serverDiscoveredAt }),
+      v1Item({ id: 'prefer-server-over-legacy', publishedAt: null, discoveredAt: serverDiscoveredAt, indexedAt: '2020-01-01T00:00:00Z' }),
+      v1Item({ id: 'keep-published', publishedAt: '2026-06-04T00:00:00Z', discoveredAt: serverDiscoveredAt }),
+      v1Item({ id: 'all-invalid-times', publishedAt: null, discoveredAt: 'invalid' })
+    ])
+  });
+  await sendMessage({ type: 'pollNow' });
+  const discoveryHistory = new Map(storageData.history.map(item => [item.id, item]));
+  assert(discoveryHistory.get('null-published')?.time === serverDiscoveredAt, '合法 null publishedAt 以服务端 discoveredAt 回退并入库');
+  assert(discoveryHistory.get('prefer-server-over-legacy')?.time === serverDiscoveredAt, '服务端收录时间优先于旧 indexedAt 回退');
+  assert(discoveryHistory.get('keep-published')?.time === '2026-06-04T00:00:00.000Z', '原文发布时间有效时仍优先显示原文时间');
+  assert(discoveryHistory.get('keep-published')?.sourceDiscoveredAt === serverDiscoveredAt, '服务端收录时间单独持久化');
+  assert(new Date(discoveryHistory.get('null-published')?.discoveredAt).getTime() >= localDiscoveryStart, '服务器旧收录时间不会替换本地首次发现时间');
+  assert(!discoveryHistory.has('all-invalid-times'), '所有服务端时间无效时仍跳过条目');
+  const firstLocalDiscovery = discoveryHistory.get('null-published')?.discoveredAt;
+  await sendMessage({ type: 'pollNow' });
+  assert(storageData.history.find(item => item.id === 'null-published')?.discoveredAt === firstLocalDiscovery && Boolean(firstLocalDiscovery), '重复刷新保留同一条目的本地首次发现时间');
+
+  console.log('\n[分页 ETag 归属]');
+  for (const firstEtag of ['W/"first-page"', '']) {
+    resetState();
+    let conditionalHeader;
+    let conditionalCalls = 0;
+    fetchImpl = async (url, options) => {
+      const secondPage = new URL(url).searchParams.has('cursor');
+      conditionalHeader = options?.headers?.['If-None-Match'];
+      conditionalCalls++;
+      if (firstEtag && conditionalHeader === firstEtag) {
+        return { status: 304, headers: new Headers({ ETag: firstEtag }) };
+      }
+      return {
+        ok: true, status: 200,
+        headers: new Headers({ ETag: secondPage ? 'W/"last-page"' : firstEtag }),
+        json: async () => v1Page([v1Item({ id: secondPage ? 'etag-second' : 'etag-first' })], { hasMore: !secondPage, nextCursor: secondPage ? null : 'etag-page2' })
+      };
+    };
+    await sendMessage({ type: 'pollNow' });
+    const cachedEtags = Object.values(storageData.apiFingerprintEtags || {});
+    assert(firstEtag ? cachedEtags.length === 1 && cachedEtags[0] === firstEtag : cachedEtags.length === 0, '首页只保存自己的 ETag，缺失时不借用末页 ETag');
+    if (firstEtag) {
+      const before304History = storageData.history;
+      conditionalCalls = 0;
+      await sendMessage({ type: 'pollNow' });
+      assert(conditionalHeader === firstEtag && conditionalCalls === 1 && storageData.history === before304History, '第二次刷新携带首页 ETag，304 不重拉分页或改写 history');
+    }
+  }
+
   console.log('\n[首次安装发现时间]');
   const oldInstallPublishedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
   const installFetchStartedAt = Date.now();
@@ -2428,6 +2482,55 @@ async function runTests() {
   await onAlarmHandler({ name: 'aihot-poll' });
   assert(requestedUrls.some(url => isV1ItemsUrl(url, 'selected')), 'safety poll 到期时请求 v1 items');
 
+  console.log('\n[安全补拉绕过首页 ETag]');
+  for (const entryPoint of ['alarm', 'manual']) {
+    resetState({ canonicalHistoryVersion: 1 });
+    let secondTitle = '旧标题';
+    let failSecondPage = false;
+    const safetyRequests = [];
+    fetchImpl = async (url, options = {}) => {
+      const secondPage = new URL(url).searchParams.has('cursor');
+      const conditional = options.headers?.['If-None-Match'];
+      safetyRequests.push({ secondPage, conditional });
+      if (!secondPage && conditional === 'W/"stable-head"') {
+        return { status: 304, headers: new Headers({ ETag: 'W/"stable-head"' }) };
+      }
+      if (secondPage && failSecondPage) return new Response('{}', { status: 503 });
+      return {
+        ok: true, status: 200,
+        headers: new Headers({ ETag: secondPage ? 'W/"tail"' : 'W/"stable-head"' }),
+        json: async () => v1Page([v1Item({ id: secondPage ? 'safety-tail' : 'safety-head', title: secondPage ? secondTitle : '首页标题' })], { hasMore: !secondPage, nextCursor: secondPage ? null : 'safety-page2' })
+      };
+    };
+    const refresh = () => entryPoint === 'alarm' ? onAlarmHandler({ name: 'aihot-poll' }) : sendMessage({ type: 'pollNow' });
+    await refresh();
+    const firstCompletePoll = storageData.lastItemsPollAt;
+    secondTitle = '后页新标题';
+    safetyRequests.length = 0;
+    await refresh();
+    assert(safetyRequests.length === 1 && safetyRequests[0].conditional === 'W/"stable-head"' && storageData.lastItemsPollAt === firstCompletePoll, `${entryPoint} 未到期仍走首页 304，且不推迟完整补拉时间`);
+    const expiredPoll = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
+    storageData.lastItemsPollAt = expiredPoll;
+    safetyRequests.length = 0;
+    await refresh();
+    assert(safetyRequests.length === 2 && safetyRequests.every(request => !request.conditional) && storageData.history.find(item => item.id === 'safety-tail')?.title === secondTitle, `${entryPoint} 到期绕过首页 ETag 并更新第二页`);
+    assert(storageData.lastItemsPollAt !== expiredPoll, `${entryPoint} 完整补拉成功后才推进补拉时间`);
+    storageData.lastItemsPollAt = expiredPoll;
+    failSecondPage = true;
+    const beforeFailureHistory = storageData.history;
+    await refresh();
+    assert(storageData.lastItemsPollAt === expiredPoll && storageData.history === beforeFailureHistory && storageData.failCount === 1, `${entryPoint} 后页失败保留补拉水位和历史，进入退避`);
+  }
+
+  console.log('\n[切源 304 不推迟安全补拉]');
+  const beforeSwitch304Poll = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
+  resetState({ feedMode: 'all', lastItemsPollAt: beforeSwitch304Poll,
+    apiFingerprintEtags: { 'https://aihot.news/api/v1/items?mode=selected&window=7d&limit=100': 'W/"switch-head"' }
+  });
+  fetchImpl = async () => ({ status: 304, headers: new Headers({ ETag: 'W/"switch-head"' }) });
+  const switched304 = await sendMessage({ type: 'feedModeChanged', feedMode: 'selected' });
+  assert(switched304.ok === true && storageData.feedMode === 'selected' && storageData.lastItemsPollAt === beforeSwitch304Poll, '切换内容源命中 304 时可以提交模式，但不能当作完整补拉');
+
   console.log('\n[自动轮询-v1 分页截断]');
   const oldLastItemsPollAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   resetState({
@@ -2636,6 +2739,51 @@ async function runTests() {
   assert(failureResponse.ok === false, 'API 500 时手动刷新返回失败');
   assert(storageData.failCount === 1, 'API 500 时递增失败计数');
 
+  console.log('\n[Problem JSON 与退避]');
+  resetState();
+  fetchImpl = async () => new Response(JSON.stringify({
+    type: 'about:blank', title: 'Bad request', status: 400,
+    code: 'invalid_cursor', detail: 'Cursor anchor left the window', requestId: 'req-problem'
+  }), { status: 400, headers: { 'Content-Type': 'application/problem+json' } });
+  let problemError;
+  try { await backgroundApi.resetAndPollForTest('selected'); } catch (error) { problemError = error; }
+  assert(problemError?.status === 400 && problemError?.code === 'invalid_cursor' && problemError?.requestId === 'req-problem' && problemError?.detail === 'Cursor anchor left the window', 'HTTP 错误保留 Problem code、detail 与 requestId');
+  const problemReply = await sendMessage({ type: 'pollNow' });
+  assert(problemReply.ok === false && problemReply.error.includes('invalid_cursor') && problemReply.error.includes('req-problem'), '调用方错误消息带稳定错误码和 requestId');
+
+  for (const [priorFailures, expectedMinutes] of [[0, 5], [1, 10], [2, 20], [3, 40], [12, 60]]) {
+    resetState({ failCount: priorFailures });
+    const failureStart = Date.now();
+    fetchImpl = async () => new Response('<html>Unavailable</html>', { status: 503, headers: { 'X-Request-Id': 'req-edge' } });
+    const reply = await sendMessage({ type: 'pollNow' });
+    const delay = new Date(storageData.nextAllowedPollAt).getTime() - failureStart;
+    assert(reply.ok === false && delay >= expectedMinutes * 60000 && delay < expectedMinutes * 60000 + 2000, `连续 5xx 第 ${priorFailures + 1} 次按 ${expectedMinutes} 分钟退避`);
+    assert(reply.error.includes('503') && reply.error.includes('req-edge'), '非 JSON 错误仍保留 HTTP 状态和响应头 requestId');
+  }
+  resetState({ failCount: 20 });
+  const retryAfterStart = Date.now();
+  fetchImpl = async () => new Response('{}', { status: 503, headers: { 'Retry-After': '7200' } });
+  await sendMessage({ type: 'pollNow' });
+  assert(new Date(storageData.nextAllowedPollAt).getTime() >= retryAfterStart + 7200000, 'Retry-After 超过指数退避上限时仍完整遵守服务端等待时间');
+  storageData.nextAllowedPollAt = '';
+  fetchImpl = async () => ({ ok: true, json: async () => v1Page([]) });
+  await sendMessage({ type: 'pollNow' });
+  assert(storageData.failCount === 0 && storageData.nextAllowedPollAt === '', '成功刷新重置失败计数与退避');
+
+  console.log('\n[错误响应解码超时保留限流语义]');
+  resetState();
+  const hungProblemStart = Date.now();
+  const hungProblem = await withFakeTimers(async timers => {
+    let response;
+    fetchImpl = async () => ({ ok: false, status: 503, headers: new Headers({ 'Retry-After': '120' }), json: () => new Promise(() => {}) });
+    void sendMessage({ type: 'pollNow' }).then(value => { response = value; });
+    await flushMicrotasks();
+    await timers.advanceBy(15000);
+    await flushMicrotasks(80);
+    return { response, pendingTimers: timers.pendingCount() };
+  });
+  assert(hungProblem.response?.ok === false && hungProblem.response.error.includes('timed out') && hungProblem.pendingTimers === 0 && new Date(storageData.nextAllowedPollAt).getTime() >= hungProblemStart + 120000, 'Problem JSON 挂起时 deadline 释放队列且保留 Retry-After');
+
   console.log('\n[请求 deadline 覆盖 fetch、JSON 与队列释放]');
   resetState({ apiFingerprints: { selected: 'fp-old' } });
   let hungFingerprintSignal = null;
@@ -2744,6 +2892,44 @@ async function runTests() {
   });
   assert(queuedAfterTimeout.firstResponse?.ok === false && queuedAfterTimeout.secondResponse?.ok === true && storageData.history.some(item => item.id === 'queue-after-timeout') && queuedAfterTimeout.pendingTimers === 0, '首个请求超时后 mutation queue 释放并执行后续刷新');
   assert(requestedUrls.every(url => !url.includes('/api/public/fingerprint')), '轮询不再请求已弃用的 legacy fingerprint 接口');
+
+  console.log('\n[归一化升级使旧 ETag 失效一次]');
+  const selectedCacheUrl = 'https://aihot.news/api/v1/items?mode=selected&window=7d&limit=100';
+  const allCacheUrl = 'https://aihot.news/api/v1/items?mode=all&window=7d&limit=100';
+  const recentPollBeforeUpgrade = new Date().toISOString();
+  resetState({
+    canonicalHistoryVersion: 1,
+    apiFingerprintEtags: { [selectedCacheUrl]: 'W/"old-selected"', [allCacheUrl]: 'W/"old-all"' },
+    lastItemsPollAt: recentPollBeforeUpgrade,
+    readIds: ['retained'],
+    history: [{ id: 'retained', title: '保留的资讯', selected: false, time: recentPollBeforeUpgrade, discoveredAt: recentPollBeforeUpgrade }],
+    watchNotifyState: { retained: { viewedAt: recentPollBeforeUpgrade } }
+  });
+  const preservedBeforeUpgrade = JSON.stringify({ history: storageData.history, readIds: storageData.readIds, watchNotifyState: storageData.watchNotifyState });
+  failSetWhen = values => Object.prototype.hasOwnProperty.call(values, 'apiNormalizationVersion');
+  delete require.cache[require.resolve('./background.js')];
+  require('./background.js');
+  const failedCacheMigration = await sendMessage({ type: 'configChanged' });
+  assert(failedCacheMigration.ok === false && storageData.apiFingerprintEtags[selectedCacheUrl] === 'W/"old-selected"' && !storageData.apiNormalizationVersion && storageData.lastItemsPollAt === recentPollBeforeUpgrade, '迁移写入失败时不提交版本或部分清空缓存');
+  failSetWhen = null;
+  await sendMessage({ type: 'configChanged' });
+  assert(storageData.apiNormalizationVersion === 1 && Object.keys(storageData.apiFingerprintEtags).length === 0 && !storageData.lastItemsPollAt, '已有 canonical marker 的旧用户也会清空两个模式 ETag 和补拉水位');
+  assert(JSON.stringify({ history: storageData.history, readIds: storageData.readIds, watchNotifyState: storageData.watchNotifyState }) === preservedBeforeUpgrade, '缓存迁移不改写已有 history、精选标记、已读或特关状态');
+  const upgradeRequests = [];
+  fetchImpl = async (url, options = {}) => {
+    upgradeRequests.push(options.headers?.['If-None-Match']);
+    if (options.headers?.['If-None-Match']) return { status: 304, headers: new Headers({ ETag: 'W/"old-selected"' }) };
+    return { ok: true, status: 200, headers: new Headers({ ETag: 'W/"old-selected"' }), json: async () => v1Page([v1Item({ id: 'missed-before-upgrade', publishedAt: null, discoveredAt: recentPollBeforeUpgrade })]) };
+  };
+  await sendMessage({ type: 'pollNow' });
+  assert(upgradeRequests.length === 1 && !upgradeRequests[0] && storageData.history.some(item => item.id === 'missed-before-upgrade'), '升级后首次拉取绕过旧缓存，补回之前漏掉的 null 发布时间条目');
+  const afterUpgradePoll = storageData.lastItemsPollAt;
+  delete require.cache[require.resolve('./background.js')];
+  require('./background.js');
+  await sendMessage({ type: 'configChanged' });
+  upgradeRequests.length = 0;
+  await sendMessage({ type: 'pollNow' });
+  assert(upgradeRequests[0] === 'W/"old-selected"' && storageData.lastItemsPollAt === afterUpgradePoll, 'worker 重启后不重复清空已迁移缓存，正常复用 304');
 
   console.log(`\n${'='.repeat(40)}`);
   console.log(`结果: ${passed} passed, ${failed} failed`);

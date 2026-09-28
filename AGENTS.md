@@ -62,7 +62,8 @@ node screenshot.mjs
 
 - **已读状态**：`readIds` 保存单条稳定 key（优先 `id`，再 `permalink`，再 `url`，并兼容旧 URL）+ `readAllBefore` 时间戳（批量清除）。两者共同决定是否已读。
 - **存储 vs 显示**：storage 保留 `Math.max(historyDays, 5)` 天数据避免切换天数时丢失；UI 和 badge 按用户设置的 `historyDays` 过滤显示。
-- **API 轮询缓冲**：自动轮询和手动刷新对完整 v1 items URL 使用 URL 级 `ETag`/`If-None-Match`；304 跳过内容处理，200 成功持久化后保存该 URL 的 ETag。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
+- **API 轮询缓冲**：自动轮询和手动刷新对完整 v1 items URL 使用 URL 级 `ETag`/`If-None-Match`；304 跳过内容处理，200 成功持久化后保存该 URL 的 ETag。首页只保存首页 ETag，不能用续页 ETag 覆盖或补齐。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
+- **时间字段**：展示时间优先 `publishedAt`，为空或无效时回退 API `discoveredAt`，最后兼容旧 `indexedAt`；全部无效才跳过。API 收录时间存为 `sourceDiscoveredAt`，本地 `discoveredAt` 保持首次获取时间语义，不得用服务端时间覆盖已读/提醒水位。查询沿用默认 `by=timeline`，列表排序及显示天数按上述展示时间计算。
 - **feedMode 切换**：弹窗先投影已有缓存，后台拉取并合并 canonical history，持久化成功后才提交新的 feedMode；失败保留旧 history 和旧模式。旧请求结果不能覆盖新选择，不能因切换清空历史。
 - **canonical history 限额**：内容源切换和轮询都合并既有 history，不因切换清空记录；持久化前最多保留 2500 条最新条目，标题/来源/摘要分别限制 500/300/3000 字符。history、readIds、watchNotifyState、lastItems 合计控制在 6 MiB UTF-8 JSON，quota 失败时只重试一次更小 history。
 - **内容源默认值**：`normalizeFeedMode()` 默认返回 `all`（全部），未明确设置时显示全部内容。
@@ -73,6 +74,8 @@ node screenshot.mjs
 - `GET https://aihot.news/api/v1/items?mode={selected|all}&window=7d&limit=100&cursor={nextCursor}`：v1 items 端点。响应为 `{ items: [...], page: { hasMore: bool, nextCursor: string|null } }`；以 `page.hasMore` 和 `page.nextCursor` 驱动分页，`cursor` 视为 opaque，原样传回。条目来源使用 `source.name`，链接使用 `links.original`（优先打开）和 `links.aihot`（permalink / HTTPS 回退）。
 
 只有 items 分页未截断且 history 持久化成功后，才提交新的 URL 级 ETag / `lastItemsPollAt`。
+
+首页 304 不代表后续页未变化。自动轮询和手动刷新在完整拉取满 6 小时或 `lastItemsPollAt` 缺失时必须绕过 ETag 条件请求，并继续正常分页；304 不能推进补拉水位。API 归一化规则变更需通过独立 `apiNormalizationVersion` 一次性失效旧 ETag 和补拉水位，版本标记与失效操作同次写入，不重置 history、已读或特关数据。
 
 `SUPPORTS_CONSISTENT_SELECTED_SNAPSHOT` 当前为 false；API 未保证一致快照前，不得依据响应中缺失某条目取消其精选标记。
 

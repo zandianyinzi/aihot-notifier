@@ -5,8 +5,20 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0';
+const UA = 'aihot-notifier-contract-test/1.0';
 const FETCH_TIMEOUT_MS = 10_000;
+
+// Run production normalization so live contract tests catch dropped valid items.
+const backgroundSource = fs.readFileSync(path.join(__dirname, 'background.js'), 'utf8');
+const normalizationNames = ['isHttpsUrl', 'normalizeAttribution', 'normalizeTimestamp', 'normalizeV1Item', 'getNormalizedItemTime'];
+const normalizationSource = normalizationNames.map(name => {
+  const match = backgroundSource.match(new RegExp(`function ${name}\\([^]*?\\n\\}`));
+  if (!match) throw new Error(`Missing background normalizer: ${name}`);
+  return match[0];
+}).join('\n');
+const { normalizeV1Item, getNormalizedItemTime } = vm.runInNewContext(
+  `${normalizationSource}\n({ normalizeV1Item, getNormalizedItemTime });`, { Date, URL }
+);
 
 let passed = 0;
 let failed = 0;
@@ -37,7 +49,6 @@ async function fetchItems(mode) {
 async function fetchItemsPaginated(mode, maxPages = 3) {
   let allItems = [];
   let cursor = null;
-  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
   for (let page = 0; page < maxPages; page++) {
     let url = `https://aihot.news/api/v1/items?mode=${mode}&window=7d&limit=50`;
@@ -51,8 +62,6 @@ async function fetchItemsPaginated(mode, maxPages = 3) {
     allItems = allItems.concat(json.items);
 
     if (!json.page?.hasMore || !json.page?.nextCursor) break;
-    const oldest = json.items[json.items.length - 1];
-    if (new Date(oldest.publishedAt).getTime() < cutoff) break;
     cursor = json.page.nextCursor;
   }
   return allItems;
@@ -79,7 +88,8 @@ function isV1Item(item) {
     item.title &&
     typeof item.source?.name === 'string' && item.source.name &&
     hasOpenLink(item) &&
-    !Number.isNaN(new Date(item.publishedAt).getTime())
+    (item.publishedAt === null || (typeof item.publishedAt === 'string' && Number.isFinite(Date.parse(item.publishedAt)))) &&
+    typeof item.discoveredAt === 'string' && Number.isFinite(Date.parse(item.discoveredAt))
   );
 }
 
@@ -87,7 +97,9 @@ function isV1Item(item) {
 function simulateResetAndPoll(apiItems, historyDays) {
   const cutoff = Date.now() - Math.max(historyDays, 7) * 24 * 60 * 60 * 1000;
   return apiItems
-    .map(i => ({ title: i.title, url: i.links?.original || i.links?.aihot || '', permalink: i.links?.aihot || i.links?.original || '', source: i.source?.name || '', category: i.category || '', summary: i.summary || '', time: i.publishedAt }))
+    .map(normalizeV1Item)
+    .filter(Boolean)
+    .map(i => ({ ...i, time: getNormalizedItemTime(i) }))
     .filter(i => new Date(i.time).getTime() > cutoff)
     .sort((a, b) => new Date(b.time) - new Date(a.time));
 }
@@ -105,7 +117,7 @@ function simulateResetAndPoll(apiItems, historyDays) {
     assert(all.length > 0, 'all 模式返回非空');
     assert(selected.length <= 50 && all.length <= 50, `selected/all 单页均不超过 limit=50`);
 
-    const requiredFields = ['id', 'title', 'source', 'links', 'publishedAt', 'category'];
+    const requiredFields = ['id', 'title', 'source', 'links', 'publishedAt', 'discoveredAt', 'category'];
     const sampleSelected = selected[0];
     const sampleAll = all[0];
     requiredFields.forEach(f => {
@@ -125,8 +137,8 @@ function simulateResetAndPoll(apiItems, historyDays) {
 
     console.log('\n[v1 响应顺序]');
     // v1 返回的原始顺序并不承诺按 publishedAt 排序；扩展会在入库时排序。
-    assert(selected.every(item => !Number.isNaN(new Date(item.publishedAt).getTime())), 'selected 每条都有可解析发布时间');
-    assert(all.every(item => !Number.isNaN(new Date(item.publishedAt).getTime())), 'all 每条都有可解析发布时间');
+    assert(selected.every(item => normalizeV1Item(item) !== null), 'selected 合法条目均可被生产归一化逻辑接收');
+    assert(all.every(item => normalizeV1Item(item) !== null), 'all 合法条目（含 null 发布时间）均可被生产归一化逻辑接收');
 
     console.log('\n[子集关系]');
     // API 每次最多返回 50 条，两个 mode 可能覆盖不同时间窗口
@@ -186,8 +198,8 @@ function simulateResetAndPoll(apiItems, historyDays) {
     console.log(`  all 分页拉取: ${allPaged.length} 条 (单页: ${all.length})`);
     assert(selectedPaged.length >= selected.length, `分页selected(${selectedPaged.length}) >= 单页(${selected.length})`);
     assert(allPaged.length >= all.length, `分页all(${allPaged.length}) >= 单页(${all.length})`);
-    assert(selectedPaged.every(item => !Number.isNaN(new Date(item.publishedAt).getTime())), '分页selected保留可解析发布时间');
-    assert(allPaged.every(item => !Number.isNaN(new Date(item.publishedAt).getTime())), '分页all保留可解析发布时间');
+    assert(selectedPaged.every(item => normalizeV1Item(item) !== null), '分页 selected 全部条目通过生产归一化');
+    assert(allPaged.every(item => normalizeV1Item(item) !== null), '分页 all 全部条目通过生产归一化');
     // 分页后子集关系应更明显
     const allPagedUrls = new Set(allPaged.map(i => i.links?.original || i.links?.aihot));
     const selectedInAllPaged = selectedPaged.filter(i => allPagedUrls.has(i.links?.original || i.links?.aihot));
@@ -212,10 +224,11 @@ function simulateResetAndPoll(apiItems, historyDays) {
 
     console.log('\n[时区一致性验证]');
     const latestItem = selected[0];
-    const utcTime = new Date(latestItem.publishedAt);
+    const latestDisplayTime = getNormalizedItemTime(normalizeV1Item(latestItem));
+    const utcTime = new Date(latestDisplayTime);
     const tzOffset = -utcTime.getTimezoneOffset() / 60;
-    console.log(`  API 最新: ${latestItem.publishedAt} → 本地 ${utcTime.toLocaleTimeString()} (UTC${tzOffset >= 0 ? '+' : ''}${tzOffset})`);
-    assert(!isNaN(utcTime.getTime()), 'publishedAt 可正确解析为 Date');
+    console.log(`  API 首条展示时间: ${latestDisplayTime} → 本地 ${utcTime.toLocaleTimeString()} (UTC${tzOffset >= 0 ? '+' : ''}${tzOffset})`);
+    assert(!isNaN(utcTime.getTime()), '发布时间或收录回退时间可正确解析为 Date');
     // 扩展 popup.js 使用本地月、日、时、分组合显示，验证转换正确。
     const expectedDisplay = `${String(utcTime.getMonth() + 1).padStart(2, '0')}/${String(utcTime.getDate()).padStart(2, '0')} ${String(utcTime.getHours()).padStart(2, '0')}:${String(utcTime.getMinutes()).padStart(2, '0')}`;
     assert(expectedDisplay.match(/^\d{2}\/\d{2} \d{2}:\d{2}$/), `本地日期时间格式正确: ${expectedDisplay}`);
@@ -225,15 +238,15 @@ function simulateResetAndPoll(apiItems, historyDays) {
     if (ageMs >= 48 * 60 * 60 * 1000) console.warn('  ⚠ API 最新条目超过 48 小时');
 
     console.log('\n[API 时效性]');
-    // API /api/v1/items 有缓存，可能出现数小时级公开接口延迟。
+    // 条目年龄不等于接口缓存延迟，只作为诊断展示。
     const apiTodayItems = selected.filter(i => {
-      const d = new Date(i.publishedAt);
+      const d = new Date(getNormalizedItemTime(normalizeV1Item(i)));
       return d.toDateString() === new Date().toDateString();
     });
     console.log(`  API 今日条目: ${apiTodayItems.length} 条`);
-    const apiLatest = new Date(selected[0].publishedAt);
+    const apiLatest = new Date(latestDisplayTime);
     const apiLagMinutes = (Date.now() - apiLatest.getTime()) / 60000;
-    console.log(`  API 数据延迟: ~${apiLagMinutes.toFixed(0)} 分钟（公开接口有缓存，属正常）`);
+    console.log(`  首条资讯展示时间距今: ~${apiLagMinutes.toFixed(0)} 分钟（不代表 API 延迟）`);
     if (apiTodayItems.length === 0) console.warn('  ⚠ API 当前没有今日条目');
 
     console.log('\n[扩展展示逻辑验证]');
