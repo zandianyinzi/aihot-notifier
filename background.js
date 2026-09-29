@@ -1165,6 +1165,30 @@ function isWithinDisplayWindow(item, cutoff) {
   return Number.isFinite(publishedAt) && publishedAt > cutoff;
 }
 
+function buildDiscoveryDelta(inserted, {
+  historyDays = DEFAULT_HISTORY_DAYS,
+  readIds = [],
+  readAllBefore = '',
+  readAllBeforeByMode = {}
+} = {}) {
+  const cutoff = Date.now() - Number(historyDays || DEFAULT_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+  const readIdSet = new Set(Array.isArray(readIds) ? readIds : []);
+  const readAllBeforeTime = new Date(getReadAllBefore({ readAllBefore, readAllBeforeByMode })).getTime();
+  const visibleInserted = inserted.filter(item => isWithinDisplayWindow(item, cutoff));
+  const visibleUnreadInserted = visibleInserted.filter(item => {
+    if (getItemAliases(item).some(alias => readIdSet.has(alias))) return false;
+    return !Number.isFinite(readAllBeforeTime) || getUnreadReferenceTime(item) > readAllBeforeTime;
+  });
+  return {
+    inserted,
+    visibleInserted,
+    visibleUnreadInserted,
+    watchInserted: inserted.filter(item => item.watchMatched === true),
+    normalInserted: inserted.filter(item => item.watchMatched !== true),
+    normalVisibleUnreadInserted: visibleUnreadInserted.filter(item => item.watchMatched !== true)
+  };
+}
+
 function toHistoryEntry(item, discoveredAt, watchMatches = [], watchMatchedAt = discoveredAt) {
   const normalizedTime = getNormalizedItemTime(item, discoveredAt);
   const entry = {
@@ -1295,11 +1319,13 @@ async function persistFetchedItems(items, options = {}) {
     history = [],
     historyDays = DEFAULT_HISTORY_DAYS,
     readIds = [],
+    readAllBefore = '',
+    readAllBeforeByMode = {},
     watchRules = [],
     watchNotifyState = {},
     allFeedContinuation = {},
     feedMode
-  } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'watchRules', 'watchNotifyState', 'allFeedContinuation', 'feedMode']);
+  } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules', 'watchNotifyState', 'allFeedContinuation', 'feedMode']);
 
   if (typeof options.isCurrent === 'function' && !await options.isCurrent()) {
     return { skipped: true, updated: history, newEntries: [], watchNotificationsSent: 0 };
@@ -1335,7 +1361,14 @@ async function persistFetchedItems(items, options = {}) {
     ...(options.storageUpdates || {})
   });
   const persistedWatchNotifyState = { ...committed.watchNotifyState };
-  const watchItems = getCommittedEntries(persisted.inserted, committed.history).filter(item => item.watchMatched === true);
+  const inserted = getCommittedEntries(persisted.inserted, committed.history);
+  const discoveryDelta = buildDiscoveryDelta(inserted, {
+    historyDays,
+    readIds: persisted.readIds || readIds,
+    readAllBefore,
+    readAllBeforeByMode
+  });
+  const watchItems = discoveryDelta.watchInserted;
 
   // The unread state is durable already; slow or failed notifications must not
   // delay its badge or determine whether the poll is considered successful.
@@ -1346,21 +1379,22 @@ async function persistFetchedItems(items, options = {}) {
       committed = await persistWatchNotificationProgress(committed, persistedWatchNotifyState);
     }, options.watchCycle)
     : [];
-  const normalItems = getCommittedEntries(persisted.inserted, committed.history).filter(item => item.watchMatched !== true);
+  const normalItems = discoveryDelta.normalInserted;
+  const normalVisibleUnreadItems = discoveryDelta.normalVisibleUnreadInserted;
 
-  if (shouldNotify && normalItems.length > 0) {
-    const count = normalItems.length;
+  if (shouldNotify && normalVisibleUnreadItems.length > 0) {
+    const notificationItem = normalVisibleUnreadItems[0];
+    const visibleUnreadCount = normalVisibleUnreadItems.length;
     const notifId = getNotificationId('aihot');
     await runPostCommitSideEffect('new-item notification', () => createNotification(notifId, {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
-      title: count === 1 ? 'AI HOT 新内容' : `AI HOT 有 ${count} 条新内容`,
-      message: normalItems[0].title,
-      contextMessage: normalItems[0].source || ''
-    }, getItemOpenUrl(normalItems[0])));
+      title: visibleUnreadCount > 1 ? `AI HOT 有 ${visibleUnreadCount} 条新内容` : 'AI HOT 新内容',
+      message: notificationItem.title,
+      contextMessage: notificationItem.source || ''
+    }, getItemOpenUrl(notificationItem)));
   }
 
-  const inserted = getCommittedEntries(persisted.inserted, committed.history);
   return {
     updated: committed.history,
     newEntries: inserted,

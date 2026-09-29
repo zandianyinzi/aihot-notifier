@@ -182,6 +182,46 @@ async function runTests() {
   assert(storageData.history.length === 2 && storageData.history[0].url === 'https://example.com/claude-5', 'history 存入 v1 links.original');
   assert(storageData.history[0].permalink === 'https://aihot.virxact.com/items/new-1', 'history 保留 v1 links.aihot');
 
+  console.log('\n[场景1b: 通知显示新增未读，角标显示累计未读]');
+  const existingUnread = [0, 1, 2].map(index => v1Item({
+    id: `existing-unread-${index}`,
+    title: `已有未读 ${index + 1}`,
+    publishedAt: new Date(Date.now() - (index + 2) * 60 * 60 * 1000).toISOString()
+  }));
+  const newlyUnread = [0, 1].map(index => v1Item({
+    id: `new-unread-${index}`,
+    title: `本轮新增未读 ${index + 1}`,
+    publishedAt: new Date(Date.now() - (index + 1) * 30 * 60 * 1000).toISOString()
+  }));
+  resetState({
+    apiFingerprints: { selected: 'fp-old' },
+    history: existingUnread.map(item => ({
+      id: item.id,
+      title: item.title,
+      url: item.links.original,
+      permalink: item.links.aihot,
+      source: item.source.name,
+      time: item.publishedAt,
+      discoveredAt: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    }))
+  });
+  useV1Feed([...newlyUnread, ...existingUnread], 'fp-new-with-existing-unread');
+  await autoPoll();
+  assert(notificationsCreated.length === 1 && notificationsCreated[0]?.title === 'AI HOT 有 2 条新内容', `通知只显示本轮新增未读 2 条: "${notificationsCreated[0]?.title}"`);
+  assert(badgeText === '5', `角标显示累计未读 5 条: "${badgeText}"`);
+  resetState({
+    apiFingerprints: { selected: 'fp-new' },
+    history: firstItems.map(item => ({
+      id: item.id,
+      title: item.title,
+      url: item.links.original,
+      permalink: item.links.aihot,
+      source: item.source.name,
+      time: item.publishedAt,
+      discoveredAt: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    }))
+  });
+
   console.log('\n[场景2-4: 已有条目不通知，已读影响角标]');
   notificationsCreated = [];
   useV1Feed(firstItems, 'fp-new');
@@ -229,13 +269,31 @@ async function runTests() {
   assert(storageData.history === oldHistory, 'manualPoll失败不覆盖旧history');
   assert(storageData.failCount === 1, `manualPoll失败递增failCount: ${storageData.failCount}`);
 
-  console.log('\n[场景10: all 模式新发现旧发布时间仍通知]');
+  console.log('\n[场景10: all 模式新发现旧发布时间不触发未读通知]');
   resetState({ feedMode: 'all', apiFingerprints: { all: 'fp-old' }, readAllBefore: new Date(Date.now() - 60 * 60 * 1000).toISOString() });
   useV1Feed([v1Item({ id: 'old-new', title: '新发现旧发布时间内容', source: { name: 'AI HOT' }, links: { original: 'https://example.com/old-new', aihot: 'https://aihot.virxact.com/items/old-new' }, publishedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString() })], 'fp-selected');
   await autoPoll();
-  assert(notificationsCreated.length === 1, '旧发布时间的新 URL 仍触发通知');
-  assert(storageData.history.length === 1 && Boolean(storageData.history[0].discoveredAt), '已通知条目写入 history 并记录发现时间');
+  assert(notificationsCreated.length === 0, '当前不可见的旧发布时间新增不触发未读通知');
+  assert(storageData.history.length === 1 && Boolean(storageData.history[0].discoveredAt), '新发现条目写入 history 并记录发现时间');
   assert(badgeText === '', `发布时间超出显示天数时不计入角标: "${badgeText}"`);
+
+  console.log('\n[场景10b: 通知数量只统计当前可见新增未读]');
+  resetState({ feedMode: 'all', apiFingerprints: { all: 'fp-old' } });
+  useV1Feed([
+    v1Item({ id: 'visible-new', title: '当前窗口内的新内容', publishedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString() }),
+    v1Item({ id: 'visible-new-2', title: '当前窗口内的新内容二', publishedAt: new Date(Date.now() - 45 * 60 * 1000).toISOString() }),
+    v1Item({ id: 'hidden-new', title: '窗口外的新内容', publishedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() })
+  ], 'fp-visible-mixed');
+  await autoPoll();
+  assert(notificationsCreated.length === 1 && notificationsCreated[0]?.title === 'AI HOT 有 2 条新内容', `通知标题只统计当前窗口新增未读: ${notificationsCreated[0]?.title}`);
+  assert(badgeText === '2', `实际新增未读数量为2: "${badgeText}"`);
+
+  console.log('\n[场景10c: 本轮新入库但已读条目不触发通知]');
+  resetState({ feedMode: 'all', apiFingerprints: { all: 'fp-old' }, readIds: ['already-read-new'] });
+  useV1Feed([v1Item({ id: 'already-read-new', title: '已读的新入库内容', publishedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString() })], 'fp-read-new');
+  await autoPoll();
+  assert(notificationsCreated.length === 0, '本轮新入库但已读的条目不触发未读通知');
+  assert(badgeText === '', `已读新条目不计入角标: "${badgeText}"`);
 
   console.log('\n[场景11-12: 特关通知单独发送且每轮至多三条]');
   resetState({
