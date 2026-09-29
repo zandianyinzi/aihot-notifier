@@ -54,6 +54,7 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 
 - `node test.js`：运行纯逻辑示例与兼容性测试；其中仍有历史重建模型，当前内容源切换行为以 `test-background.js` 对真实代码的验证为准。
 - `node test-notification.js`：使用 mock 的 Chrome API 验证通知和 badge 逻辑。
+- `node test-notification-reliability.js`：加载真实后台，验证角标并发、通知部分失败、持久化结果与分页缓存边界。
 - `node test-background.js`：直接加载真实 `background.js`，验证消息通道和失败语义。
 - `node test-popup-ui.js`：验证弹窗设置、特关和光标等 UI 约束。
 - `node test-feed-state.js`：验证全部/精选内容源的共享投影规则。
@@ -103,7 +104,9 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - 扩展保留 canonical history，不因内容源切换清空既有记录。存储保留 `Math.max(historyDays, 5)` 天窗口内的数据（同时考虑发布时间与发现时间），UI 和 badge 仅按发布时间过滤最近 `historyDays` 天。每次持久化最多保留 2500 条最新内容，并限制标题 500、来源 300、摘要 3000 字符。history、已读、特关提醒和最近条目的合计 JSON 使用 6 MiB UTF-8 预算，遇到 quota 会以更小 history 重试一次。
 - 已读/特关状态优先使用稳定 key（`id` / `permalink` / `url`），并兼容旧 URL 数据
 - 全局 `readAllBefore` 和单条 `readIds` 共同决定已读状态，切换内容源不重置已读。后台负责串行持久化；打开条目时先创建标签页，成功后再提交已读/已查看状态。
+- 角标使用独立串行队列读取已提交状态，更新失败时重读并重试一次；新内容入库后先更新角标，再发送通知。角标失败不会把已完成的数据保存误报为失败，也不会阻止通知点击打开原文。
 - 特关同一规则内的来源、作者和关键词条件同时满足才命中，多个关键词命中任意一个即可。未查看的特关最多提醒 3 次，计划时间相对 `firstMatchedAt` 为立即、8 小时、24 小时，到期后由轮询检查，每轮最多发送 3 条。查看、全部已读或停用对应规则会抑制后续提醒；手动刷新与内容源切换当次不弹通知。
+- 特关成功投递后逐条保存提醒进度，新通知与到期提醒共享当轮预算；单条发送失败不重发当轮已尝试条目，也不计为资讯 API 失败。quota 降容后的通知与后续写入以实际保留的 history 为准。
 
 ## 文件结构
 

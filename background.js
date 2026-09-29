@@ -54,6 +54,7 @@ const SOURCE_SWITCH_STORAGE_KEYS = [
 ];
 let notificationCounter = 0;
 let stateMutationQueue = Promise.resolve();
+let badgeUpdateQueue = Promise.resolve();
 let feedModeGeneration = 0;
 let sourceSwitchGeneration = 0;
 let canonicalHistoryMigrationPromise = null;
@@ -702,9 +703,9 @@ function getNotificationId(prefix) {
 }
 
 async function createNotification(id, options, url, stateKey = '') {
-  await rememberNotificationUrl(id, url);
-  await rememberNotificationStateKey(id, stateKey);
   try {
+    await rememberNotificationUrl(id, url);
+    await rememberNotificationStateKey(id, stateKey);
     await chrome.notifications.create(id, options);
   } catch (e) {
     await forgetNotificationUrl(id).catch(() => {});
@@ -721,32 +722,64 @@ function findWatchState(watchNotifyState, item) {
   };
 }
 
-async function sendWatchNotifications(items, watchNotifyState, now, limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
-  if (limit <= 0) return [];
+async function persistWatchNotificationProgress(committed, watchNotifyState, lastItems = committed.lastItems) {
+  const updates = {
+    history: committed.history,
+    readIds: committed.readIds,
+    watchNotifyState,
+    ...(lastItems ? { lastItems: lastItems.slice(0, 5) } : {})
+  };
+  let saved;
+  try {
+    saved = await persistCanonicalState(updates);
+  } catch (e) {
+    // Quota has already had its one smaller-history retry. Retry only a
+    // transient non-quota write, without sending the notification again.
+    if (isQuotaStorageError(e)) throw e;
+    saved = await persistCanonicalState(updates);
+  }
+  // Quota recovery can trim more items; do not notify or restore their state.
+  Object.keys(watchNotifyState).forEach(key => { delete watchNotifyState[key]; });
+  Object.assign(watchNotifyState, saved.watchNotifyState);
+  return saved;
+}
+
+async function sendWatchNotifications(items, watchNotifyState, now, limit, persistProgress, cycle = { attempted: new Set(), sent: 0 }) {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
   const nowMs = new Date(now).getTime();
   const dueItems = items
-    .filter(item => shouldNotifyWatchState(findWatchState(watchNotifyState, item).state, nowMs))
+    .filter(item => !cycle.attempted.has(getItemStateKey(item)) && shouldNotifyWatchState(findWatchState(watchNotifyState, item).state, nowMs))
     .sort((a, b) => getItemTime(b) - getItemTime(a))
-    .slice(0, limit);
+    .slice(0, Math.min(Math.floor(limit), getCycleWatchNotificationBudget(cycle.sent)));
+  const notified = [];
 
   for (let index = 0; index < dueItems.length; index++) {
     const item = dueItems[index];
     const { key, state } = findWatchState(watchNotifyState, item);
-    const url = getItemOpenUrl(item);
-    await createNotification(getNotificationId('aihot-watch'), {
-      type: 'basic',
-      iconUrl: 'icons/icon128.png',
-      title: getWatchNotificationTitle(item),
-      message: item.title,
-      contextMessage: item.source || ''
-    }, url, key);
+    if (!shouldNotifyWatchState(state, nowMs)) continue;
+    cycle.attempted.add(getItemStateKey(item));
+    try {
+      await createNotification(getNotificationId('aihot-watch'), {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: getWatchNotificationTitle(item),
+        message: item.title,
+        contextMessage: item.source || ''
+      }, getItemOpenUrl(item), key);
+    } catch (e) {
+      console.warn('[AI HOT] watch notification failed:', e);
+      continue;
+    }
+    cycle.sent++;
+    notified.push(item);
     watchNotifyState[key] = advanceWatchNotifyState(state, now);
+    await runPostCommitSideEffect('watch notification progress', () => persistProgress(notified));
   }
 
-  return dueItems;
+  return notified;
 }
 
-async function markWatchViewed(urls) {
+async function markWatchViewed(urls, options = {}) {
   const list = Array.isArray(urls) ? urls : [urls];
   const filtered = [...new Set(list.flatMap(getItemAliases).filter(Boolean))];
   if (filtered.length === 0) return;
@@ -761,7 +794,7 @@ async function markWatchViewed(urls) {
     });
   });
   await chrome.storage.local.set({ watchNotifyState });
-  await updateBadge();
+  if (options.skipBadge !== true) await runPostCommitSideEffect('watch viewed badge update', updateBadge);
 }
 
 async function markItemsRead(ids, options = {}) {
@@ -770,7 +803,7 @@ async function markItemsRead(ids, options = {}) {
   const merged = [...new Set([...readIds, ...aliases])];
   const bounded = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
   await chrome.storage.local.set({ readIds: bounded });
-  if (options.skipBadge !== true) await updateBadge();
+  if (options.skipBadge !== true) await runPostCommitSideEffect('mark-read badge update', updateBadge);
   return bounded;
 }
 
@@ -787,8 +820,8 @@ async function openItem(urlValue, ids) {
   try {
     await runMigratedStateMutation(async () => {
       await markItemsRead(aliases, { skipBadge: true });
-      await markWatchViewed(aliases);
-      await updateBadge();
+      await markWatchViewed(aliases, { skipBadge: true });
+      await runPostCommitSideEffect('open-item badge update', updateBadge);
     });
     return { ok: true, opened: true, readCommitted: true };
   } catch (error) {
@@ -812,7 +845,7 @@ async function saveWatchRules(rules) {
   const { watchRules: storedWatchRules = [] } = await chrome.storage.local.get('watchRules');
   const watchRules = normalizeStoredWatchRules(Array.isArray(rules) ? rules : storedWatchRules);
   await chrome.storage.local.set({ watchRules });
-  await updateBadge();
+  await runPostCommitSideEffect('watch rules badge update', updateBadge);
   return watchRules;
 }
 
@@ -1052,7 +1085,8 @@ function getNormalizedItemTime(item) {
 }
 
 function getCycleWatchNotificationBudget(used = 0) {
-  return Math.max(MAX_WATCH_NOTIFICATIONS_PER_CYCLE - used, 0);
+  if (!Number.isFinite(used)) return 0;
+  return Math.max(MAX_WATCH_NOTIFICATIONS_PER_CYCLE - Math.max(0, Math.floor(used)), 0);
 }
 
 async function clearNotificationUrlOnClosed(notificationId) {
@@ -1161,7 +1195,7 @@ async function migrateReadAllBefore() {
   await advanceReadAllBefore();
 }
 
-async function pollForUpdatesInternal() {
+async function pollForUpdatesInternal(watchCycle) {
   const config = await getConfig();
   if (!config.enabled) return;
 
@@ -1203,8 +1237,9 @@ async function pollForUpdatesInternal() {
     const continuation = config.feedMode === 'all' && allFeedContinuation.active !== true && allItems.truncated && allItems.nextCursor
       ? { continuationId: getContinuationId(), cursor: allItems.nextCursor }
       : null;
-    const newWatchNotifications = await persistFetchedItems(allItems, {
+    const persisted = await persistFetchedItems(allItems, {
       notify: true,
+      watchCycle,
       storageUpdates: continuation
         ? { allFeedContinuation: getActiveAllContinuationStatus(allItems.nextCursor, continuation.continuationId) }
         : undefined
@@ -1220,7 +1255,7 @@ async function pollForUpdatesInternal() {
         await runPostCommitSideEffect('automatic all continuation alarm scheduling', () => chrome.alarms.create(ALL_CONTINUATION_ALARM_NAME, { when: Date.now() + RETRY_AFTER_FALLBACK_MS }));
       }
     }
-    return { watchNotificationsSent: newWatchNotifications, truncated: Boolean(allItems.truncated) };
+    return { watchNotificationsSent: persisted.watchNotificationsSent, truncated: Boolean(allItems.truncated) };
   } catch (e) {
     console.error(`[AI HOT] fetch error:`, e);
     await recordApiFailure(e.response || e.status || 0);
@@ -1229,7 +1264,7 @@ async function pollForUpdatesInternal() {
 }
 
 function pollForUpdates() {
-  return runMigratedStateMutation(pollForUpdatesInternal);
+  return runMigratedStateMutation(() => pollForUpdatesInternal());
 }
 
 async function incrementFailCount() {
@@ -1237,10 +1272,17 @@ async function incrementFailCount() {
   const newCount = failCount + 1;
   await chrome.storage.local.set({ failCount: newCount });
   if (newCount >= 3) {
-    chrome.action.setBadgeText({ text: '!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
+    await runPostCommitSideEffect('failure badge update', () => enqueueBadgeUpdate(async () => {
+      await chrome.action.setBadgeText({ text: '!' });
+      await chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
+    }));
   }
   return newCount;
+}
+
+function getCommittedEntries(items, history) {
+  const byKey = new Map(history.map(item => [getItemStateKey(item), item]));
+  return items.map(item => byKey.get(getItemStateKey(item))).filter(Boolean);
 }
 
 async function persistFetchedItems(items, options = {}) {
@@ -1281,62 +1323,51 @@ async function persistFetchedItems(items, options = {}) {
     historyDays,
     retainUnmatchedWatchState
   });
-  await persistCanonicalState({
+  const orderedInserted = [
+    ...persisted.inserted.filter(item => item.watchMatched === true),
+    ...persisted.inserted.filter(item => item.watchMatched !== true)
+  ];
+  let committed = await persistCanonicalState({
     history: persisted.history,
     readIds: persisted.readIds,
     watchNotifyState: persisted.watchNotifyState,
+    ...(options.updateLastItems !== false ? { lastItems: orderedInserted.slice(0, 5) } : {}),
     ...(options.storageUpdates || {})
   });
-  const updated = persisted.history;
-  const persistedWatchNotifyState = persisted.watchNotifyState;
-  const watchItems = persisted.inserted.filter(item => item.watchMatched === true);
-  const normalItems = persisted.inserted.filter(item => item.watchMatched !== true);
+  const persistedWatchNotifyState = { ...committed.watchNotifyState };
+  const watchItems = getCommittedEntries(persisted.inserted, committed.history).filter(item => item.watchMatched === true);
+
+  // The unread state is durable already; slow or failed notifications must not
+  // delay its badge or determine whether the poll is considered successful.
+  if (options.updateBadge !== false) await runPostCommitSideEffect('persist badge update', updateBadge);
 
   const notifiedWatchItems = shouldNotify
-    ? await sendWatchNotifications(watchItems, persistedWatchNotifyState, discoveredAt, watchNotificationLimit)
+    ? await sendWatchNotifications(watchItems, persistedWatchNotifyState, discoveredAt, watchNotificationLimit, async () => {
+      committed = await persistWatchNotificationProgress(committed, persistedWatchNotifyState);
+    }, options.watchCycle)
     : [];
+  const normalItems = getCommittedEntries(persisted.inserted, committed.history).filter(item => item.watchMatched !== true);
 
   if (shouldNotify && normalItems.length > 0) {
     const count = normalItems.length;
     const notifId = getNotificationId('aihot');
-
-    if (count === 1) {
-      await createNotification(notifId, {
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title: 'AI HOT 新内容',
-        message: normalItems[0].title,
-        contextMessage: normalItems[0].source || ''
-      }, getItemOpenUrl(normalItems[0]));
-    } else {
-      await createNotification(notifId, {
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title: `AI HOT 有 ${count} 条新内容`,
-        message: normalItems[0].title,
-        contextMessage: normalItems[0].source || ''
-      }, getItemOpenUrl(normalItems[0]));
-    }
+    await runPostCommitSideEffect('new-item notification', () => createNotification(notifId, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: count === 1 ? 'AI HOT 新内容' : `AI HOT 有 ${count} 条新内容`,
+      message: normalItems[0].title,
+      contextMessage: normalItems[0].source || ''
+    }, getItemOpenUrl(normalItems[0])));
   }
 
-  if (shouldNotify || options.updateLastItems !== false) {
-    const updates = { watchNotifyState: persistedWatchNotifyState };
-    if (options.updateLastItems !== false) updates.lastItems = [...watchItems, ...normalItems].slice(0, 5);
-    await persistCanonicalState({
-      history: persisted.history,
-      readIds: persisted.readIds,
-      ...updates
-    });
-  }
-
-  if (options.updateBadge !== false) await runPostCommitSideEffect('persist badge update', updateBadge);
+  const inserted = getCommittedEntries(persisted.inserted, committed.history);
   return {
-    updated,
-    newEntries: persisted.inserted,
-    inserted: persisted.inserted,
-    updatedEntries: persisted.updated,
-    newlyMatched: persisted.newlyMatched,
-    watchNotifyState: persistedWatchNotifyState,
+    updated: committed.history,
+    newEntries: inserted,
+    inserted,
+    updatedEntries: getCommittedEntries(persisted.updated, committed.history),
+    newlyMatched: getCommittedEntries(persisted.newlyMatched, committed.history),
+    watchNotifyState: committed.watchNotifyState,
     watchNotificationsSent: notifiedWatchItems.length
   };
 }
@@ -1346,23 +1377,18 @@ async function showNotification(items) {
   return result.watchNotificationsSent;
 }
 
-async function checkWatchRemindersInternal(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE) {
+async function checkWatchRemindersInternal(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE, watchCycle) {
   if (limit <= 0) return 0;
-  const { history = [], feedMode, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'feedMode', 'watchRules', 'watchNotifyState']);
+  const { history = [], readIds = [], feedMode, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'readIds', 'feedMode', 'watchRules', 'watchNotifyState']);
   const watchItems = projectHistory(history, feedMode)
     .filter(item => getActiveWatchMatchIds(item, watchRules).length > 0 && findWatchState(watchNotifyState, item).state);
   if (watchItems.length === 0) return;
   const now = new Date().toISOString();
   const nextWatchNotifyState = { ...watchNotifyState };
-  const notified = await sendWatchNotifications(watchItems, nextWatchNotifyState, now, limit);
-  if (notified.length > 0) {
-    await persistCanonicalState({
-      history,
-      readIds: (await chrome.storage.local.get('readIds')).readIds || [],
-      watchNotifyState: nextWatchNotifyState,
-      lastItems: notified.slice(0, 5)
-    });
-  }
+  let committed = { history, readIds };
+  const notified = await sendWatchNotifications(watchItems, nextWatchNotifyState, now, limit, async sent => {
+    committed = await persistWatchNotificationProgress(committed, nextWatchNotifyState, sent);
+  }, watchCycle);
   return notified.length;
 }
 
@@ -1448,7 +1474,26 @@ function manualPoll() {
   return runMigratedStateMutation(manualPollInternal);
 }
 
-async function updateBadge() {
+function enqueueBadgeUpdate(task) {
+  // This queue must remain independent of stateMutationQueue: its callers can
+  // already hold the state queue while source-switch/continuation callers do not.
+  const operation = badgeUpdateQueue.then(task, task);
+  badgeUpdateQueue = operation.catch(() => {});
+  return operation;
+}
+
+function updateBadge() {
+  return enqueueBadgeUpdate(async () => {
+    try {
+      await updateBadgeInternal();
+    } catch (_e) {
+      // Retry once from current durable state, never from the failed snapshot.
+      await updateBadgeInternal();
+    }
+  });
+}
+
+async function updateBadgeInternal() {
   const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
   const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = data;
   const readIdSet = new Set(readIds);
@@ -1811,7 +1856,7 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
       continueAllFeed(committed.continuation);
     } else if (mode === 'all') {
       saveDeferredAllFingerprintProbe(committed.nextGeneration, fingerprintProbe);
-    } else {
+    } else if (!allItems.truncated) {
       void Promise.resolve(fingerprintProbe)
         .then(probe => runStateMutation(async () => {
           if (generation !== sourceSwitchGeneration) return;
@@ -1842,16 +1887,16 @@ function resetAndPoll(feedMode) {
 chrome.notifications.onClicked.addListener((notificationId) => runMigratedStateMutation(async () => {
   if (notificationId.startsWith('aihot-')) {
     const { lastItems = [], notificationUrlMap = {}, notificationStateKeyMap = {} } = await chrome.storage.local.get(['lastItems', 'notificationUrlMap', 'notificationStateKeyMap']);
-    const url = notificationUrlMap[notificationId] || lastItems[0]?.url;
+    const url = getSafeHttpsUrl(notificationUrlMap[notificationId] || lastItems[0]?.url);
     if (url) {
+      await chrome.tabs.create({ url });
       if (notificationId.startsWith('aihot-watch-')) {
         await markWatchViewed([notificationStateKeyMap[notificationId], url]);
       }
       await forgetNotificationUrl(notificationId);
-      await chrome.tabs.create({ url });
     }
   }
-}));
+}).catch(e => console.warn('[AI HOT] notification click failed:', e)));
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALL_CONTINUATION_ALARM_NAME) {
@@ -1859,8 +1904,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === ALARM_NAME) {
     return runMigratedStateMutation(async () => {
-      const result = await pollForUpdatesInternal();
-      return checkWatchRemindersInternal(getCycleWatchNotificationBudget(result?.watchNotificationsSent || 0));
+      const watchCycle = { attempted: new Set(), sent: 0 };
+      await pollForUpdatesInternal(watchCycle);
+      return checkWatchRemindersInternal(getCycleWatchNotificationBudget(watchCycle.sent), watchCycle);
     });
   }
 });

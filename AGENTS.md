@@ -18,6 +18,7 @@ Chrome 扩展（Manifest V3），通过 aihot.news API 获取 AI HOT 资讯并�
 # 单元测试（纯逻辑验证，不需要浏览器）
 node test.js
 node test-notification.js
+node test-notification-reliability.js
 node test-popup-ui.js
 node test-feed-state.js
 node test-popup-reliability.js
@@ -46,7 +47,7 @@ node screenshot.mjs
 
 ## 测试指南
 
-修改逻辑前后至少运行 `node test.js`、`node test-notification.js` 和相关 UI/API 测试。涉及 background 消息、ETag、分页或失败语义时运行 `node test-background.js`；涉及线上 feed 假设时运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。部分旧测试使用简化模拟，不能替代真实后台/弹窗测试。
+修改逻辑前后至少运行 `node test.js`、`node test-notification.js` 和相关 UI/API 测试。涉及通知、角标或已读提交时运行 `node test-notification-reliability.js`；涉及 background 消息、ETag、分页或失败语义时运行 `node test-background.js`；涉及线上 feed 假设时运行 `node test-e2e.js`。新增测试使用 `test-*.js` 命名，并确保可直接用 Node 执行。部分旧测试使用简化模拟，不能替代真实后台/弹窗测试。
 
 ## UI 约定
 
