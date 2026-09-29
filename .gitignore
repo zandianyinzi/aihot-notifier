@@ -3,6 +3,7 @@ node_modules/
 package-lock.json
 _wrapper_*.html
 *-preview.html
+!theme-comparison-preview.html
 preview/
 .superpowers/
 .claude/

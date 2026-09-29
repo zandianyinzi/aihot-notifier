@@ -63,6 +63,7 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - `node test-e2e.js`：请求 `https://aihot.news/api/v1/items`，验证线上 API 数据假设；其中的简化模拟不替代真实后台回归测试。
 - `python3 scripts/generate-logo.py`：重新生成扩展图标 PNG；需要 `Pillow`。
 - `node screenshot.mjs`：重新生成 Chrome Web Store 截图和宣传图；首次使用前执行 `npm install --no-save puppeteer`。
+- `node scripts/sync-theme-preview.mjs`：将最新 `popup.html` 同步到主题比较预览，避免评审模板与扩展界面漂移。
 - `bash pack.sh`：生成可上传 Chrome Web Store 的 `aihot-notifier.zip`；Windows 无 bash 时可用 PowerShell `Compress-Archive` 打包同一文件集合。
 
 仅在明确发布时升级 `manifest.json` 版本号，随后运行测试、打包、提交并推送源码与发布 ZIP；推送不代表已上传或通过 Chrome Web Store 审核。打包文件白名单以 `pack.sh` 为准，禁止打入调试脚本、测试、依赖或浏览器 profile。
@@ -78,7 +79,7 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - 日期与时间在条目元信息中统一补零显示为 `MM/DD HH:mm`，沿用元信息的次级文字层级；主列表不显示悬浮日期胶囊。
 - 菜单图标使用原生 `title` 悬浮提示，字体和字号由浏览器/操作系统决定，不跟随扩展设置。
 - 图标按钮使用语义状态类：`is-loading`、`is-result-accent`、`is-result-danger`、`is-result-ok`、`is-confirmed`。
-- 动效时长集中在 CSS token 中：点击反馈 `--motion-tap`、加载旋转 `--motion-loading`、本地确认 `--motion-confirm`、异步结果 `--motion-result`。
+- 动效时长集中在 CSS token 中：点击反馈 `--motion-tap`、设置面板 `--motion-panel` / `--motion-panel-open`、加载旋转 `--motion-loading`、异步结果 `--motion-result`。
 
 ## 通知不弹出排查
 

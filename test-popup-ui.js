@@ -4,6 +4,7 @@
  */
 
 const fs = require('fs');
+const vm = require('vm');
 
 let passed = 0;
 let failed = 0;
@@ -89,6 +90,11 @@ const agentsMd = fs.readFileSync('AGENTS.md', 'utf8');
 const packSh = fs.readFileSync('pack.sh', 'utf8');
 const readme = fs.readFileSync('README.md', 'utf8');
 const screenshotMjs = fs.readFileSync('screenshot.mjs', 'utf8');
+const gitignore = fs.readFileSync('.gitignore', 'utf8');
+const themePreviewPath = 'theme-comparison-preview.html';
+const themePreviewHtml = fs.existsSync(themePreviewPath)
+  ? fs.readFileSync(themePreviewPath, 'utf8')
+  : null;
 const storeDescriptionZh = fs.readFileSync('store/description_zh.txt', 'utf8');
 const storeDescriptionEn = fs.readFileSync('store/description_en.txt', 'utf8');
 const htmlTag = popupHtml.match(/<html\b[^>]*>/i)?.[0] || '';
@@ -99,8 +105,25 @@ const viewportRule = popupHtml.match(/html,\s*body\s*{([\s\S]*?)}/i)?.[1] || '';
 const bodyRule = popupHtml.match(/\n\s*body\s*{([\s\S]*?)}/i)?.[1] || '';
 const rootRule = popupHtml.match(/:root\s*{([\s\S]*?)}/i)?.[1] || '';
 const themeRules = [...popupHtml.matchAll(/\[data-theme="([^"]+)"\]\s*{([\s\S]*?)}/g)];
+const popupTemplateStart = themePreviewHtml
+  ? themePreviewHtml.indexOf('const popupTemplate = ') + 'const popupTemplate = '.length
+  : -1;
+const popupTemplateEnd = themePreviewHtml
+  ? themePreviewHtml.indexOf(';\n    const themes', popupTemplateStart)
+  : -1;
+let previewPopupTemplate = '';
+if (popupTemplateStart >= 'const popupTemplate = '.length && popupTemplateEnd > popupTemplateStart) {
+  try {
+    previewPopupTemplate = vm.runInNewContext(themePreviewHtml.slice(popupTemplateStart, popupTemplateEnd));
+  } catch (_error) {
+    previewPopupTemplate = '';
+  }
+}
 
 console.log('\n[popup首帧尺寸与背景]');
+assert(/^!theme-comparison-preview\.html\s*$/m.test(gitignore), '主题比较预览纳入版本控制，干净检出可同步');
+assert(themePreviewHtml !== null, '主题比较预览文件存在');
+assert(previewPopupTemplate === popupHtml, '主题比较预览复用最新 popup.html 模板');
 assert(/<meta\s+name="color-scheme"\s+content="dark"\s*>/i.test(popupHtml), '声明深色 color-scheme，避免首帧默认白色画布');
 assert(hasDeclaration(htmlStyle, 'width', '420px'), 'html 根节点内联声明首帧宽度');
 assert(hasDeclaration(htmlStyle, 'min-width', '420px'), 'html 根节点内联声明最小宽度');
@@ -127,7 +150,7 @@ assert(!/box-shadow\s*:/.test(bodyRule), '主窗口不额外绘制应用内外�
 assert(!/border\s*:\s*1px\s+solid\s+var\(--window-edge\)/i.test(bodyRule), '主窗口不使用 window-edge 真实 border');
 assert(!/--window-edge\s*:/.test(rootRule), '全局不保留 window-edge token，避免边框体系分叉');
 assert(!/--window-edge-highlight\s*:/.test(rootRule), '全局不保留 window-edge-highlight token');
-assert(hasDeclaration(rootRule, '--hairline', '1.25px'), '全局 hairline token 使用 1.25px');
+assert(!/--hairline\s*:/.test(rootRule), '全局不保留未使用的 hairline token');
 assert(!/--hover-rail\s*:/.test(rootRule), '全局不保留 hover rail 实线 token');
 assert(!/--hover-rail-glow\s*:/.test(rootRule), '全局不保留 hover rail 轻染 token');
 
@@ -153,6 +176,8 @@ for (const [themeName, varNames] of Object.entries(themeVarNamesByTheme)) {
   assert(varNames.includes('--brand-hot-glow'), `${themeName} 主题定义品牌热源光晕 token`);
   assert(!varNames.includes('--rule-rail'), `${themeName} 主题不使用旧 rule-rail token`);
 }
+assert(themeRules.every(([, , themeCss]) => hasDeclaration(themeCss, '--bg-item-hover', /var\(--bg-hover\)/)), '列表悬停 token 统一继承主题 hover 底色');
+assert(!/--motion-confirm\s*:/.test(rootRule), '全局不保留未使用的 motion-confirm token');
 
 const brandLogoRule = popupHtml.match(/\.brand-logo\s*{([\s\S]*?)}/i)?.[1] || '';
 const brandLogoMarkRule = popupHtml.match(/\.brand-logo-mark\s*{([\s\S]*?)}/i)?.[1] || '';
@@ -233,6 +258,8 @@ for (const themeName of Object.keys(themeCssByName)) {
 }
 
 console.log('\n[简约设置分组]');
+assert(hasDeclaration(rootRule, '--motion-panel', '0.25s'), '设置面板关闭动画使用统一 motion token');
+assert(hasDeclaration(rootRule, '--motion-panel-open', '0.18s'), '设置面板展开动画使用独立 motion token');
 assert(/<details class="setting-group" data-setting-group="general">[\s\S]*?<summary class="setting-group-title">常规<\/summary>[\s\S]*?id="enabled"[\s\S]*?id="interval"[\s\S]*?id="feedMode"[\s\S]*?id="historyDays"[\s\S]*?id="openPositionMode"[\s\S]*?<\/details>/.test(popupHtml), '常规分组默认收起并包含推送、频率、内容源、显示天数、定位');
 assert(/<details class="setting-group" data-setting-group="appearance">[\s\S]*?<summary class="setting-group-title">外观<\/summary>[\s\S]*?id="theme"[\s\S]*?id="fontFamily"[\s\S]*?id="fontSize"[\s\S]*?<\/details>/.test(popupHtml), '外观分组默认收起且只包含视觉设置');
 assert(/<details class="setting-group watch-settings" data-setting-group="watch">[\s\S]*?<summary class="setting-group-title">特关<\/summary>[\s\S]*?id="watchRulesList"/.test(popupHtml), '特关分组默认收起并包含规则列表');
@@ -252,7 +279,8 @@ assert(hasDeclaration(settingsInnerTailRule, '-webkit-mask-image', /linear-gradi
 assert(hasDeclaration(settingsInnerTailRule, 'mask-image', /linear-gradient\(to bottom,\s*#000\s+calc\(100%\s*-\s*32px\),\s*rgba\(0,\s*0,\s*0,\s*0\.35\)\s+calc\(100%\s*-\s*12px\),\s*transparent\)/), '设置面板底部渐隐兼容标准 mask');
 const settingsRule = popupHtml.match(/\.settings\s*{([\s\S]*?)}/i)?.[1] || '';
 const settingsPanelOpenRule = popupHtml.match(/\.settings\.open\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(/^max-height\s+0\.28s\s+ease/i.test(readDeclaration(settingsRule, 'transition')), '设置面板使用平滑高度动画');
+assert(/^max-height\s+var\(--motion-panel\)\s+ease/i.test(readDeclaration(settingsRule, 'transition')), '设置面板关闭动画使用统一 motion token');
+assert(/^max-height\s+var\(--motion-panel-open\)\s+ease-out/i.test(readDeclaration(settingsPanelOpenRule, 'transition')), '设置面板展开动画使用独立 motion token');
 assert(!readDeclaration(settingsRule, 'position'), '设置面板保留正常文档流布局');
 assert(/function\s+updateSettingsScrollHint\(\)/.test(popupJs), '设置面板具备底部渐隐状态更新函数');
 assert(/settingsInnerEl\.classList\.toggle\('has-scroll-tail',\s*hasScrollTail\)/.test(popupJs), '设置面板按滚动位置切换渐隐 class');

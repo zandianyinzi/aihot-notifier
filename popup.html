@@ -10,7 +10,7 @@
       --bg: #111110;
       --bg-sub: #191918;
       --bg-hover: #252522;
-      --bg-item-hover: #252522;
+      --bg-item-hover: var(--bg-hover);
       --bg-unread: #1b1b18;
       --border: #2b2a26;
       --border-light: #242420;
@@ -54,7 +54,7 @@
       --bg: #101610;
       --bg-sub: #161d17;
       --bg-hover: #212921;
-      --bg-item-hover: #212921;
+      --bg-item-hover: var(--bg-hover);
       --bg-unread: #171f18;
       --border: #242f25;
       --border-light: #202921;
@@ -98,7 +98,7 @@
       --bg: #13151a;
       --bg-sub: #1a1d23;
       --bg-hover: #222830;
-      --bg-item-hover: #222830;
+      --bg-item-hover: var(--bg-hover);
       --bg-unread: #1a1e25;
       --border: #282d36;
       --border-light: #22262e;
@@ -142,7 +142,7 @@
       --bg: #0e181b;
       --bg-sub: #141f24;
       --bg-hover: #1b2a30;
-      --bg-item-hover: #1b2a30;
+      --bg-item-hover: var(--bg-hover);
       --bg-unread: #142226;
       --border: #203034;
       --border-light: #1d2a2e;
@@ -187,7 +187,6 @@
     [data-size="xxlarge"] { --fs-base: 19px; --fs-title: 19px; --fs-meta: 15px; --item-pad: 20px; --skeleton-title-h: 19px; --skeleton-summary-h: 16px; --skeleton-meta-h: 13px; }
 
     :root {
-      --hairline: 1.25px;
       --control-size: 30px;
       --control-radius: 6px;
       --control-icon-size: 16px;
@@ -195,8 +194,8 @@
       --control-active-scale: 0.9;
       --motion-tap: 0.15s;
       --motion-panel: 0.25s;
+      --motion-panel-open: 0.18s;
       --motion-loading: 0.45s;
-      --motion-confirm: 0.6s;
       --motion-result: 1.2s;
     }
 
@@ -486,13 +485,13 @@
     .settings {
       overflow: hidden;
       max-height: 0;
-      transition: max-height 0.28s ease;
+      transition: max-height var(--motion-panel) ease;
       background: var(--bg-sub);
     }
 
     .settings.open {
       max-height: 420px;
-      transition: max-height 0.18s ease-out;
+      transition: max-height var(--motion-panel-open) ease-out;
     }
 
     .settings-inner {

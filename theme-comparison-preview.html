@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI HOT 主题配色比较预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #282828;
+      color: #ececec;
+      font: 14px/1.65 "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    main { max-width: 1120px; margin: 0 auto; padding: 34px 28px 64px; }
+    h1 { margin: 0; font-size: 26px; font-weight: 600; line-height: 1.35; }
+    h2 { margin: 28px 0 10px; font-size: 17px; font-weight: 550; }
+    p { max-width: 78ch; color: #c7c7c7; margin: 8px 0; }
+    .intro { color: #e0e0e0; font-size: 15px; }
+    .muted { color: #aaa; font-size: 12px; }
+    .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 18px 0 12px; }
+    .control-label { color: #bdbdbd; font-size: 12px; margin-right: 2px; }
+    button, select {
+      min-height: 34px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background: #333;
+      color: #eee;
+      font: inherit;
+      padding: 5px 10px;
+    }
+    button { cursor: pointer; }
+    button[aria-pressed="true"] { background: #e5e5e5; border-color: #e5e5e5; color: #222; }
+    button:focus-visible, select:focus-visible { outline: 2px solid #f3f3f3; outline-offset: 2px; }
+    .theme-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
+    .spacer { flex: 1 1 auto; }
+    .compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; margin-top: 18px; }
+    .preview { min-width: 0; }
+    .preview-heading { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 8px; }
+    .preview-heading strong { font-size: 13px; font-weight: 550; }
+    .preview-heading span { color: #999; font-size: 11px; }
+    .frame-clip { width: 100%; max-width: 420px; overflow: hidden; background: #111; }
+    .frame-clip iframe { display: block; width: 420px; height: 600px; border: 0; transform-origin: top left; }
+    .swatches { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; }
+    .swatch { height: 38px; border: 1px solid #666; border-radius: 2px; }
+    .swatch-name { display: block; margin-top: 4px; color: #bbb; font-size: 10px; }
+    .swatch-value { display: block; color: #8f8f8f; font: 10px/1.35 Consolas, monospace; overflow-wrap: anywhere; }
+    .difference-panel {
+      margin-top: 24px;
+      border-top: 1px solid #505050;
+      border-bottom: 1px solid #505050;
+    }
+    .difference-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 0 9px;
+    }
+    .difference-header strong { font-size: 15px; font-weight: 550; }
+    .difference-header span { color: #999; font-size: 11px; }
+    .difference-list { display: grid; }
+    .difference-row {
+      display: grid;
+      grid-template-columns: minmax(112px, 0.8fr) minmax(0, 1.25fr) 24px minmax(0, 1.25fr) minmax(180px, 1.8fr);
+      gap: 14px;
+      align-items: center;
+      padding: 12px 0;
+      border-top: 1px solid #414141;
+    }
+    .difference-role { color: #ddd; font-size: 12px; }
+    .difference-role code { display: block; margin-top: 2px; color: #888; font: 10px/1.35 Consolas, monospace; }
+    .difference-value { min-width: 0; }
+    .difference-value-head { display: flex; align-items: center; gap: 7px; color: #aaa; font-size: 10px; }
+    .difference-chip { width: 12px; height: 12px; flex: 0 0 12px; border: 1px solid #777; border-radius: 2px; }
+    .difference-value code { display: block; margin-top: 3px; color: #c4c4c4; font: 11px/1.35 Consolas, monospace; overflow-wrap: anywhere; }
+    .difference-arrow { color: #888; font-size: 15px; text-align: center; }
+    .difference-note { color: #bdbdbd; font-size: 12px; }
+    .difference-empty { padding: 14px 0 16px; color: #c9c9c9; font-size: 13px; }
+    .difference-empty strong { color: #eee; font-weight: 550; }
+    .direction { margin-top: 22px; padding: 12px 0 0 14px; border-top: 1px solid #505050; border-left: 2px solid #999; }
+    .direction strong { font-size: 14px; font-weight: 550; }
+    .direction p { font-size: 13px; }
+    @media (max-width: 760px) {
+      main { padding: 24px 16px 44px; }
+      h1 { font-size: 22px; }
+      .compare { grid-template-columns: 1fr; gap: 26px; }
+      .frame-clip { max-width: 420px; }
+      .spacer { display: none; }
+      .difference-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; }
+      .difference-role, .difference-note { grid-column: 1 / -1; }
+      .difference-arrow { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>AI HOT 主题配色比较</h1>
+    <p class="intro">左侧是当前扩展配色，右侧是克制调整后的候选方向。两边共用真实弹窗样式与同一组资讯内容。</p>
+    <p class="muted">候选方向收敛表面、阅读文字和交互强调三层关系。墨夜未读底色、标题、摘要与分类色保持当前版本，重点比较其它主题的材质感与四套之间的区分度。</p>
+
+    <nav class="controls" id="theme-nav" aria-label="选择主题"></nav>
+    <div class="controls">
+      <label class="control-label" for="view">视图</label>
+      <select id="view">
+        <option value="feed">阅读列表</option>
+        <option value="settings">外观与特关</option>
+        <option value="feedback">状态反馈</option>
+      </select>
+      <label class="control-label" for="read-mode">条目</label>
+      <select id="read-mode">
+        <option value="mixed">混合已读 / 未读</option>
+        <option value="unread">全部未读</option>
+        <option value="read">全部已读</option>
+      </select>
+      <span class="spacer"></span>
+      <label class="control-label" for="font-mode">字体</label>
+      <select id="font-mode">
+        <option value="system">系统</option>
+        <option value="noto-serif">宋体</option>
+        <option value="lxgw">楷体</option>
+      </select>
+    </div>
+
+    <div class="compare">
+      <section class="preview" aria-label="当前配色">
+        <div class="preview-heading"><strong>当前配色</strong><span id="before-count">扩展现行 token</span></div>
+        <div class="frame-clip"><iframe id="before" title="当前主题预览" sandbox="allow-same-origin"></iframe></div>
+        <div class="swatches" id="before-swatches"></div>
+      </section>
+      <section class="preview" aria-label="候选配色">
+        <div class="preview-heading"><strong>候选方向</strong><span id="after-count">仅供视觉评审</span></div>
+        <div class="frame-clip"><iframe id="after" title="候选主题预览" sandbox="allow-same-origin"></iframe></div>
+        <div class="swatches" id="after-swatches"></div>
+      </section>
+    </div>
+
+    <section class="difference-panel" aria-labelledby="difference-title">
+      <div class="difference-header">
+        <strong id="difference-title">差异清单</strong>
+        <span>当前值 → 候选值</span>
+      </div>
+      <div class="difference-list" id="difference-list"></div>
+    </section>
+
+    <p class="muted">悬停条目可比较整行反馈；点击资讯可切换已读状态；可切换设置、反馈、字体和条目状态。预览数据为虚构示例，不会读写扩展存储。</p>
+    <div class="direction">
+      <strong id="direction-title"></strong>
+      <p id="direction-copy"></p>
+    </div>
+  </main>
+
+  <script>
+    const popupTemplate = "<!DOCTYPE html>\r\n<html data-theme=\"dark\" data-font=\"system\" data-size=\"medium\" style=\"width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: #111110; color-scheme: dark;\">\r\n<head>\r\n  <meta charset=\"utf-8\">\r\n  <meta name=\"color-scheme\" content=\"dark\">\r\n  <style>html,body{width:420px;min-width:420px;height:600px;min-height:600px;overflow:hidden;background:#111110;color-scheme:dark;}</style>\r\n  <style>\r\n    [data-theme=\"dark\"] {\r\n      --color-scheme: dark;\r\n      --bg: #111110;\r\n      --bg-sub: #191918;\r\n      --bg-hover: #252522;\r\n      --bg-item-hover: var(--bg-hover);\n      --bg-unread: #1b1b18;\r\n      --border: #2b2a26;\r\n      --border-light: #242420;\r\n      --text: #e7e5de;\r\n      --text-2: #b6b3a9;\r\n      --text-3: #939187;\r\n      --text-unread: #ece9e1;\r\n      --text-unread-2: #c3bfb3;\r\n      --text-unread-3: #9f9b8f;\r\n      --text-read: #a7a398;\r\n      --text-read-hover: #bdb9b0;\r\n      --accent: #b5a58a;\r\n      --accent-soft: rgba(181,165,138,0.12);\r\n      --rail: #c7ae78;\r\n      --rail-strong: #8f7950;\r\n      --scrollbar: #2b2a26;\r\n      --hot: #ff5520;\r\n      --hot-soft: rgba(255,85,32,0.10);\r\n      --state-ok: #91b89c;\r\n      --state-ok-soft: rgba(145,184,156,0.22);\r\n      --state-ok-softer: rgba(145,184,156,0.12);\r\n      --state-fail: #dc9492;\r\n      --state-fail-soft: rgba(220,148,146,0.22);\r\n      --state-fail-softer: rgba(220,148,146,0.12);\r\n      --cat-model: #ada0cc;\r\n      --cat-products: #8eafc8;\r\n      --cat-industry: #c2ae7d;\r\n      --cat-paper: #92b59e;\r\n      --cat-tips: #cd9f99;\r\n      --cat-default: #95958f;\r\n      --shadow: 0 1px 3px rgba(0,0,0,0.32);\r\n      --rule-source: #b1ada3;\r\n      --rule-author: #cbc6b9;\r\n      --brand-hot: #e85500;\r\n      --brand-hot-dot: #e40012;\r\n      --brand-hot-glow: rgba(228,0,18,0.30);\r\n    }\r\n\r\n    [data-theme=\"green-dark\"] {\r\n      --color-scheme: dark;\r\n      --bg: #101610;\r\n      --bg-sub: #161d17;\r\n      --bg-hover: #212921;\r\n      --bg-item-hover: var(--bg-hover);\n      --bg-unread: #171f18;\r\n      --border: #242f25;\r\n      --border-light: #202921;\r\n      --text: #e1e5dc;\r\n      --text-2: #b4baae;\r\n      --text-3: #91968b;\r\n      --text-unread: #e7e9e1;\r\n      --text-unread-2: #c0c4ba;\r\n      --text-unread-3: #9ba294;\r\n      --text-read: #a3a99c;\r\n      --text-read-hover: #bdb9b0;\r\n      --accent: #a5b595;\r\n      --accent-soft: rgba(165,181,149,0.12);\r\n      --rail: #b3c596;\r\n      --rail-strong: #71845d;\r\n      --scrollbar: #242f25;\r\n      --hot: #d8955f;\r\n      --hot-soft: rgba(216,149,95,0.13);\r\n      --state-ok: #8dbca6;\r\n      --state-ok-soft: rgba(141,188,166,0.22);\r\n      --state-ok-softer: rgba(141,188,166,0.12);\r\n      --state-fail: #d0989d;\r\n      --state-fail-soft: rgba(208,152,157,0.22);\r\n      --state-fail-softer: rgba(208,152,157,0.12);\r\n      --cat-model: #aba1c2;\r\n      --cat-products: #8eaab8;\r\n      --cat-industry: #b8b18a;\r\n      --cat-paper: #9fb68b;\r\n      --cat-tips: #c39c94;\r\n      --cat-default: #99a18f;\r\n      --shadow: 0 1px 3px rgba(0,0,0,0.34);\r\n      --rule-source: #aeb7a3;\r\n      --rule-author: #c2cab5;\r\n      --brand-hot: #e85500;\r\n      --brand-hot-dot: #e40012;\r\n      --brand-hot-glow: rgba(228,0,18,0.30);\r\n    }\r\n\r\n    [data-theme=\"chrome-dark\"] {\r\n      --color-scheme: dark;\r\n      --bg: #13151a;\r\n      --bg-sub: #1a1d23;\r\n      --bg-hover: #222830;\r\n      --bg-item-hover: var(--bg-hover);\n      --bg-unread: #1a1e25;\r\n      --border: #282d36;\r\n      --border-light: #22262e;\r\n      --text: #e2e6ec;\r\n      --text-2: #b2b9c3;\r\n      --text-3: #9097a0;\r\n      --text-unread: #e9ecf0;\r\n      --text-unread-2: #bec4cc;\r\n      --text-unread-3: #9aa3af;\r\n      --text-read: #a2a9b2;\r\n      --text-read-hover: #aab2bb;\r\n      --accent: #aab8c8;\r\n      --accent-soft: rgba(170,184,200,0.12);\r\n      --rail: #b8c9dd;\r\n      --rail-strong: #73879e;\r\n      --scrollbar: #282d36;\r\n      --hot: #ff8a45;\r\n      --hot-soft: rgba(255,138,69,0.13);\r\n      --state-ok: #94b8a5;\r\n      --state-ok-soft: rgba(148,184,165,0.22);\r\n      --state-ok-softer: rgba(148,184,165,0.12);\r\n      --state-fail: #d79ea4;\r\n      --state-fail-soft: rgba(215,158,164,0.22);\r\n      --state-fail-softer: rgba(215,158,164,0.12);\r\n      --cat-model: #b3a4cc;\r\n      --cat-products: #99b6d0;\r\n      --cat-industry: #c2b28a;\r\n      --cat-paper: #9abaa8;\r\n      --cat-tips: #caa0a3;\r\n      --cat-default: #9ca6b4;\r\n      --shadow: 0 2px 8px rgba(0,0,0,0.40);\r\n      --rule-source: #abb5c1;\r\n      --rule-author: #c7d0dc;\r\n      --brand-hot: #e85500;\r\n      --brand-hot-dot: #e40012;\r\n      --brand-hot-glow: rgba(228,0,18,0.30);\r\n    }\r\n\r\n    [data-theme=\"slate-night\"] {\r\n      --color-scheme: dark;\r\n      --bg: #0e181b;\r\n      --bg-sub: #141f24;\r\n      --bg-hover: #1b2a30;\r\n      --bg-item-hover: var(--bg-hover);\n      --bg-unread: #142226;\r\n      --border: #203034;\r\n      --border-light: #1d2a2e;\r\n      --text: #dee6e2;\r\n      --text-2: #afbcb6;\r\n      --text-3: #8e9a97;\r\n      --text-unread: #e7ecea;\r\n      --text-unread-2: #bdc9c4;\r\n      --text-unread-3: #98a7a1;\r\n      --text-read: #a0aba8;\r\n      --text-read-hover: #c9d1d9;\r\n      --accent: #91b8b1;\r\n      --accent-soft: rgba(145,184,177,0.12);\r\n      --rail: #9ac9bf;\r\n      --rail-strong: #5b8d88;\r\n      --scrollbar: #203034;\r\n      --hot: #ff7a45;\r\n      --hot-soft: rgba(255,122,69,0.14);\r\n      --state-ok: #8cb5a1;\r\n      --state-ok-soft: rgba(140,181,161,0.22);\r\n      --state-ok-softer: rgba(140,181,161,0.12);\r\n      --state-fail: #d39793;\r\n      --state-fail-soft: rgba(211,151,147,0.22);\r\n      --state-fail-softer: rgba(211,151,147,0.12);\r\n      --cat-model: #b2a0c8;\r\n      --cat-products: #8ab3c8;\r\n      --cat-industry: #b7ad82;\r\n      --cat-paper: #93b8a1;\r\n      --cat-tips: #c49a94;\r\n      --cat-default: #98aaaa;\r\n      --shadow: 0 8px 24px rgba(1,4,9,0.38);\r\n      --rule-source: #a3babd;\r\n      --rule-author: #bdccca;\r\n      --brand-hot: #e85500;\r\n      --brand-hot-dot: #e40012;\r\n      --brand-hot-glow: rgba(228,0,18,0.30);\r\n    }\r\n    [data-size=\"small\"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --item-pad: 12px; --skeleton-title-h: 13px; --skeleton-summary-h: 12px; --skeleton-meta-h: 10px; }\r\n    [data-size=\"medium\"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --item-pad: 14px; --skeleton-title-h: 14px; --skeleton-summary-h: 13px; --skeleton-meta-h: 10px; }\r\n    [data-size=\"large\"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --item-pad: 16px; --skeleton-title-h: 15px; --skeleton-summary-h: 14px; --skeleton-meta-h: 11px; }\r\n    [data-size=\"xlarge\"] { --fs-base: 17px; --fs-title: 17px; --fs-meta: 14px; --item-pad: 18px; --skeleton-title-h: 17px; --skeleton-summary-h: 15px; --skeleton-meta-h: 12px; }\r\n    [data-size=\"xxlarge\"] { --fs-base: 19px; --fs-title: 19px; --fs-meta: 15px; --item-pad: 20px; --skeleton-title-h: 19px; --skeleton-summary-h: 16px; --skeleton-meta-h: 13px; }\r\n\r\n    :root {\r\n      --control-size: 30px;\n      --control-radius: 6px;\r\n      --control-icon-size: 16px;\r\n      --control-icon-stroke: 1.6;\r\n      --control-active-scale: 0.9;\r\n      --motion-tap: 0.15s;\n      --motion-panel: 0.25s;\n      --motion-panel-open: 0.18s;\n      --motion-loading: 0.45s;\n      --motion-result: 1.2s;\n    }\r\n\r\n    * {\r\n      box-sizing: border-box;\r\n      margin: 0;\r\n      padding: 0;\r\n    }\r\n\r\n\r\n    [data-font=\"noto-serif\"] { --ff-body: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif; }\r\n    [data-font=\"lxgw\"] { --ff-body: 'LXGW WenKai TC', 'LXGW WenKai', KaiTi, STKaiti, cursive; }\r\n    [data-font=\"system\"] { --ff-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }\r\n\r\n    html, body {\r\n      width: 420px;\r\n      min-width: 420px;\r\n      height: 600px;\r\n      min-height: 600px;\r\n      overflow: hidden;\r\n      background: var(--bg, #111110);\r\n      color-scheme: var(--color-scheme, dark);\r\n    }\r\n\r\n    body {\r\n      --header-height: 50px;\r\n      display: flex;\r\n      flex-direction: column;\r\n      font-family: var(--ff-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif);\r\n      font-size: var(--fs-base, 14px);\r\n      font-weight: 400;\r\n      color: var(--text);\r\n      background: var(--bg);\r\n      -webkit-font-smoothing: antialiased;\r\n    }\r\n\r\n    /* ---- Header ---- */\r\n    .header {\r\n      height: var(--header-height);\r\n      flex: 0 0 var(--header-height);\r\n      display: flex;\r\n      align-items: center;\r\n      justify-content: space-between;\r\n      padding: 10px 18px;\r\n    }\r\n\r\n    .brand {\r\n      display: flex;\r\n      align-items: center;\r\n      min-width: 0;\r\n      flex: 1 1 auto;\r\n    }\r\n\r\n    .brand a {\r\n      width: 38px;\r\n      height: 30px;\r\n      display: inline-flex;\r\n      align-items: center;\r\n      justify-content: center;\r\n      text-decoration: none;\r\n      line-height: 0;\r\n      transition: opacity 0.15s ease;\r\n    }\r\n\r\n    .brand a:hover {\r\n      opacity: 0.8;\r\n    }\r\n\r\n    .brand-logo {\r\n      width: 32px;\r\n      height: 30px;\r\n      display: block;\r\n      flex: none;\r\n      overflow: visible;\r\n    }\r\n\r\n    .brand-logo-mark {\r\n      fill: none;\r\n      stroke: var(--brand-hot);\r\n      stroke-linecap: butt;\r\n      stroke-linejoin: miter;\r\n    }\r\n\r\n    .brand-logo-dot {\r\n      fill: var(--brand-hot-dot);\r\n      filter: drop-shadow(0 0 3px var(--brand-hot-glow));\r\n      transform-box: fill-box;\r\n      transform-origin: center;\r\n      opacity: 0.8;\r\n      transform: scale(0.8);\r\n      animation: logo-dot-breathe 3.2s ease-in-out infinite;\r\n    }\r\n\r\n    @keyframes logo-dot-breathe {\r\n      0%, 100% { opacity: 0.8; transform: scale(0.8); filter: drop-shadow(0 0 3px var(--brand-hot-glow)); }\r\n      50% { opacity: 0.6; transform: scale(0.6); filter: drop-shadow(0 0 3px var(--brand-hot-glow)); }\r\n    }\r\n\r\n    @media (prefers-reduced-motion: reduce) {\r\n      .brand-logo-dot {\r\n        animation: none;\r\n      }\r\n\r\n      .watch-rule-card.is-moved {\r\n        animation: none;\r\n      }\r\n\r\n      .skeleton-line,\r\n      .btn-icon.is-loading svg,\r\n      .btn-icon.is-result-ok,\r\n      #pollNow.is-result-accent,\r\n      .btn-icon.is-result-danger,\r\n      .item.is-jump-target {\r\n        animation: none;\r\n      }\r\n    }\r\n\r\n    .actions {\r\n      display: flex;\r\n      align-items: center;\r\n      justify-content: flex-end;\r\n      gap: 6px;\r\n      flex: 0 0 auto;\r\n      white-space: nowrap;\r\n    }\r\n\r\n    .btn-icon {\r\n      width: var(--control-size);\r\n      height: var(--control-size);\r\n      display: inline-flex;\r\n      align-items: center;\r\n      justify-content: center;\r\n      flex: 0 0 var(--control-size);\r\n      border: none;\r\n      background: none;\r\n      color: var(--text-3);\r\n      border-radius: var(--control-radius);\r\n      cursor: pointer;\r\n      transition:\r\n        background var(--motion-tap) ease,\r\n        color var(--motion-tap) ease,\r\n        transform var(--motion-tap) ease;\r\n    }\r\n\r\n    .btn-icon:hover {\r\n      background: var(--accent-soft);\r\n      color: var(--accent);\r\n    }\r\n\r\n    .btn-icon:focus-visible {\r\n      outline: 1px solid var(--accent);\r\n      outline-offset: 2px;\r\n    }\r\n\r\n    .btn-icon:active {\r\n      transform: scale(var(--control-active-scale));\r\n    }\r\n\r\n    .btn-mark-read {\r\n      display: none;\r\n    }\r\n\r\n    .btn-mark-read.visible {\r\n      display: flex;\r\n    }\r\n\r\n    .btn-unread-nav {\r\n      visibility: hidden;\r\n      opacity: 0;\r\n      pointer-events: none;\r\n    }\r\n\r\n    .btn-unread-nav.visible {\r\n      visibility: visible;\r\n      opacity: 1;\r\n      pointer-events: auto;\r\n    }\r\n\r\n    .scroll-nav-btn {\r\n      display: none;\r\n    }\r\n\r\n    .scroll-nav-btn.visible {\r\n      display: flex;\r\n    }\r\n\r\n    .btn-mini {\r\n      font-size: 11px;\r\n      font-family: inherit;\r\n      padding: 5px 8px;\r\n      border: 1px solid var(--border);\r\n      border-radius: 5px;\r\n      background: var(--bg);\r\n      color: var(--text-2);\r\n      cursor: pointer;\r\n      transition:\r\n        background var(--motion-tap) ease,\r\n        color var(--motion-tap) ease,\r\n        border-color var(--motion-tap) ease,\r\n        transform var(--motion-tap) ease;\r\n    }\r\n\r\n    .btn-mini:hover {\r\n      background: var(--accent-soft);\r\n      color: var(--accent);\r\n      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));\r\n    }\r\n\r\n    .btn-mini:focus-visible {\r\n      outline: 1px solid var(--accent);\r\n      outline-offset: 2px;\r\n    }\r\n\r\n    .btn-mini:active {\r\n      transform: scale(var(--control-active-scale));\r\n    }\r\n\r\n\r\n    .btn-icon svg {\r\n      width: var(--control-icon-size);\r\n      height: var(--control-icon-size);\r\n      stroke: currentColor;\r\n      stroke-width: var(--control-icon-stroke);\r\n      fill: none;\r\n      stroke-linecap: round;\r\n      stroke-linejoin: round;\r\n    }\r\n\r\n    .btn-icon.is-loading svg {\r\n      animation: rotate var(--motion-loading) linear infinite;\r\n    }\r\n\r\n    #pollNow.is-loading {\r\n      color: var(--accent);\r\n    }\r\n\r\n    @keyframes rotate {\r\n      to { transform: rotate(360deg); }\r\n    }\r\n\r\n    .btn-icon.is-result-ok {\r\n      color: var(--state-ok);\r\n      animation: control-result-ok var(--control-result-duration, var(--motion-result)) ease-out forwards;\r\n    }\r\n\r\n    #pollNow.is-result-accent {\r\n      color: var(--accent);\r\n      animation: control-result-accent var(--control-result-duration, var(--motion-result)) ease-out forwards;\r\n    }\r\n\r\n    .btn-icon.is-result-danger {\r\n      color: var(--state-fail);\r\n      animation: control-result-danger var(--control-result-duration, var(--motion-result)) ease-out forwards;\r\n    }\r\n\r\n    @keyframes control-result-ok {\r\n      0% { background: var(--state-ok-soft); color: var(--state-ok); }\r\n      45% { background: var(--state-ok-softer); color: var(--state-ok); }\r\n      82% { background: transparent; color: var(--text-3); }\r\n      100% { background: transparent; color: var(--text-3); }\r\n    }\r\n\r\n    @keyframes control-result-accent {\r\n      0% { background: var(--accent-soft); color: var(--accent); }\r\n      45% { background: var(--accent-soft); color: var(--accent); }\r\n      82% { background: transparent; color: var(--text-3); }\r\n      100% { background: transparent; color: var(--text-3); }\r\n    }\r\n\r\n    @keyframes control-result-danger {\r\n      0% { background: var(--state-fail-soft); color: var(--state-fail); }\r\n      45% { background: var(--state-fail-softer); color: var(--state-fail); }\r\n      82% { background: transparent; color: var(--text-3); }\r\n      100% { background: transparent; color: var(--text-3); }\r\n    }\r\n\r\n    .item.is-jump-target {\r\n      animation: unread-jump-target 0.75s ease-out;\r\n    }\r\n\r\n    @keyframes unread-jump-target {\r\n      0%, 65% { background: color-mix(in srgb, var(--accent-soft) 90%, var(--bg-unread)); }\r\n      100% { background: var(--bg-unread); }\r\n    }\r\n\r\n    /* ---- Settings ---- */\r\n    .settings {\r\n      overflow: hidden;\r\n      max-height: 0;\r\n      transition: max-height var(--motion-panel) ease;\n      background: var(--bg-sub);\r\n    }\r\n\r\n    .settings.open {\r\n      max-height: 420px;\r\n      transition: max-height var(--motion-panel-open) ease-out;\n    }\r\n\r\n    .settings-inner {\r\n      padding: 12px 18px 14px;\r\n      display: flex;\r\n      flex-direction: column;\r\n      gap: 4px;\r\n      max-height: 420px;\r\n      overflow-y: auto;\r\n      scrollbar-width: none;\r\n      -ms-overflow-style: none;\r\n    }\r\n\r\n    .settings-inner::-webkit-scrollbar { width: 0; height: 0; }\r\n    .settings-inner::-webkit-scrollbar-track { background: transparent; }\r\n    .settings-inner::-webkit-scrollbar-thumb { background: var(--scrollbar, var(--border)); border-radius: 4px; }\r\n\r\n    .settings-inner.has-scroll-tail {\r\n      -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);\r\n      mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);\r\n    }\r\n\r\n    .settings {\r\n      cursor: default;\r\n    }\r\n\r\n    .settings * {\r\n      user-select: none;\r\n      -webkit-user-select: none;\r\n      -moz-user-select: none;\r\n      -ms-user-select: none;\r\n    }\r\n\r\n    .settings input,\r\n    .settings textarea {\r\n      cursor: text;\r\n      user-select: text;\r\n      -webkit-user-select: text;\r\n      -moz-user-select: text;\r\n      -ms-user-select: text;\r\n    }\r\n\r\n    .settings button,\r\n    .settings summary,\r\n    .settings select,\r\n    .settings .switch {\r\n      cursor: pointer;\r\n    }\r\n\r\n    .setting-group {\r\n      display: flex;\r\n      flex-direction: column;\r\n      gap: 0;\r\n      margin: 0;\r\n      padding-top: 0;\r\n    }\r\n\r\n    .setting-group + .setting-group {\r\n      border-top: 0;\r\n      padding-top: 0;\r\n    }\r\n\r\n    .setting-group > summary {\r\n      list-style: none;\r\n    }\r\n\r\n    .setting-group > summary::-webkit-details-marker {\r\n      display: none;\r\n    }\r\n\r\n    .setting-group > summary::marker {\r\n      content: '';\r\n    }\r\n\r\n    .setting-group-title {\r\n      appearance: none;\r\n      border: 0;\r\n      background: transparent;\r\n      padding: 0;\r\n      height: 38px;\r\n      width: 100%;\r\n      display: flex;\r\n      align-items: center;\r\n      justify-content: space-between;\r\n      font-size: 11px;\r\n      font-weight: 500;\r\n      color: var(--text-2);\r\n      line-height: 1;\r\n      cursor: pointer;\r\n      -webkit-tap-highlight-color: transparent;\r\n      transition:\r\n        color var(--motion-tap) ease,\r\n        background var(--motion-tap) ease;\r\n    }\r\n\r\n    .setting-group-title::after {\r\n      content: '';\r\n      display: block;\r\n      width: 6px;\r\n      height: 6px;\r\n      border-right: 1.5px solid var(--text-3);\r\n      border-bottom: 1.5px solid var(--text-3);\r\n      transform: rotate(45deg);\r\n      transition: transform var(--motion-tap) ease, border-color var(--motion-tap) ease;\r\n    }\r\n\r\n    .setting-group-title:hover::after {\r\n      border-color: var(--accent);\r\n    }\r\n\r\n    .setting-group-title:hover {\r\n      color: var(--accent);\r\n      background: transparent;\r\n    }\r\n\r\n    .setting-group[open] > .setting-group-title:hover {\r\n      color: var(--accent);\r\n      background: transparent;\r\n    }\r\n\r\n    .setting-group[open] > .setting-group-title::after {\r\n      transform: rotate(-135deg);\r\n      border-color: var(--accent);\r\n    }\r\n\r\n    .setting-group[open] > .setting-group-title {\r\n      color: var(--accent);\r\n      background: transparent;\r\n    }\r\n\r\n    .setting-group-body .setting-row > label:not(.switch) {\r\n      color: var(--text-3);\r\n    }\r\n\r\n    .setting-group-body {\r\n      display: flex;\r\n      flex-direction: column;\r\n      gap: 8px;\r\n      margin: 4px 0 12px;\r\n    }\r\n\r\n    .setting-group:not([open]) > .setting-group-body {\r\n      display: none;\r\n    }\r\n\r\n    .setting-group-title:focus-visible {\r\n      outline: 1px solid var(--accent);\r\n      outline-offset: 2px;\r\n      border-radius: 4px;\r\n    }\r\n\r\n    .setting-row {\r\n      display: flex;\r\n      align-items: center;\r\n      justify-content: space-between;\r\n      min-height: 28px;\r\n    }\r\n\r\n    .setting-row label {\r\n      font-size: 12px;\r\n      color: var(--text-2);\r\n    }\r\n\r\n    .switch {\r\n      position: relative;\r\n      width: 32px;\r\n      height: 18px;\r\n    }\r\n\r\n    .switch input {\r\n      position: absolute;\r\n      width: 1px;\r\n      height: 1px;\r\n      margin: 0;\r\n      opacity: 0;\r\n    }\r\n\r\n    .switch-track {\r\n      position: absolute;\r\n      inset: 0;\r\n      background: var(--border);\r\n      border-radius: 18px;\r\n      cursor: pointer;\r\n      transition: background 0.2s;\r\n    }\r\n\r\n    .switch-track::after {\r\n      content: '';\r\n      position: absolute;\r\n      width: 14px;\r\n      height: 14px;\r\n      top: 2px;\r\n      left: 2px;\r\n      background: var(--text-2);\r\n      border-radius: 50%;\r\n      transition: transform 0.2s;\r\n      box-shadow: 0 1px 2px rgba(0,0,0,0.15);\r\n    }\r\n\r\n    .switch input:checked + .switch-track {\r\n      background: var(--accent);\r\n    }\r\n\r\n    .switch input:checked + .switch-track::after {\r\n      background: var(--bg);\r\n      transform: translateX(14px);\r\n    }\r\n\r\n    .switch input:focus-visible + .switch-track {\r\n      outline: 1px solid var(--accent);\r\n      outline-offset: 2px;\r\n    }\r\n\r\n    .select-mini {\r\n      font-size: 11px;\r\n      font-family: inherit;\r\n      padding: 5px 8px;\r\n      border: 1px solid var(--border);\r\n      border-radius: 5px;\r\n      background: var(--bg);\r\n      color: var(--text);\r\n      outline: none;\r\n      cursor: pointer;\r\n      transition:\r\n        background var(--motion-tap) ease,\r\n        color var(--motion-tap) ease,\r\n        border-color var(--motion-tap) ease;\r\n    }\r\n\r\n    .select-mini:hover {\r\n      background: var(--bg);\r\n      color: var(--accent);\r\n      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));\r\n    }\r\n\r\n    .select-mini:focus {\r\n      background: var(--bg);\r\n      color: var(--accent);\r\n      border-color: var(--accent);\r\n    }\r\n\r\n    .watch-rule-form {\r\n      display: grid;\r\n      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);\r\n      gap: 6px;\r\n      padding: 8px;\r\n      border: 1px dashed var(--border-light);\r\n      border-radius: 6px;\r\n      background: color-mix(in srgb, var(--bg) 76%, var(--bg-sub));\r\n    }\r\n\r\n    .watch-input {\r\n      min-width: 0;\r\n      font-size: 11px;\r\n      font-family: inherit;\r\n      padding: 5px 7px;\r\n      border: 1px solid var(--border);\r\n      border-radius: 5px;\r\n      background: var(--bg);\r\n      color: var(--text);\r\n      outline: none;\r\n      transition:\r\n        background var(--motion-tap) ease,\r\n        color var(--motion-tap) ease,\r\n        border-color var(--motion-tap) ease;\r\n    }\r\n\r\n    .watch-input:hover {\r\n      background: var(--bg);\r\n      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));\r\n    }\r\n\r\n    .watch-input:focus {\r\n      background: var(--bg);\r\n      color: var(--text);\r\n      border-color: var(--accent);\r\n    }\r\n\r\n    .watch-action-row {\r\n      grid-column: 1 / 3;\r\n      display: grid;\r\n      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);\r\n      align-items: stretch;\r\n      gap: 6px;\r\n      min-width: 0;\r\n    }\r\n\r\n    .watch-action-row .watch-input-full {\r\n      width: 100%;\r\n      min-width: 0;\r\n    }\r\n\r\n    .watch-action-row .watch-add-btn {\r\n      width: 100%;\r\n      min-width: 0;\r\n    }\r\n\r\n    .watch-rules-list {\r\n      display: flex;\r\n      flex-direction: column;\r\n      gap: 6px;\r\n      max-height: 168px;\r\n      overflow-y: auto;\r\n      padding-right: 0;\r\n      scrollbar-width: none;\r\n      -ms-overflow-style: none;\r\n    }\r\n\r\n    .watch-rules-list:empty {\r\n      display: none;\r\n    }\r\n\r\n    .watch-rules-list.has-scroll-tail {\r\n      -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);\r\n      mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);\r\n    }\r\n\r\n    .watch-rules-list::-webkit-scrollbar { width: 0; height: 0; }\r\n    .watch-rules-list::-webkit-scrollbar-track { background: transparent; }\r\n    .watch-rules-list::-webkit-scrollbar-thumb { background: var(--scrollbar, var(--border)); border-radius: 4px; }\r\n\r\n    .watch-rule-card {\r\n      display: grid;\r\n      flex: 0 0 auto;\r\n      grid-template-columns: minmax(0, 1fr);\r\n      align-items: start;\r\n      width: 100%;\r\n      min-width: 0;\r\n      padding: 8px;\r\n      border: 1px dashed var(--border-light);\r\n      border-radius: 6px;\r\n      background: color-mix(in srgb, var(--bg) 76%, var(--bg-sub));\r\n      position: relative;\r\n    }\r\n\r\n    .watch-rule-card.is-moved {\r\n      animation: watch-rule-moved 420ms ease-out;\r\n    }\r\n\r\n    @keyframes watch-rule-moved {\r\n      0% {\r\n        border-color: color-mix(in srgb, var(--accent) 58%, var(--border-light));\r\n        background: color-mix(in srgb, var(--accent) 13%, var(--bg));\r\n      }\r\n      100% {\r\n        border-color: var(--border-light);\r\n        background: color-mix(in srgb, var(--bg) 76%, var(--bg-sub));\r\n      }\r\n    }\r\n\r\n    .watch-rule-content {\r\n      grid-column: 1 / -1;\r\n      min-width: 0;\r\n      display: flex;\r\n      flex-direction: column;\r\n      gap: 5px;\r\n    }\r\n\r\n    .watch-rule-head {\r\n      grid-column: 1 / -1;\r\n      display: flex;\r\n      align-items: center;\r\n      gap: 8px;\r\n      min-width: 0;\r\n    }\r\n\r\n    .watch-rule-source {\r\n      flex: 0 1 auto;\r\n      min-width: 0;\r\n      font-size: 10px;\r\n      color: var(--rule-source);\r\n      white-space: normal;\r\n      overflow-wrap: anywhere;\r\n    }\r\n\r\n    .watch-rule-author {\r\n      min-width: 0;\r\n      flex: 1 1 auto;\r\n      font-size: 11px;\r\n      font-weight: 500;\r\n      color: var(--rule-author);\r\n      white-space: nowrap;\r\n      overflow: hidden;\r\n      text-overflow: ellipsis;\r\n    }\r\n\r\n    .watch-keyword-tags {\r\n      display: flex;\r\n      flex-wrap: wrap;\r\n      gap: 4px;\r\n      min-width: 0;\r\n    }\r\n\r\n    .watch-rule-card.disabled .watch-rule-source,\r\n    .watch-rule-card.disabled .watch-rule-author,\r\n    .watch-rule-card.disabled .watch-keyword-tags {\r\n      opacity: 0.52;\r\n    }\r\n\r\n    .watch-keyword-tag {\r\n      display: inline-flex;\r\n      align-items: center;\r\n      min-width: 0;\r\n      max-width: 100%;\r\n      font-size: 10px;\r\n      line-height: 1.2;\r\n      color: var(--accent);\r\n      background: var(--accent-soft);\r\n      border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);\r\n      border-radius: 3px;\r\n      padding: 2px 5px;\r\n      gap: 3px;\r\n    }\r\n\r\n    .watch-keyword-text {\r\n      min-width: 0;\r\n      overflow: hidden;\r\n      text-overflow: ellipsis;\r\n      white-space: nowrap;\r\n    }\r\n\r\n    .watch-keyword-remove {\r\n      flex: 0 0 auto;\r\n      position: relative;\r\n      width: 14px;\r\n      height: 14px;\r\n      min-width: 14px;\r\n      min-height: 14px;\r\n      display: inline-flex;\r\n      align-items: center;\r\n      justify-content: center;\r\n      border: 0;\r\n      background: transparent;\r\n      color: var(--text-3);\r\n      cursor: pointer;\r\n      font: inherit;\r\n      line-height: 1;\r\n      padding: 0;\r\n    }\r\n\r\n    .watch-keyword-remove::before {\r\n      content: '';\r\n      position: absolute;\r\n      width: 24px;\r\n      height: 24px;\r\n      left: 50%;\r\n      top: 50%;\r\n      transform: translate(-50%, -50%);\r\n    }\r\n\r\n    .watch-keyword-remove:hover {\r\n      color: var(--state-fail);\r\n    }\r\n\r\n    .watch-rule-actions {\r\n      margin-left: auto;\r\n      flex: 0 0 auto;\r\n      display: inline-flex;\r\n      gap: 4px;\r\n      align-items: center;\r\n    }\r\n\r\n    .watch-rule-actions .watch-rule-btn {\r\n      min-width: 0;\r\n      display: inline-flex;\r\n      align-items: center;\r\n      justify-content: center;\r\n      padding: 0 5px;\r\n      height: 24px;\r\n      font-size: 10px;\r\n      line-height: 1;\r\n    }\r\n\r\n    .watch-rule-move-group {\r\n      display: inline-flex;\r\n      align-items: center;\r\n      gap: 4px;\r\n      padding-left: 4px;\r\n      border-left: 1px solid var(--border-light);\r\n    }\r\n\r\n    .watch-rule-actions .watch-rule-move {\r\n      width: 24px;\r\n      height: 24px;\r\n      padding: 0;\r\n      color: var(--text-3);\r\n    }\r\n\r\n    .watch-rule-actions .watch-rule-move svg {\r\n      width: 13px;\r\n      height: 13px;\r\n      stroke: currentColor;\r\n      stroke-width: 1.8;\r\n      fill: none;\r\n      stroke-linecap: round;\r\n      stroke-linejoin: round;\r\n    }\r\n\r\n    .watch-rule-actions .watch-rule-move:disabled {\r\n      opacity: 0.3;\r\n      cursor: default;\r\n      pointer-events: none;\r\n    }\r\n\r\n    .watch-rule-actions .watch-rule-btn[data-action=\"toggle\"] {\r\n      width: 24px;\r\n      min-width: 24px;\r\n      padding: 0;\r\n    }\r\n\r\n    .watch-rule-actions .watch-rule-btn[data-action=\"delete\"] {\r\n      min-width: 24px;\r\n      height: 24px;\r\n      padding-inline: 4px;\r\n      font-size: 10px;\r\n      line-height: 1;\r\n      color: var(--text-3);\r\n    }\r\n\r\n    .watch-rule-actions .watch-rule-btn[data-action=\"delete\"]:hover {\r\n      color: var(--state-fail);\r\n      background: var(--state-fail-softer);\r\n      border-color: var(--state-fail-soft);\r\n    }\r\n\r\n    .watch-badge {\r\n      font-size: 10px;\r\n      font-weight: 500;\r\n      padding: 1px 6px;\r\n      border-radius: 3px;\r\n      flex-shrink: 0;\r\n      white-space: nowrap;\r\n      margin-right: 6px;\r\n      color: var(--accent);\r\n      background: color-mix(in srgb, var(--accent) 10%, transparent);\r\n    }\r\n\r\n    /* ---- List ---- */\r\n    .list {\r\n      flex: 1;\r\n      overflow-y: auto;\r\n      overscroll-behavior: contain;\r\n      background: var(--bg);\r\n      scrollbar-width: none;\r\n      -ms-overflow-style: none;\r\n    }\r\n\r\n    .list::-webkit-scrollbar { width: 0; height: 0; }\r\n    .list::-webkit-scrollbar-track { background: transparent; }\r\n    .list::-webkit-scrollbar-thumb { background: var(--scrollbar, var(--border)); border-radius: 4px; opacity: 0.5; }\r\n\r\n    .initial-skeleton {\r\n      pointer-events: none;\r\n    }\r\n\r\n    .skeleton-item {\r\n      padding: var(--item-pad, 12px) 18px;\r\n      border-bottom: 1px solid var(--border);\r\n    }\r\n\r\n    .skeleton-line {\r\n      height: 10px;\r\n      border-radius: 4px;\r\n      background: color-mix(in srgb, var(--text-3) 14%, transparent);\r\n      animation: skeleton-pulse 1.2s ease-in-out infinite;\r\n    }\r\n\r\n    .skeleton-title { width: 78%; height: var(--skeleton-title-h); }\r\n    .skeleton-summary { width: 94%; height: var(--skeleton-summary-h); margin-top: 6px; }\r\n    .skeleton-meta { width: 36%; height: var(--skeleton-meta-h); margin-top: 6px; }\r\n\r\n    .skeleton-item:nth-child(2) .skeleton-title { width: 66%; }\r\n    .skeleton-item:nth-child(2) .skeleton-summary { width: 88%; }\r\n    .skeleton-item:nth-child(3) .skeleton-title { width: 72%; }\r\n    .skeleton-item:nth-child(3) .skeleton-summary { width: 82%; }\r\n\r\n    @keyframes skeleton-pulse {\r\n      0%, 100% { opacity: 0.32; }\r\n      50% { opacity: 0.62; }\r\n    }\r\n\r\n    /* Items */\r\n    .item {\r\n      display: flex;\r\n      align-items: flex-start;\r\n      padding: var(--item-pad, 12px) 18px;\r\n      border-bottom: 1px solid var(--border);\r\n      cursor: pointer;\r\n      user-select: none;\r\n      -webkit-user-select: none;\r\n      -moz-user-select: none;\r\n      -ms-user-select: none;\r\n    }\r\n\r\n    .item:last-child { border-bottom: none; }\r\n\r\n    .item:hover {\r\n      background: color-mix(in srgb, var(--bg-item-hover) 88%, #000);\r\n    }\r\n\r\n    .item.read:hover {\r\n      background: color-mix(in srgb, var(--bg) 86%, #000);\r\n    }\r\n\r\n    .item:focus-visible {\r\n      outline: 1px solid var(--accent);\r\n      outline-offset: -2px;\r\n    }\r\n\r\n    .item.unread {\r\n      background: var(--bg-unread);\r\n    }\r\n\r\n    .item.unread:hover {\r\n      background: color-mix(in srgb, var(--bg-unread) 84%, #000);\r\n    }\r\n\r\n    .item.watch-item.unread {\r\n      box-shadow: none;\r\n    }\r\n\r\n    .item.read .item-title {\r\n      color: var(--text-read);\r\n    }\r\n\r\n    .item.read .item-meta {\r\n      color: var(--text-3);\r\n    }\r\n\r\n    .item.read .cat-tag {\r\n      opacity: 1;\r\n      background: transparent;\r\n    }\r\n\r\n    .item.read .cat-tag.cat-model { color: color-mix(in srgb, var(--cat-model) 30%, var(--text-read)); }\r\n    .item.read .cat-tag.cat-products { color: color-mix(in srgb, var(--cat-products) 30%, var(--text-read)); }\r\n    .item.read .cat-tag.cat-industry { color: color-mix(in srgb, var(--cat-industry) 30%, var(--text-read)); }\r\n    .item.read .cat-tag.cat-paper { color: color-mix(in srgb, var(--cat-paper) 30%, var(--text-read)); }\r\n    .item.read .cat-tag.cat-tips { color: color-mix(in srgb, var(--cat-tips) 30%, var(--text-read)); }\r\n    .item.read .cat-tag.cat-default { color: color-mix(in srgb, var(--cat-default) 30%, var(--text-read)); }\r\n\r\n    /* Category tag */\r\n    .cat-tag {\r\n      font-size: 10px;\r\n      font-weight: 500;\r\n      padding: 1px 6px;\r\n      border-radius: 3px;\r\n      flex-shrink: 0;\r\n      white-space: nowrap;\r\n    }\r\n\r\n    .cat-tag.cat-model { color: var(--cat-model); background: color-mix(in srgb, var(--cat-model) 9%, transparent); }\r\n    .cat-tag.cat-products { color: var(--cat-products); background: color-mix(in srgb, var(--cat-products) 9%, transparent); }\r\n    .cat-tag.cat-industry { color: var(--cat-industry); background: color-mix(in srgb, var(--cat-industry) 9%, transparent); }\r\n    .cat-tag.cat-paper { color: var(--cat-paper); background: color-mix(in srgb, var(--cat-paper) 9%, transparent); }\r\n    .cat-tag.cat-tips { color: var(--cat-tips); background: color-mix(in srgb, var(--cat-tips) 9%, transparent); }\r\n    .cat-tag.cat-default { color: var(--cat-default); background: color-mix(in srgb, var(--cat-default) 9%, transparent); }\r\n\r\n    .item-body {\r\n      flex: 1;\r\n      min-width: 0;\r\n    }\r\n\r\n    .item-title {\r\n      font-size: var(--fs-title, 13px);\r\n      font-weight: 500;\r\n      line-height: 1.55;\r\n      color: var(--text);\r\n      display: -webkit-box;\r\n      -webkit-line-clamp: 2;\r\n      -webkit-box-orient: vertical;\r\n      overflow: hidden;\r\n    }\r\n\r\n    .item.unread .item-title {\r\n      color: var(--text-unread, var(--text));\r\n    }\r\n\r\n    .item.unread .item-summary {\r\n      color: var(--text-unread-2, var(--text-2));\r\n    }\r\n\r\n    .item.unread .item-meta {\r\n      color: var(--text-unread-3, var(--text-3));\r\n    }\r\n\r\n    .item-summary {\r\n      margin-top: 6px;\r\n      font-size: var(--fs-meta, 12px);\r\n      line-height: 1.65;\r\n      color: var(--text-2);\r\n      display: -webkit-box;\r\n      -webkit-line-clamp: 3;\r\n      -webkit-box-orient: vertical;\r\n      overflow: hidden;\r\n    }\r\n\r\n    .item.read .item-summary {\r\n      color: var(--text-3);\r\n    }\r\n\r\n    .item-meta {\r\n      margin-top: 6px;\r\n      font-size: var(--fs-meta, 11px);\r\n      color: var(--text-3);\r\n      display: flex;\r\n      align-items: center;\r\n      gap: 6px;\r\n    }\r\n\r\n    .item-source {\r\n      min-width: 0;\r\n      overflow: hidden;\r\n      text-overflow: ellipsis;\r\n      white-space: nowrap;\r\n    }\r\n\r\n    .item-datetime {\r\n      white-space: nowrap;\r\n      font-variant-numeric: tabular-nums;\r\n    }\r\n\r\n    .item-meta .sep {\r\n      width: 2px;\r\n      height: 2px;\r\n      background: currentColor;\r\n      border-radius: 50%;\r\n    }\r\n\r\n    .empty-state {\r\n      padding: 52px 20px;\r\n      text-align: center;\r\n      color: var(--text-3);\r\n      font-size: 12px;\r\n      line-height: 1.6;\r\n      cursor: default;\r\n      user-select: none;\r\n    }\r\n\r\n    .popup-status {\r\n      flex: 0 0 22px;\r\n      width: 100%;\r\n      height: 22px;\r\n      min-height: 22px;\r\n      display: none;\r\n      align-items: center;\r\n      padding: 0 14px;\r\n      margin: 0;\r\n      overflow: hidden;\r\n      color: var(--text-3);\r\n      background: var(--bg-sub);\r\n      border-top: 1px solid var(--border);\r\n      font-size: 11px;\r\n      line-height: 1;\r\n      white-space: nowrap;\r\n      text-overflow: ellipsis;\r\n      opacity: 0;\r\n      transition: opacity var(--motion-tap) ease, color var(--motion-tap) ease;\r\n    }\r\n\r\n    .popup-status:not(:empty) {\r\n      display: flex;\r\n      opacity: 1;\r\n    }\r\n\r\n    .popup-status.is-error {\r\n      color: var(--state-fail);\r\n    }\r\n\r\n    .popup-status.is-continuation {\r\n      color: var(--accent);\r\n    }\r\n\r\n\r\n  </style>\r\n  <script src=\"popup-log.js\"></script>\r\n  <script src=\"popup-boot.js\"></script>\r\n  <script src=\"feed-state.js\"></script>\r\n  <script src=\"popup-reliability.js\"></script>\r\n</head>\r\n  <body style=\"width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: var(--bg, #111110); color-scheme: var(--color-scheme, dark);\">\r\n  <div class=\"header\">\r\n    <div class=\"brand\">\r\n      <a href=\"https://aihot.virxact.com/\" target=\"_blank\" rel=\"noopener noreferrer\" aria-label=\"AI HOT\">\r\n        <svg class=\"brand-logo\" viewBox=\"24 0 90 128\" aria-hidden=\"true\" focusable=\"false\">\r\n          <g class=\"brand-logo-mark\">\r\n            <path d=\"M35.84 115.2 L62.72 12.8\" stroke-width=\"7\"></path>\r\n            <path d=\"M29.44 115.2 H42.24\" stroke-width=\"3\"></path>\r\n            <path d=\"M89.6 115.2 V30.72\" stroke-width=\"4\"></path>\r\n            <path d=\"M85.76 115.2 H93.44\" stroke-width=\"3\"></path>\r\n            <path d=\"M48.64 66.56 H81.92\" stroke-width=\"2\"></path>\r\n          </g>\r\n          <circle class=\"brand-logo-dot\" cx=\"89.6\" cy=\"15.36\" r=\"8.9\"></circle>\r\n        </svg>\r\n      </a>\r\n    </div>\r\n    <div class=\"actions\">\r\n      <button class=\"btn-icon btn-unread-nav\" id=\"jumpToUnread\" title=\"跳到未读\" aria-label=\"跳到未读\">\r\n        <svg viewBox=\"0 0 24 24\"><path d=\"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z\"/><circle cx=\"12\" cy=\"12\" r=\"2.5\"/></svg>\r\n      </button>\r\n      <button class=\"btn-icon btn-mark-read\" id=\"markAllRead\" title=\"全部已读\" aria-label=\"全部已读\">\r\n        <svg viewBox=\"0 0 24 24\"><path d=\"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z\"/><path d=\"M4 20L20 4\"/></svg>\r\n      </button>\r\n      <button class=\"btn-icon scroll-nav-btn\" id=\"scrollToTop\" title=\"置顶\" aria-label=\"置顶\">\r\n        <svg viewBox=\"0 0 24 24\"><path d=\"M5 4h14\"/><path d=\"M12 20V8\"/><path d=\"m7 13 5-5 5 5\"/></svg>\r\n      </button>\r\n      <button class=\"btn-icon scroll-nav-btn\" id=\"scrollToBottom\" title=\"置底\" aria-label=\"置底\">\r\n        <svg viewBox=\"0 0 24 24\"><path d=\"M5 20h14\"/><path d=\"M12 4v12\"/><path d=\"m7 11 5 5 5-5\"/></svg>\r\n      </button>\r\n      <button class=\"btn-icon\" id=\"pollNow\" title=\"刷新\" aria-label=\"刷新\">\r\n        <svg viewBox=\"0 0 24 24\"><path d=\"M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7\"/><path d=\"M21 3v6h-6\"/></svg>\r\n      </button>\r\n      <button class=\"btn-icon\" id=\"settingsBtn\" title=\"设置\" aria-label=\"设置\" aria-controls=\"settingsPanel\" aria-expanded=\"false\">\r\n        <svg viewBox=\"0 0 24 24\"><line x1=\"4\" y1=\"6\" x2=\"20\" y2=\"6\"/><line x1=\"4\" y1=\"12\" x2=\"20\" y2=\"12\"/><line x1=\"4\" y1=\"18\" x2=\"20\" y2=\"18\"/><circle cx=\"8\" cy=\"6\" r=\"1.5\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"16\" cy=\"12\" r=\"1.5\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"10\" cy=\"18\" r=\"1.5\" fill=\"currentColor\" stroke=\"none\"/></svg>\r\n      </button>\r\n    </div>\r\n  </div>\r\n\r\n  <div class=\"settings\" id=\"settingsPanel\" inert>\r\n    <div class=\"settings-inner\">\r\n      <details class=\"setting-group\" data-setting-group=\"general\">\r\n        <summary class=\"setting-group-title\">常规</summary>\r\n        <div class=\"setting-group-body\">\r\n          <div class=\"setting-row\">\r\n            <label>推送通知</label>\r\n            <label class=\"switch\">\r\n              <input type=\"checkbox\" id=\"enabled\" aria-label=\"推送通知\">\r\n              <span class=\"switch-track\"></span>\r\n            </label>\r\n          </div>\r\n          <div class=\"setting-row\">\r\n            <label>检查频率</label>\r\n            <select class=\"select-mini\" id=\"interval\" aria-label=\"检查频率\">\r\n              <option value=\"2\" selected>2 分钟</option>\r\n              <option value=\"5\">5 分钟</option>\r\n              <option value=\"15\">15 分钟</option>\r\n              <option value=\"30\">30 分钟</option>\r\n              <option value=\"60\">60 分钟</option>\r\n            </select>\r\n          </div>\r\n          <div class=\"setting-row\">\r\n            <label>内容源</label>\r\n            <select class=\"select-mini\" id=\"feedMode\" aria-label=\"内容源\">\r\n              <option value=\"selected\">精选</option>\r\n              <option value=\"all\" selected>全部</option>\r\n            </select>\r\n          </div>\r\n          <div class=\"setting-row\">\r\n            <label>显示天数</label>\r\n            <select class=\"select-mini\" id=\"historyDays\" aria-label=\"显示天数\">\r\n              <option value=\"1\" selected>1 天</option>\r\n              <option value=\"2\">2 天</option>\r\n              <option value=\"3\">3 天</option>\r\n              <option value=\"5\">5 天</option>\r\n            </select>\r\n          </div>\r\n          <div class=\"setting-row\">\r\n            <label>定位</label>\r\n            <select class=\"select-mini\" id=\"openPositionMode\" aria-label=\"定位\">\r\n              <option value=\"free\" selected>自由浏览</option>\r\n              <option value=\"unread\">未读优先</option>\r\n            </select>\r\n          </div>\r\n        </div>\r\n      </details>\r\n\r\n      <details class=\"setting-group\" data-setting-group=\"appearance\">\r\n        <summary class=\"setting-group-title\">外观</summary>\r\n        <div class=\"setting-group-body\">\r\n          <div class=\"setting-row\">\r\n            <label>主题</label>\r\n            <select class=\"select-mini\" id=\"theme\" aria-label=\"主题\">\r\n              <option value=\"dark\">墨夜</option>\r\n              <option value=\"green-dark\">暗森</option>\r\n              <option value=\"chrome-dark\">铬墨</option>\r\n              <option value=\"slate-night\">石青</option>\r\n            </select>\r\n          </div>\r\n          <div class=\"setting-row\">\r\n            <label>字体</label>\r\n            <select class=\"select-mini\" id=\"fontFamily\" aria-label=\"字体\">\r\n              <option value=\"system\">系统</option>\r\n              <option value=\"noto-serif\">宋体</option>\r\n              <option value=\"lxgw\">楷体</option>\r\n            </select>\r\n          </div>\r\n          <div class=\"setting-row\">\r\n            <label>字号</label>\r\n            <select class=\"select-mini\" id=\"fontSize\" aria-label=\"字号\">\r\n              <option value=\"small\">小</option>\r\n              <option value=\"medium\">默认</option>\r\n              <option value=\"large\">大</option>\r\n              <option value=\"xlarge\">特大</option>\r\n              <option value=\"xxlarge\">超大</option>\r\n            </select>\r\n          </div>\r\n        </div>\r\n      </details>\r\n\r\n      <details class=\"setting-group watch-settings\" data-setting-group=\"watch\">\r\n        <summary class=\"setting-group-title\">特关</summary>\r\n        <div class=\"setting-group-body\">\r\n          <div class=\"watch-rule-form\">\r\n            <input class=\"watch-input\" id=\"watchSource\" placeholder=\"来源\" aria-label=\"来源\">\r\n            <input class=\"watch-input\" id=\"watchAuthor\" placeholder=\"作者\" aria-label=\"作者\">\r\n            <div class=\"watch-action-row\">\r\n              <input class=\"watch-input watch-input-full\" id=\"watchKeywords\" placeholder=\"关键词，逗号分隔\" aria-label=\"关键词，逗号分隔\">\r\n              <button class=\"btn-mini watch-add-btn\" id=\"addWatchRule\">添加</button>\r\n            </div>\r\n          </div>\r\n          <div class=\"watch-rules-list\" id=\"watchRulesList\"></div>\r\n        </div>\r\n      </details>\r\n\r\n      <details class=\"setting-group setting-group-debug\" data-setting-group=\"debug\">\r\n        <summary class=\"setting-group-title\">调试</summary>\r\n        <div class=\"setting-group-body\">\r\n          <div class=\"setting-row\">\r\n            <label>日志</label>\r\n            <button class=\"btn-mini\" id=\"copyLogs\">拷贝</button>\r\n          </div>\r\n        </div>\r\n      </details>\r\n    </div>\r\n  </div>\r\n\r\n  <div class=\"list\" id=\"historyList\">\r\n    <div class=\"initial-skeleton\" aria-hidden=\"true\">\r\n      <div class=\"skeleton-item\">\r\n        <div class=\"skeleton-line skeleton-title\"></div>\r\n        <div class=\"skeleton-line skeleton-summary\"></div>\r\n        <div class=\"skeleton-line skeleton-meta\"></div>\r\n      </div>\r\n      <div class=\"skeleton-item\">\r\n        <div class=\"skeleton-line skeleton-title\"></div>\r\n        <div class=\"skeleton-line skeleton-summary\"></div>\r\n        <div class=\"skeleton-line skeleton-meta\"></div>\r\n      </div>\r\n      <div class=\"skeleton-item\">\r\n        <div class=\"skeleton-line skeleton-title\"></div>\r\n        <div class=\"skeleton-line skeleton-summary\"></div>\r\n        <div class=\"skeleton-line skeleton-meta\"></div>\r\n      </div>\r\n    </div>\r\n  </div>\r\n  <div class=\"popup-status\" id=\"popupStatus\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"></div>\r\n\r\n  <script src=\"popup.js\"></script>\r\n</body>\r\n</html>\r\n";
+    const themes = {
+      dark: {
+        name: '墨夜', accent: '#bca77b',
+        direction: '黑曜与旧铜',
+        copy: '保留当前中性炭黑、烟金强调和未读灰底。候选版不把暖色扩展到标题、摘要或未读背景，阅读区域维持现在的稳定感。',
+        tokens: {}
+      },
+      'green-dark': {
+        name: '暗森', accent: '#a6ad8d',
+        direction: '炭灰与橄榄绿',
+        copy: '把绿色从大面积背景收回到交互和少量标签，底色改为中性的炭灰，只留一层低饱和橄榄绿作为主题识别。',
+        tokens: {
+          '--bg': '#121513', '--bg-sub': '#1a1d1b', '--bg-hover': '#252926', '--bg-item-hover': '#252926',
+          '--bg-unread': '#1b201e', '--border': '#2d332f', '--border-light': '#292e2b',
+          '--text': '#e5e5df', '--text-2': '#b8b7ae', '--text-3': '#929188',
+          '--text-unread': '#ecebe4', '--text-unread-2': '#c2c1b8', '--text-unread-3': '#99978f',
+          '--text-read': '#a4a39a', '--text-read-hover': '#bbb9b0', '--accent': '#a6ad8d',
+          '--accent-soft': 'rgba(166,173,141,0.12)', '--scrollbar': '#2d332f',
+          '--cat-default': '#98978e', '--rule-source': '#aaa99f', '--rule-author': '#c2c0b4'
+        }
+      },
+      'chrome-dark': {
+        name: '铬墨', accent: '#b8c3cf',
+        direction: '拉丝冷铬',
+        copy: '底色减少蓝紫倾向，转为更中性的石墨与钛灰；强调色从雾蓝收成冷银。列表正文保留现有冷灰层级。',
+        tokens: {
+          '--bg': '#14161a', '--bg-sub': '#1e2228', '--bg-hover': '#2a3038', '--bg-item-hover': '#2a3038',
+          '--border': '#30343a', '--accent': '#b8c3cf', '--accent-soft': 'rgba(184,195,207,0.12)',
+          '--brand-hot-glow': 'rgba(228,0,18,0.18)'
+        }
+      },
+      'slate-night': {
+        name: '石青', accent: '#82b0aa',
+        direction: '矿物青与海玻璃',
+        copy: '保留青黑底的辨识度，把强调色稍微压灰、压深，让它更像海玻璃而不是高亮青绿。未读状态仍由现有底色与文字表达。',
+        tokens: {
+          '--bg': '#0e191c', '--bg-sub': '#17252a', '--bg-hover': '#203238', '--bg-item-hover': '#203238',
+          '--accent': '#82b0aa', '--accent-soft': 'rgba(130,176,170,0.12)', '--brand-hot-glow': 'rgba(228,0,18,0.18)'
+        }
+      }
+    };
+    const categories = ['model', 'products', 'paper', 'industry', 'tips', 'default'];
+    const categoryLabels = ['模型', '产品', '论文', '行业', '技巧', '资讯'];
+    const changeLabels = {
+      '--bg': { label: '窗口底色', role: '大面积表面' },
+      '--bg-sub': { label: '设置面板', role: '次级表面' },
+      '--bg-unread': { label: '未读底色', role: '阅读状态' },
+      '--bg-hover': { label: '悬停底色', role: '动作反馈' },
+      '--bg-item-hover': { label: '列表悬停', role: '动作反馈' },
+      '--border': { label: '分隔边界', role: '结构边界' },
+      '--border-light': { label: '轻边界', role: '辅助结构' },
+      '--text': { label: '主文字', role: '正文层级' },
+      '--text-2': { label: '次文字', role: '摘要层级' },
+      '--text-3': { label: '弱文字', role: '元信息层级' },
+      '--text-unread': { label: '未读标题', role: '未读层级' },
+      '--text-unread-2': { label: '未读摘要', role: '未读层级' },
+      '--text-unread-3': { label: '未读元信息', role: '未读层级' },
+      '--text-read': { label: '已读标题', role: '已读层级' },
+      '--text-read-hover': { label: '已读悬停文字', role: '动作反馈' },
+      '--accent': { label: '主题强调', role: '交互信号' },
+      '--accent-soft': { label: '强调轻染', role: '交互背景' },
+      '--scrollbar': { label: '滚动条', role: '辅助控件' },
+      '--cat-default': { label: '默认分类', role: '分类标签' },
+      '--rule-source': { label: '特关来源', role: '规则信息' },
+      '--rule-author': { label: '特关作者', role: '规则信息' },
+      '--brand-hot-glow': { label: '品牌光晕', role: 'Logo 细节' }
+    };
+    const changeNotes = {
+      dark: {},
+      'green-dark': {
+        '--bg': '把大面积背景从绿黑改为中性炭灰，绿色退到小面积交互区域。',
+        '--bg-sub': '设置面板只保留一点灰绿，不让整个弹窗都泛绿。',
+        '--bg-hover': '悬停使用炭灰层级，指针反馈清楚但不产生绿色光晕。',
+        '--bg-item-hover': '列表悬停回到中性压暗，阅读内容不会被背景色牵着走。',
+        '--bg-unread': '未读底色改为带极轻橄榄感的炭灰，继续区分状态但不染绿。',
+        '--border': '边界减少绿色比例，保持结构分隔而不是主题装饰。',
+        '--border-light': '轻边界改成中性灰绿，设置控件保持清楚但不发亮。',
+        '--text': '主文字转为暖中性雾白，减少绿色底色对阅读的牵引。',
+        '--text-2': '摘要使用暖灰，保留层级同时降低整体绿感。',
+        '--text-3': '元信息收成中性灰，弱信息不再扩大绿色面积。',
+        '--text-unread': '未读标题使用中性雾白，状态靠明度而非绿色表达。',
+        '--text-unread-2': '未读摘要继续保持清晰，但去掉灰绿偏移。',
+        '--text-unread-3': '未读元信息回到中性灰，和标题形成克制层级。',
+        '--text-read': '已读标题压低为暖灰，弱化后退感但不引入绿色。',
+        '--text-read-hover': '已读悬停只提高暖灰亮度，反馈更安静。',
+        '--accent': '只保留低饱和橄榄绿作为交互信号，避免绿色铺满页面。',
+        '--accent-soft': '轻染同步降彩，焦点和按钮状态只留下小面积绿色。',
+        '--scrollbar': '滚动条沿用中性边界，不把滚动轨道做成绿色线索。',
+        '--cat-default': '默认分类标签回到暖中性灰，避免无色分类也带绿。',
+        '--rule-source': '特关来源改为中性暖灰，规则信息保持可读而不抢主题。',
+        '--rule-author': '特关作者保留更高层级，但去掉原有灰绿倾向。'
+      },
+      'chrome-dark': {
+        '--bg': '从蓝紫石墨转为更中性的冷铬黑，降低系统默认深色的既视感。',
+        '--bg-sub': '面板改成钛灰，保留层级但减少蓝色面积。',
+        '--bg-hover': '悬停使用中性冷灰，动作反馈不再叠加额外蓝色。',
+        '--bg-item-hover': '列表悬停与面板同一冷灰语法，指针位置更清楚。',
+        '--border': '边界从偏蓝灰收成钛灰，分隔线更像结构而不是发光线。',
+        '--accent': '雾蓝改为冷银，设置和焦点有辨识度但不接近系统链接蓝。',
+        '--accent-soft': '轻染跟随冷银，保持交互反馈的低对比度。',
+        '--brand-hot-glow': '缩小红点光晕面积，把品牌橙红留在 Logo 细节。'
+      },
+      'slate-night': {
+        '--bg': '保留青黑方向，只增加一点黑度，让海玻璃强调色更集中。',
+        '--bg-sub': '面板向深石青移动，扩大矿物材质的连续性。',
+        '--bg-hover': '维持现有青黑悬停层级，避免把反馈做成亮青色。',
+        '--bg-item-hover': '列表悬停不新增彩色边条，只沿用青黑压暗。',
+        '--accent': '灰青绿略压深、压灰，更像海玻璃而不是高亮青绿。',
+        '--accent-soft': '降低轻染存在感，设置状态不会压过资讯标题。',
+        '--brand-hot-glow': '压低红点光晕，让暖色只承担品牌识别。'
+      }
+    };
+    const swatchTokens = [
+      ['bg', '底色'], ['bg-sub', '面板'], ['bg-unread', '未读底'],
+      ['text-unread', '未读标题'], ['accent', '强调'], ['brand-hot', '品牌']
+    ];
+    const fixtures = [
+      { category: 'model', title: '模型发布说明：如何比较推理能力与响应延迟', summary: '整理评测范围、上下文限制与适用场景，帮助判断模型更新是否值得关注。', source: '模型观察', watch: true },
+      { category: 'products', title: '开发工具实践：把代码审查融入日常工作流', summary: '从变更阅读到验证结果，梳理工具使用中的实际取舍。', source: '产品观察' },
+      { category: 'paper', title: '论文阅读笔记：理解评测指标背后的条件', summary: '记录实验设置与主要结论，区分可复现结果和仍待验证的推断。', source: '研究笔记' },
+      { category: 'industry', title: '产业观察：算力成本如何影响产品选择', summary: '结合部署规模、运行成本与使用频率，比较不同路径。', source: '行业观察' },
+      { category: 'tips', title: '提示技巧：把任务目标写得具体一些', summary: '用清楚的约束、输入与完成条件减少反复沟通。', source: '实践笔记' },
+      { category: 'default', title: '本周资讯回顾：值得继续关注的几个方向', summary: '这些内容用于比较阅读层级与主题配色，不是真实新闻。', source: '编辑示例' }
+    ];
+    let selectedTheme = 'dark';
+    let renderId = 0;
+
+    const themeNav = document.getElementById('theme-nav');
+    for (const [key, theme] of Object.entries(themes)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.theme = key;
+      button.innerHTML = `<span class="theme-dot" style="background:${theme.accent}"></span>${theme.name}`;
+      button.addEventListener('click', () => { selectedTheme = key; render(); });
+      themeNav.append(button);
+    }
+
+    function candidateCss(theme) {
+      const declarations = Object.entries(theme.tokens).map(([name, value]) => `  ${name}: ${value};`).join('\n');
+      return declarations ? `<style>[data-theme="${selectedTheme}"] {\n${declarations}\n}</style>` : '';
+    }
+
+    function populateFrame(frame, isCandidate, id) {
+      const frameDocument = frame.contentDocument;
+      const theme = themes[selectedTheme];
+      const view = globalThis.document.getElementById('view').value;
+      const readMode = globalThis.document.getElementById('read-mode').value;
+      const font = globalThis.document.getElementById('font-mode').value;
+      frameDocument.documentElement.dataset.theme = selectedTheme;
+      frameDocument.documentElement.dataset.font = font;
+      frameDocument.documentElement.style.background = frameDocument.defaultView.getComputedStyle(frameDocument.documentElement).getPropertyValue('--bg').trim();
+      frameDocument.body.dataset.theme = selectedTheme;
+      frameDocument.getElementById('theme').value = selectedTheme;
+      frameDocument.getElementById('fontFamily').value = font;
+      frameDocument.getElementById('enabled').checked = true;
+      frameDocument.getElementById('markAllRead').classList.add('visible');
+      frameDocument.getElementById('jumpToUnread').classList.add('visible');
+
+      const list = frameDocument.getElementById('historyList');
+      list.innerHTML = fixtures.map((item, index) => {
+        const state = readMode === 'mixed' ? (index % 2 === 0 ? 'unread' : 'read') : readMode;
+        const time = `09/24 ${String(10 - Math.floor(index / 2)).padStart(2, '0')}:30`;
+        const watch = item.watch ? '<span class="watch-badge">特关</span>' : '';
+        return `<div class="item ${state}${item.watch ? ' watch-item' : ''}" tabindex="0" role="button" aria-label="${item.title}">
+          <div class="item-body">
+            <div class="item-title">${item.title}</div>
+            <div class="item-summary">${item.summary}</div>
+            <div class="item-meta">${watch}<span class="cat-tag cat-${item.category}">${categoryLabels[index]}</span><span class="item-source">${item.source}</span><span class="sep"></span><span class="item-datetime">${time}</span></div>
+          </div>
+        </div>`;
+      }).join('');
+      for (const row of list.querySelectorAll('.item')) {
+        const toggleRead = () => {
+          const wasRead = row.classList.contains('read');
+          row.classList.toggle('read', !wasRead);
+          row.classList.toggle('unread', wasRead);
+        };
+        row.addEventListener('click', toggleRead);
+        row.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleRead(); }
+        });
+      }
+
+      const panel = frameDocument.getElementById('settingsPanel');
+      panel.classList.toggle('open', view === 'settings');
+      panel.inert = view !== 'settings';
+      for (const group of frameDocument.querySelectorAll('.setting-group')) {
+        group.open = view === 'settings' && ['appearance', 'watch'].includes(group.dataset.settingGroup);
+      }
+      frameDocument.getElementById('watchRulesList').innerHTML = '<div class="watch-rule-card"><div class="watch-rule-content"><div class="watch-rule-head"><span class="watch-rule-source">研究笔记</span><span class="watch-rule-author">编辑示例</span><div class="watch-rule-actions"><button class="btn-mini watch-rule-btn">停用</button><button class="btn-mini watch-rule-btn" data-action="delete">删除</button></div></div><div class="watch-keyword-tags"><span class="watch-keyword-tag">模型评测</span><span class="watch-keyword-tag">开源</span></div></div></div>';
+      frameDocument.getElementById('settingsBtn').addEventListener('click', () => {
+        panel.classList.toggle('open');
+        panel.inert = !panel.classList.contains('open');
+      });
+      if (view === 'feedback') {
+        const status = frameDocument.getElementById('popupStatus');
+        status.textContent = '刷新失败，请稍后重试（示例）';
+        status.classList.add('is-error');
+        frameDocument.getElementById('pollNow').classList.add('is-result-danger');
+        frameDocument.getElementById('markAllRead').classList.add('is-result-ok');
+        const feedbackStyle = frameDocument.createElement('style');
+        feedbackStyle.textContent = '.is-result-ok{animation:none!important;color:var(--state-ok)!important;background:var(--state-ok-soft)!important}.is-result-danger{animation:none!important;color:var(--state-fail)!important;background:var(--state-fail-soft)!important}';
+        frameDocument.head.append(feedbackStyle);
+      }
+      const motionStyle = frameDocument.createElement('style');
+      motionStyle.textContent = '.brand-logo-dot{animation:none}';
+      frameDocument.head.append(motionStyle);
+      frame.dataset.ready = `${id}|${selectedTheme}|${view}|${readMode}|${font}|${isCandidate}`;
+      const color = frameDocument.defaultView.getComputedStyle(frameDocument.documentElement);
+      const swatches = Object.fromEntries(swatchTokens.map(([token]) => [token, color.getPropertyValue(`--${token}`).trim()]));
+      const changes = Object.fromEntries(Object.keys(changeLabels).map(token => [token, color.getPropertyValue(token).trim()]));
+      return { swatches, changes };
+    }
+
+    function renderSwatches(containerId, values) {
+      document.getElementById(containerId).innerHTML = swatchTokens.map(([token, label]) => `
+        <div><div class="swatch" style="background:${values[token]}"></div><span class="swatch-name">${label}</span><code class="swatch-value">${values[token]}</code></div>
+      `).join('');
+    }
+
+    function renderDifferences(currentValues, candidateValues) {
+      const theme = themes[selectedTheme];
+      const changedTokens = Object.keys(theme.tokens).filter(token => changeLabels[token]);
+      const differenceList = document.getElementById('difference-list');
+      document.getElementById('before-count').textContent = '现行 token 基准';
+      document.getElementById('after-count').textContent = changedTokens.length ? `${changedTokens.length} 项调整` : '保持不变';
+      if (!changedTokens.length) {
+        differenceList.innerHTML = '<div class="difference-empty"><strong>墨夜保持当前阅读底色。</strong> 候选方向不改未读背景、标题、摘要或分类色，只保留现有的中性黑与烟金关系。</div>';
+        return;
+      }
+      differenceList.innerHTML = changedTokens.map(token => {
+        const meta = changeLabels[token];
+        const current = currentValues[token] || '未读取';
+        const candidate = candidateValues[token] || theme.tokens[token];
+        const note = changeNotes[selectedTheme][token] || '候选方向仅调整这一层的色温或对比度。';
+        return `<div class="difference-row">
+          <div class="difference-role">${meta.label}<code>${meta.role} · ${token}</code></div>
+          <div class="difference-value"><div class="difference-value-head"><span class="difference-chip" style="background:${current}"></span>当前</div><code>${current}</code></div>
+          <div class="difference-arrow" aria-hidden="true">→</div>
+          <div class="difference-value"><div class="difference-value-head"><span class="difference-chip" style="background:${candidate}"></span>候选</div><code>${candidate}</code></div>
+          <div class="difference-note">${note}</div>
+        </div>`;
+      }).join('');
+    }
+
+    function resizeFrames() {
+      for (const clip of document.querySelectorAll('.frame-clip')) {
+        const scale = Math.min(1, clip.clientWidth / 420);
+        clip.querySelector('iframe').style.transform = `scale(${scale})`;
+        clip.style.height = `${600 * scale}px`;
+      }
+    }
+
+    function render() {
+      const id = ++renderId;
+      for (const button of themeNav.children) button.setAttribute('aria-pressed', String(button.dataset.theme === selectedTheme));
+      document.getElementById('direction-title').textContent = `${themes[selectedTheme].name}：${themes[selectedTheme].direction}`;
+      document.getElementById('direction-copy').textContent = themes[selectedTheme].copy;
+      const frameResults = {};
+      const frames = [['before', false], ['after', true]];
+      for (const [frameId, isCandidate] of frames) {
+        const frame = document.getElementById(frameId);
+        frame.dataset.ready = '';
+        frame.onload = () => {
+          if (id !== renderId) return;
+          const result = populateFrame(frame, isCandidate, id);
+          frameResults[frameId] = result;
+          if (isCandidate) renderSwatches('after-swatches', result.swatches);
+          else renderSwatches('before-swatches', result.swatches);
+          if (frameResults.before && frameResults.after) renderDifferences(frameResults.before.changes, frameResults.after.changes);
+          resizeFrames();
+        };
+        const content = popupTemplate.replace('</head>', `${isCandidate ? candidateCss(themes[selectedTheme]) : ''}</head>`);
+        frame.srcdoc = content;
+      }
+    }
+
+    for (const id of ['view', 'read-mode', 'font-mode']) document.getElementById(id).addEventListener('change', render);
+    new ResizeObserver(resizeFrames).observe(document.querySelector('.compare'));
+    render();
+  </script>
+</body>
+</html>
