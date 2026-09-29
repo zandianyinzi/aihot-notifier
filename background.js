@@ -17,6 +17,8 @@ const MAX_HISTORY_DAYS = 5;
 const AUTO_POLL_DELAY_BUFFER_MS = 6 * 60 * 60 * 1000;
 const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
+const MAX_PENDING_NOTIFICATIONS = 100;
+const MAX_PENDING_NOTIFICATIONS_PER_POLL = 1;
 const SELECTED_MAX_PAGES = 3;
 const ALL_MAX_PAGES = 20;
 const MANUAL_MAX_PAGES = 3;
@@ -713,6 +715,45 @@ async function createNotification(id, options, url, stateKey = '') {
   }
 }
 
+async function flushPendingNotifications(cycle = { sent: 0 }) {
+  const { pendingNotifications = [] } = await chrome.storage.local.get('pendingNotifications');
+  if (!Array.isArray(pendingNotifications)) return;
+
+  while (pendingNotifications.length > 0 && cycle.sent < MAX_PENDING_NOTIFICATIONS_PER_POLL) {
+    const pending = pendingNotifications[0];
+    try {
+      await createNotification(pending.id, pending.options, pending.url);
+      pendingNotifications.shift();
+      await chrome.storage.local.set({ pendingNotifications });
+      cycle.sent++;
+    } catch (e) {
+      console.warn('[AI HOT] pending notification delivery failed:', e);
+      return;
+    }
+  }
+}
+
+async function enqueueNotification(id, options, url, count, cycle) {
+  const { pendingNotifications = [] } = await chrome.storage.local.get('pendingNotifications');
+  const next = Array.isArray(pendingNotifications) ? [...pendingNotifications] : [];
+  const pending = { id, options, url, count };
+  if (next.length < MAX_PENDING_NOTIFICATIONS) {
+    next.push(pending);
+  } else {
+    const summary = next[next.length - 1];
+    summary.count = Number(summary.count || 1) + count;
+    summary.options = {
+      ...summary.options,
+      title: `AI HOT 有 ${summary.count} 条新内容`,
+      message: options.message,
+      contextMessage: options.contextMessage
+    };
+    summary.url = url;
+  }
+  await chrome.storage.local.set({ pendingNotifications: next });
+  await flushPendingNotifications(cycle);
+}
+
 function findWatchState(watchNotifyState, item) {
   const aliases = getItemAliases(item);
   const key = aliases.find(alias => watchNotifyState[alias]);
@@ -1223,6 +1264,9 @@ async function pollForUpdatesInternal(watchCycle) {
   const config = await getConfig();
   if (!config.enabled) return;
 
+  const notificationCycle = { sent: 0 };
+  await runPostCommitSideEffect('pending notification retry', () => flushPendingNotifications(notificationCycle));
+
   const { nextAllowedPollAt = '', lastItemsPollAt = '', allFeedContinuation = {} } = await chrome.storage.local.get(['nextAllowedPollAt', 'lastItemsPollAt', 'allFeedContinuation']);
   if (nextAllowedPollAt && new Date(nextAllowedPollAt).getTime() > Date.now()) {
     console.log(`[AI HOT] polling paused until ${nextAllowedPollAt}`);
@@ -1264,6 +1308,7 @@ async function pollForUpdatesInternal(watchCycle) {
     const persisted = await persistFetchedItems(allItems, {
       notify: true,
       watchCycle,
+      notificationCycle,
       storageUpdates: continuation
         ? { allFeedContinuation: getActiveAllContinuationStatus(allItems.nextCursor, continuation.continuationId) }
         : undefined
@@ -1386,13 +1431,13 @@ async function persistFetchedItems(items, options = {}) {
     const notificationItem = normalVisibleUnreadItems[0];
     const visibleUnreadCount = normalVisibleUnreadItems.length;
     const notifId = getNotificationId('aihot');
-    await runPostCommitSideEffect('new-item notification', () => createNotification(notifId, {
+    await runPostCommitSideEffect('new-item notification', () => enqueueNotification(notifId, {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: visibleUnreadCount > 1 ? `AI HOT 有 ${visibleUnreadCount} 条新内容` : 'AI HOT 新内容',
       message: notificationItem.title,
       contextMessage: notificationItem.source || ''
-    }, getItemOpenUrl(notificationItem)));
+    }, getItemOpenUrl(notificationItem), visibleUnreadCount, options.notificationCycle));
   }
 
   return {

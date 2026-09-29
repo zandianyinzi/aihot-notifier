@@ -296,6 +296,76 @@ test('ordinary notification failure is not recorded as an API failure', { timeou
   assert.notEqual(f.data.lastItemsPollAt, before);
   assert.ok(Object.values(f.data.apiFingerprintEtags || {}).includes('W/"head"'));
   assert.equal(f.control.badge, '1');
+  assert.equal(f.data.pendingNotifications?.length, 1);
+});
+
+test('a failed ordinary notification is retried on a later poll', { timeout: 3000 }, async () => {
+  let fail = true;
+  const attemptedIds = [];
+  const f = fixture({ items: [apiItem('normal', { source: { name: 'normal' } })],
+    notificationHook: async id => {
+      attemptedIds.push(id);
+      if (fail) throw new Error('temporary desktop notification failure');
+    } });
+  await f.poll();
+  assert.equal(f.data.pendingNotifications?.length, 1);
+  assert.equal(f.notifications.length, 0);
+
+  fail = false;
+  f.data.nextAllowedPollAt = new Date(Date.now() + 60_000).toISOString();
+  await f.poll();
+  assert.equal(f.data.history.length, 1, 'the second poll must not need a newly inserted item');
+  assert.equal(f.notifications.length, 1);
+  assert.equal(f.notifications[0].message, 'normal');
+  assert.deepEqual(attemptedIds, [attemptedIds[0], attemptedIds[0]], 'retry reuses the persisted notification ID');
+  assert.deepEqual(f.data.pendingNotifications, []);
+});
+
+test('pending notifications are delivered one at a time per poll', { timeout: 3000 }, async () => {
+  const pendingNotifications = ['first', 'second', 'third'].map(id => ({
+    id: `aihot-${id}`,
+    options: { type: 'basic', title: id, message: id },
+    url: `https://example.com/${id}`,
+    count: 1
+  }));
+  const f = fixture({ state: {
+    pendingNotifications
+  }, items: [apiItem('new-item', { source: { name: 'normal' } })] });
+
+  await f.poll();
+  assert.deepEqual(f.notifications.map(item => item.id), ['aihot-first']);
+  assert.deepEqual(f.data.pendingNotifications.slice(0, 2).map(item => item.id), ['aihot-second', 'aihot-third']);
+  assert.equal(f.data.pendingNotifications.length, 3, 'the newly discovered notice stays queued after this poll uses its budget');
+
+  f.data.nextAllowedPollAt = new Date(Date.now() + 60_000).toISOString();
+  await f.poll();
+  assert.deepEqual(f.notifications.map(item => item.id), ['aihot-first', 'aihot-second']);
+  assert.equal(f.data.pendingNotifications[0].id, 'aihot-third');
+});
+
+test('a full pending queue merges new notices into its tail summary', { timeout: 3000 }, async () => {
+  const pendingNotifications = Array.from({ length: 100 }, (_, index) => ({
+    id: `aihot-pending-${index}`,
+    options: { type: 'basic', title: 'AI HOT 新内容', message: `pending-${index}` },
+    url: `https://example.com/pending-${index}`,
+    count: 1
+  }));
+  const f = fixture({ state: { pendingNotifications },
+    items: [apiItem('overflow-new', { source: { name: 'normal' } })],
+    notificationHook: async () => { throw new Error('desktop notifications unavailable'); } });
+
+  await f.poll();
+
+  const queue = f.data.pendingNotifications;
+  const summary = queue[queue.length - 1];
+  assert.equal(queue.length, 100);
+  assert.equal(queue[0].id, 'aihot-pending-0');
+  assert.equal(summary.id, 'aihot-pending-99');
+  assert.equal(summary.count, 2);
+  assert.equal(summary.options.title, 'AI HOT 有 2 条新内容');
+  assert.equal(summary.options.message, 'overflow-new');
+  assert.equal(summary.options.contextMessage, 'normal');
+  assert.equal(summary.url, 'https://example.com/overflow-new');
 });
 
 test('committed unread badge updates before a slow notification completes', { timeout: 3000 }, async () => {
