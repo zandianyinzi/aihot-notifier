@@ -911,8 +911,28 @@ function renderHistory(data, options = {}) {
   applyRenderPosition(data, options);
   refreshUnreadNavigatorFromDom();
   updateHistoryScrollControls();
+  updateSourceTitles();
   lastRenderSignature = signature;
   logPerf('render-end', { items: history.length, unread });
+}
+
+// 仅当来源在元信息行内被省略（overflow）时，才附加原生 title 悬浮展示完整来源；
+// 未截断的来源不设 title，避免与可见文本重复弹出提示。
+function updateSourceTitles() {
+  const sources = historyList.querySelectorAll('.item-source');
+  sources.forEach(el => {
+    // 元素需具备几何测量与属性 API 才处理；非常规 DOM（测试 mock）下安全跳过。
+    if (!el || typeof el.scrollWidth !== 'number' || typeof el.clientWidth !== 'number'
+        || typeof el.setAttribute !== 'function' || typeof el.removeAttribute !== 'function') {
+      return;
+    }
+    // 亚像素渲染下 scrollWidth 可能比 clientWidth 大 1px，留容差避免误判。
+    if (el.scrollWidth > el.clientWidth + 1) {
+      el.setAttribute('title', el.textContent);
+    } else {
+      el.removeAttribute('title');
+    }
+  });
 }
 
 function scrollToFirstUnread() {
@@ -1414,8 +1434,8 @@ feedModeEl.addEventListener('change', async () => {
   await feedModeSwitchController.switchFeedMode(nextFeedMode, feedbackStartedAt);
 });
 themeEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
-fontFamilyEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
-fontSizeEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
+fontFamilyEl.addEventListener('change', () => { requestAnimationFrame(updateSourceTitles); void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
+fontSizeEl.addEventListener('change', () => { requestAnimationFrame(updateSourceTitles); void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
 openPositionModeEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
 historyDaysEl.addEventListener('change', () => {
   clearScrollPosition();

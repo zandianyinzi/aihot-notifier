@@ -626,6 +626,9 @@ assert(!/classList\.add\('is-result-ok'\)/.test(popupJs), '拷贝成功不添加
 assert(/function\s+formatDateTime\(isoStr\)/.test(popupJs), '条目时间格式化同时输出本地日期和时间');
 assert(/return\s+`\$\{month}\/\$\{day}\s+\$\{hours}:\$\{minutes}`/.test(popupJs), '条目时间使用 MM/DD HH:mm 格式');
 assert(/<span class="item-source">\$\{source\}<\/span>/.test(popupJs), '来源使用可独立收缩的语义节点');
+assert(/el\.scrollWidth\s*>\s*el\.clientWidth[\s\S]*?setAttribute\('title'/.test(popupJs) && /else[\s\S]*?removeAttribute\('title'\)/.test(popupJs), '来源仅在被省略时附加原生 title 悬浮展示完整来源，未截断时不设 title');
+assert(/updateSourceTitles\(\)/.test(popupJs), '历史渲染后按需刷新来源 title');
+assert(/fontSizeEl\.addEventListener\('change',[\s\S]*?updateSourceTitles/.test(popupJs) && /fontFamilyEl\.addEventListener\('change',[\s\S]*?updateSourceTitles/.test(popupJs), '字号或字体切换后刷新来源 title，避免省略状态与提示失同步');
 const itemSourceRule = popupHtml.match(/\.item-source\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(itemSourceRule, 'min-width', '0'), '长来源允许在元信息行内收缩');
 assert(hasDeclaration(itemSourceRule, 'overflow', 'hidden'), '长来源隐藏溢出内容');
