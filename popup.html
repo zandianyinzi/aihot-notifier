@@ -195,7 +195,8 @@
       --motion-tap: 0.15s;
       --motion-panel: 0.25s;
       --motion-panel-open: 0.18s;
-      --motion-loading: 0.45s;
+      --motion-loading: 0.8s;
+      --motion-loading-finish: 0.2s;
       --motion-result: 1.2s;
     }
 
@@ -304,13 +305,13 @@
       }
 
       .skeleton-line,
-      .btn-icon.is-loading svg,
       .btn-icon.is-result-ok,
       #pollNow.is-result-accent,
       .btn-icon.is-result-danger,
       .item.is-jump-target {
         animation: none;
       }
+
     }
 
     .actions {
@@ -424,8 +425,29 @@
       stroke-linejoin: round;
     }
 
-    .btn-icon.is-loading svg {
+    #pollNow .refresh-icon {
+      transform-origin: center;
+    }
+
+    #pollNow .loading-ring {
+      stroke-dasharray: 53.4 0;
+    }
+
+    #pollNow.is-loading .refresh-icon {
       animation: rotate var(--motion-loading) linear infinite;
+    }
+
+    #pollNow.is-loading .loading-ring {
+      stroke-dasharray: 40 13.4;
+      animation: loading-ring-open var(--motion-loading-finish) ease-out forwards;
+    }
+
+    #pollNow.is-loading-finishing .refresh-icon {
+      animation: none;
+    }
+
+    #pollNow.is-loading-finishing .loading-ring {
+      animation: loading-ring-close var(--motion-loading-finish) ease-out forwards;
     }
 
     #pollNow.is-loading {
@@ -434,6 +456,24 @@
 
     @keyframes rotate {
       to { transform: rotate(360deg); }
+    }
+
+    @keyframes loading-ring-open {
+      from { stroke-dasharray: 53.4 0; }
+      to { stroke-dasharray: 40 13.4; }
+    }
+
+    @keyframes loading-ring-close {
+      to { stroke-dasharray: 53.4 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #pollNow.is-loading .refresh-icon,
+      #pollNow.is-loading .loading-ring,
+      #pollNow.is-loading-finishing .refresh-icon,
+      #pollNow.is-loading-finishing .loading-ring {
+        animation: none;
+      }
     }
 
     .btn-icon.is-result-ok {
@@ -1302,7 +1342,7 @@
         <svg viewBox="0 0 24 24"><path d="M5 20h14"/><path d="M12 4v12"/><path d="m7 11 5 5 5-5"/></svg>
       </button>
       <button class="btn-icon" id="pollNow" title="刷新" aria-label="刷新">
-        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7"/><path d="M21 3v6h-6"/></svg>
+        <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><circle class="loading-ring" cx="12" cy="12" r="8.5"/></svg>
       </button>
       <button class="btn-icon" id="settingsBtn" title="设置" aria-label="设置" aria-controls="settingsPanel" aria-expanded="false">
         <svg viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="8" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="10" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg>

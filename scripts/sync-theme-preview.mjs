@@ -9,8 +9,12 @@ const preview = fs.readFileSync(previewPath, 'utf8');
 const popup = fs.readFileSync(popupPath, 'utf8');
 const declaration = 'const popupTemplate = ';
 const start = preview.indexOf(declaration);
-const endMarker = ';\n    const themes';
-const end = start === -1 ? -1 : preview.indexOf(endMarker, start + declaration.length);
+const templateTail = start === -1
+  ? null
+  : preview.slice(start + declaration.length).match(/;\r?\n    const themes/);
+const end = templateTail
+  ? start + declaration.length + templateTail.index
+  : -1;
 
 if (start === -1 || end === -1) {
   throw new Error('Could not locate popupTemplate in theme-comparison-preview.html');

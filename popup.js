@@ -61,6 +61,7 @@ const POPUP_SCROLL_TTL_MS = 30 * 60 * 1000;
 const POPUP_SCROLL_SAVE_DELAY_MS = 200;
 const BUTTON_RESULT_CLASSES = ['is-result-accent', 'is-result-danger', 'is-result-ok'];
 const BUTTON_TRANSIENT_CLASSES = ['is-loading', ...BUTTON_RESULT_CLASSES];
+const buttonLoadingCleanups = new WeakMap();
 const BUTTON_RESULT_MIN_MS = 600;
 const BUTTON_RESULT_MAX_MS = 1400;
 const BUTTON_RESULT_TARGET_TOTAL_MS = 1800;
@@ -94,8 +95,44 @@ const allFeedContinuationStatusController = createAllFeedContinuationStatusContr
 });
 
 function clearButtonFeedback(button) {
-  button.classList.remove(...BUTTON_TRANSIENT_CLASSES);
+  buttonLoadingCleanups.get(button)?.();
+  button.classList.remove(...BUTTON_TRANSIENT_CLASSES, 'is-loading-finishing');
   button.style.removeProperty('--control-result-duration');
+}
+
+function finishButtonLoading(button) {
+  if (!button.classList.contains('is-loading') || button.classList.contains('is-loading-finishing')) return;
+  const indicator = button.querySelector('.refresh-icon');
+  const ring = button.querySelector('.loading-ring');
+  if (!indicator || !ring) {
+    button.classList.remove('is-loading', 'is-loading-finishing');
+    return;
+  }
+
+  let settled = false;
+  const cleanup = () => {
+    if (settled) return;
+    settled = true;
+    ring.removeEventListener('animationend', onRingClosed);
+    indicator.style.removeProperty('transform');
+    ring.style.removeProperty('stroke-dasharray');
+    if (buttonLoadingCleanups.get(button) === cleanup) buttonLoadingCleanups.delete(button);
+    button.classList.remove('is-loading-finishing', 'is-loading');
+  };
+  const onRingClosed = event => {
+    if (event.target === ring && event.animationName === 'loading-ring-close') cleanup();
+  };
+
+  const currentTransform = getComputedStyle(indicator).transform;
+  const currentDasharray = getComputedStyle(ring).strokeDasharray;
+  indicator.style.transform = currentTransform;
+  ring.style.strokeDasharray = currentDasharray;
+  buttonLoadingCleanups.set(button, cleanup);
+  button.classList.add('is-loading-finishing');
+  ring.addEventListener('animationend', onRingClosed);
+  requestAnimationFrame(() => {
+    if (!settled && getComputedStyle(ring).animationName === 'none') cleanup();
+  });
 }
 
 function waitForNextPaint() {
@@ -160,21 +197,24 @@ function getButtonResultDuration(elapsedMs) {
 
 function removeClassAfterAnimation(button, className, onCleanup) {
   let cleaned = false;
-  const cleanup = () => {
+  const cleanup = event => {
+    if (event?.target && event.target !== button) return;
     if (cleaned) return;
     cleaned = true;
+    button.removeEventListener('animationend', cleanup);
     button.classList.remove(className);
     if (onCleanup) onCleanup();
   };
 
-  button.addEventListener('animationend', cleanup, { once: true });
+  button.addEventListener('animationend', cleanup);
   requestAnimationFrame(() => {
     if (getComputedStyle(button).animationName === 'none') cleanup();
   });
 }
 
 function showButtonResult(button, className, elapsedMs) {
-  button.classList.remove(...BUTTON_TRANSIENT_CLASSES);
+  finishButtonLoading(button);
+  button.classList.remove(...BUTTON_RESULT_CLASSES);
   button.style.setProperty('--control-result-duration', `${getButtonResultDuration(elapsedMs)}ms`);
   button.classList.add(className);
   removeClassAfterAnimation(button, className, () => {

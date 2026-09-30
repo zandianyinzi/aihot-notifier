@@ -108,8 +108,11 @@ const themeRules = [...popupHtml.matchAll(/\[data-theme="([^"]+)"\]\s*{([\s\S]*?
 const popupTemplateStart = themePreviewHtml
   ? themePreviewHtml.indexOf('const popupTemplate = ') + 'const popupTemplate = '.length
   : -1;
-const popupTemplateEnd = themePreviewHtml
-  ? themePreviewHtml.indexOf(';\n    const themes', popupTemplateStart)
+const popupTemplateTail = themePreviewHtml
+  ? themePreviewHtml.slice(popupTemplateStart).match(/;\r?\n    const themes/)
+  : null;
+const popupTemplateEnd = popupTemplateTail
+  ? popupTemplateStart + popupTemplateTail.index
   : -1;
 let previewPopupTemplate = '';
 if (popupTemplateStart >= 'const popupTemplate = '.length && popupTemplateEnd > popupTemplateStart) {
@@ -382,7 +385,23 @@ assert(hasDeclaration(itemFocusVisibleRule, 'outline-offset', '-2px'), '列表�
 console.log('\n[降低动态效果]');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.brand-logo-dot\s*{[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止 Logo 呼吸动画');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.skeleton-line[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止骨架屏闪烁');
-assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.btn-icon\.is-loading svg[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止刷新按钮旋转');
+assert(/#pollNow\.is-loading\s+\.refresh-icon\s*{[\s\S]*animation:\s*rotate/i.test(popupHtml), '请求中旋转单个刷新圆环');
+assert(!/#pollNow\s+\.refresh-icon,[\s\S]*#pollNow\s+\.loading-indicator\s*{[\s\S]*transition:\s*opacity/i.test(popupHtml), '停止交接不使用双圆环透明度叠加');
+assert(!/<svg\s+class="loading-indicator"/.test(popupHtml), '刷新按钮不再渲染第二个加载环');
+assert((popupHtml.match(/<circle\s+class="loading-ring"/g) || []).length === 1, '刷新按钮只渲染一个加载圆环');
+assert(/<svg\s+class="refresh-icon"[^>]*>[\s\S]*<circle\s+class="loading-ring"\s+cx="12"\s+cy="12"\s+r="8\.5"\s*\/>[\s\S]*<\/svg>/.test(popupHtml), '静止刷新图标使用无箭头圆环');
+assert(/#pollNow\s+\.loading-ring\s*{[\s\S]*stroke-dasharray:\s*53\.4\s+0/i.test(popupHtml), '静止圆环使用完整描边');
+assert(/#pollNow\.is-loading\s+\.loading-ring\s*{[\s\S]*stroke-dasharray:\s*40\s+13\.4[\s\S]*animation:\s*loading-ring-open/i.test(popupHtml), '加载时单个圆环平滑打开缺口');
+assert(/#pollNow\.is-loading-finishing\s+\.refresh-icon\s*{[\s\S]*animation:\s*none/i.test(popupHtml), '停止时移除旋转动画，保留加载环当前变换');
+assert(/#pollNow\.is-loading-finishing\s+\.loading-ring\s*{[\s\S]*animation:\s*loading-ring-close/i.test(popupHtml), '停止时仅闭合加载环缺口');
+assert(/@keyframes\s+loading-ring-close[\s\S]*stroke-dasharray:\s*53\.4\s+0/i.test(popupHtml), '加载环闭合到完整圆周');
+assert(/function\s+finishButtonLoading\(button\)/.test(popupJs) && /finishButtonLoading\(button\)/.test(popupJs), '请求结束使用加载环闭合流程');
+assert(/const currentTransform = getComputedStyle\(indicator\)\.transform;[\s\S]*indicator\.style\.transform = currentTransform;/.test(popupJs), '停止时固定当前绘制相位，避免暂停延迟带来的额外旋转');
+assert(/function finishButtonLoading\(button\)[\s\S]*?const cleanup = \(\) => \{[\s\S]*?indicator\.style\.removeProperty\('transform'\)/.test(popupJs), '圆环交接结束后清除冻结相位');
+assert(/function\s+showButtonResult\(button,[\s\S]*?finishButtonLoading\(button\);\s*button\.classList\.remove\(\.\.\.BUTTON_RESULT_CLASSES\)/.test(popupJs), '按钮结果反馈不打断加载环闭合');
+assert(!/refresh-settle|is-loading-settling|refresh-settle-from|phaseDegrees/.test(`${popupHtml}\n${popupJs}`), '刷新状态不再计算旋转归位角度');
+assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*#pollNow\.is-loading\s+\.refresh-icon,[\s\S]*#pollNow\.is-loading-finishing\s+\.loading-ring\s*{[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止加载环旋转');
+assert(/event\?\.target\s*&&\s*event\.target\s*!==\s*button/.test(popupJs), '按钮结果反馈忽略子元素动画结束事件');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.btn-icon\.is-result-ok[\s\S]*\.btn-icon\.is-result-danger[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止按钮结果动画');
 
 console.log('\n[主列表滚动]');
