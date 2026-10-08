@@ -150,6 +150,22 @@ test('refresh without new items preserves the saved position for reopening', asy
   assert.equal(reopened.list.scrollTop, 125);
 });
 
+test('stored historyDays above seven renders only the seven-day window', () => {
+  const popup = createPopup();
+  popup.data.historyDays = 8;
+  popup.data.history = [{
+    id: 'day-six', url: 'https://example.com/day-six', title: 'Day six',
+    time: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString()
+  }, {
+    id: 'day-eight', url: 'https://example.com/day-eight', title: 'Day eight',
+    time: new Date(Date.now() - 7.5 * 24 * 60 * 60 * 1000).toISOString()
+  }];
+  popup.sandbox.applyConfig(popup.data);
+  popup.sandbox.renderHistory(popup.data);
+  assert.equal(popup.getElement('historyDays').value, '7');
+  assert.deepEqual(popup.list.querySelectorAll('.item').map(item => item.dataset.key), ['day-six']);
+});
+
 test('refresh keeps non-default font and size in the warm popup cache', async () => {
   const popup = createPopup();
   popup.sandbox.writePopupCache({

@@ -1,7 +1,7 @@
 const feedState = typeof importScripts === 'function'
   ? (importScripts('feed-state.js'), globalThis.FeedState)
   : require('./feed-state.js');
-const { normalizeFeedMode, projectHistory } = feedState;
+const { normalizeFeedMode, normalizeHistoryDays, projectHistory } = feedState;
 
 const API_BASE = 'https://aihot.news/api/v1/items';
 const API_WINDOW = '7d';
@@ -13,7 +13,8 @@ const ALL_CONTINUATION_ALARM_NAME = 'aihot-all-continuation';
 const DEFAULT_INTERVAL = 5;
 const MIN_INTERVAL = 2;
 const DEFAULT_HISTORY_DAYS = 1;
-const MAX_HISTORY_DAYS = 5;
+const MAX_HISTORY_DAYS = 7;
+const MIN_RETAINED_HISTORY_DAYS = 5;
 const AUTO_POLL_DELAY_BUFFER_MS = 6 * 60 * 60 * 1000;
 const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
@@ -1007,7 +1008,7 @@ function upsertCanonicalItems(state, items, options = {}) {
   const mode = normalizeFeedMode(options.mode);
   const discoveredAt = options.discoveredAt || new Date().toISOString();
   const matchedAt = options.matchedAt || (typeof discoveredAt === 'string' ? discoveredAt : new Date().toISOString());
-  const historyDays = Number(options.historyDays || DEFAULT_HISTORY_DAYS);
+  const historyDays = normalizeHistoryDays(options.historyDays);
   const history = [...(state.history || [])];
   const readIds = new Set(state.readIds || []);
   const watchRules = state.watchRules || [];
@@ -1083,7 +1084,7 @@ function upsertCanonicalItems(state, items, options = {}) {
     });
   }
 
-  const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - Math.max(historyDays, MIN_RETAINED_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
   const retainedHistory = history
     .filter(item => isWithinHistoryWindow(item, cutoff))
     .sort((a, b) => getItemTime(b) - getItemTime(a));
@@ -1212,7 +1213,7 @@ function buildDiscoveryDelta(inserted, {
   readAllBefore = '',
   readAllBeforeByMode = {}
 } = {}) {
-  const cutoff = Date.now() - Number(historyDays || DEFAULT_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - normalizeHistoryDays(historyDays) * 24 * 60 * 60 * 1000;
   const readIdSet = new Set(Array.isArray(readIds) ? readIds : []);
   const readAllBeforeTime = new Date(getReadAllBefore({ readAllBefore, readAllBeforeByMode })).getTime();
   const visibleInserted = inserted.filter(item => isWithinDisplayWindow(item, cutoff));
@@ -1224,7 +1225,7 @@ function buildDiscoveryDelta(inserted, {
     inserted,
     visibleInserted,
     visibleUnreadInserted,
-    watchInserted: inserted.filter(item => item.watchMatched === true),
+    watchInserted: visibleInserted.filter(item => item.watchMatched === true),
     normalInserted: inserted.filter(item => item.watchMatched !== true),
     normalVisibleUnreadInserted: visibleUnreadInserted.filter(item => item.watchMatched !== true)
   };
@@ -1458,8 +1459,10 @@ async function showNotification(items) {
 
 async function checkWatchRemindersInternal(limit = MAX_WATCH_NOTIFICATIONS_PER_CYCLE, watchCycle) {
   if (limit <= 0) return 0;
-  const { history = [], readIds = [], feedMode, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'readIds', 'feedMode', 'watchRules', 'watchNotifyState']);
+  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode, watchRules = [], watchNotifyState = {} } = await chrome.storage.local.get(['history', 'readIds', 'historyDays', 'feedMode', 'watchRules', 'watchNotifyState']);
+  const cutoff = Date.now() - normalizeHistoryDays(historyDays) * 24 * 60 * 60 * 1000;
   const watchItems = projectHistory(history, feedMode)
+    .filter(item => isWithinDisplayWindow(item, cutoff))
     .filter(item => getActiveWatchMatchIds(item, watchRules).length > 0 && findWatchState(watchNotifyState, item).state);
   if (watchItems.length === 0) return;
   const now = new Date().toISOString();
@@ -1509,7 +1512,7 @@ async function manualPollInternal() {
     const safetyPollDue = isSafetyItemsPollDue(lastItemsPollAt);
     const sinceTime = getAutoPollSinceTime({ interval: DEFAULT_INTERVAL, lastCheck: lastCheck || now }, safetyPollDue, lastItemsPollAt);
     console.log(`[AI HOT] manual poll since=${sinceTime}`);
-    const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - Math.max(normalizeHistoryDays(historyDays), MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
     const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: MANUAL_MAX_PAGES, bypassEtag: safetyPollDue });
     if (allItems.notModified) {
       await chrome.storage.local.set({ lastCheck: now, failCount: 0, nextAllowedPollAt: '' });
@@ -1577,7 +1580,7 @@ async function updateBadgeInternal() {
   const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = data;
   const readIdSet = new Set(readIds);
   const readAllBefore = getReadAllBefore(data);
-  const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - normalizeHistoryDays(historyDays) * 24 * 60 * 60 * 1000;
   const projectedHistory = projectHistory(history, feedMode);
   const unread = projectedHistory.filter(i => {
     if (!isWithinDisplayWindow(i, cutoff)) return false;
@@ -1860,8 +1863,9 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
   console.log(`[AI HOT] resetAndPoll feedMode=${feedMode}`);
   try {
     const { historyDays = DEFAULT_HISTORY_DAYS } = await chrome.storage.local.get('historyDays');
-    const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
-    const sinceTime = new Date(Date.now() - Math.max(historyDays, 1) * 24 * 60 * 60 * 1000).toISOString();
+    const normalizedHistoryDays = normalizeHistoryDays(historyDays);
+    const cutoff = Date.now() - Math.max(normalizedHistoryDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+    const sinceTime = new Date(Date.now() - Math.max(normalizedHistoryDays, 1) * 24 * 60 * 60 * 1000).toISOString();
     const mode = normalizeFeedMode(feedMode);
     const allItems = await fetchItems({ mode, sinceTime, cutoff, maxPages: mode === 'all' ? 1 : getMaxPages(mode) });
     if (generation !== sourceSwitchGeneration) return { stale: true };
@@ -1890,7 +1894,7 @@ async function resetAndPollInternal(feedMode, generation, capabilities = {}) {
         mode,
         discoveredAt,
         matchedAt: discoveredAt,
-        historyDays: committedHistoryDays,
+        historyDays: normalizeHistoryDays(committedHistoryDays),
         completeSelectedSnapshot: isCompleteSelectedSnapshot(
           allItems,
           mode,
@@ -2012,14 +2016,14 @@ async function handleInstalled(details) {
         watchNotifyState = {}
       } = await chrome.storage.local.get(['feedMode', 'historyDays', 'history', 'readIds', 'watchRules', 'watchNotifyState']);
       const mode = normalizeFeedMode(feedMode);
-      const cutoff = Date.now() - Math.max(historyDays, MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+      const cutoff = Date.now() - Math.max(normalizeHistoryDays(historyDays), MAX_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
       const allItems = await fetchItems({ mode, cutoff, maxPages: Math.min(getMaxPages(mode), SELECTED_MAX_PAGES) });
       const discoveredAt = new Date().toISOString();
       const canonical = upsertCanonicalItems({ history, readIds, watchRules, watchNotifyState }, allItems, {
         mode,
         discoveredAt,
         matchedAt: discoveredAt,
-        historyDays
+        historyDays: normalizeHistoryDays(historyDays)
       });
       await chrome.storage.local.set({
         history: canonical.history,

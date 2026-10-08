@@ -385,6 +385,37 @@ async function runTests() {
   assert(storageData.history[0]?.url === 'https://example.com/v1-original' && storageData.history[0]?.permalink === 'https://aihot.virxact.com/items/v1-item', 'links.original 和 links.aihot 映射为历史链接');
   assert(storageData.history[0]?.source === 'v1 来源', 'source.name 映射为历史来源');
 
+  console.log('\n[七天显示窗口保留第六天内容]');
+  resetState({ historyDays: 7 });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({
+      id: 'six-day-item',
+      publishedAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString()
+    })]))
+  });
+  await sendMessage({ type: 'pollNow' });
+  assert(storageData.history.some(item => item.id === 'six-day-item'), '选择 7 天时第 6 天的内容保留在 history');
+
+  console.log('\n[短显示窗口沿用五天存储保留基线]');
+  const sixDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+  resetState({
+    historyDays: 1,
+    history: [{
+      id: 'six-day-expired',
+      title: '旧历史条目',
+      url: 'https://example.com/six-day-expired',
+      time: sixDaysAgo,
+      discoveredAt: sixDaysAgo
+    }]
+  });
+  fetchImpl = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(v1Page([v1Item({ id: 'recent-item' })]))
+  });
+  await sendMessage({ type: 'pollNow' });
+  assert(!storageData.history.some(item => item.id === 'six-day-expired'), '选择 1 天时第 6 天的内容超过五天存储保留基线');
+
   console.log('\n[API v1 无序分页不提前截断]');
   resetState({ apiFingerprints: { selected: 'fp-old' }, historyDays: 5 });
   fetchImpl = (url) => {
@@ -2598,6 +2629,33 @@ async function runTests() {
   if (notificationId) await onClickedHandler(notificationId);
   assert(notificationId && openedTabs[0] === 'https://example.com/v1-watch', '点击 v1 特关通知打开 original 链接');
 
+  console.log('\n[特关通知遵循显示天数]');
+  resetState({
+    apiFingerprints: { selected: 'fp-old' },
+    historyDays: 1,
+    watchRules: [{ id: 'wr-old-published', source: 'X', author: '目标作者', keywords: [], enabled: true }],
+    watchNotifyState: {}
+  });
+  fetchImpl = (url) => {
+    if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-old-published');
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(v1Page([
+        v1Item({
+          id: 'v1-old-published-watch',
+          source: { name: 'X：目标作者' },
+          publishedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+          links: {
+            original: 'https://example.com/v1-old-published-watch',
+            aihot: 'https://aihot.virxact.com/items/v1-old-published-watch'
+          }
+        })
+      ]))
+    });
+  };
+  await onAlarmHandler({ name: 'aihot-poll' });
+  assert(notificationCreateIds.filter(id => id.startsWith('aihot-watch-')).length === 0, '发布时间超出显示天数的特关条目不发送不可见通知');
+
   console.log('\n[并发轮询与特关状态清理]');
   resetState({
     apiFingerprints: { selected: 'fp-old' },
@@ -2687,6 +2745,21 @@ async function runTests() {
   onStorageChangedHandler({ historyDays: { oldValue: 7, newValue: 1 } });
   await waitFor(() => badgeTexts.length > 0);
   assert(badgeTexts.at(-1) === '', '修改显示天数后 badge 立即按新发布时间窗口更新');
+
+  resetState({
+    historyDays: 8,
+    history: [{
+      id: 'out-of-range-badge',
+      title: '超出七天的角标测试',
+      url: 'https://example.com/out-of-range-badge',
+      time: new Date(Date.now() - 7.5 * 24 * 60 * 60 * 1000).toISOString(),
+      discoveredAt: new Date().toISOString()
+    }],
+    readIds: []
+  });
+  onStorageChangedHandler({ historyDays: { oldValue: 7, newValue: 8 } });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(badgeTexts.at(-1) === '', '异常存储值 8 的 badge 按七天上限过滤');
 
   resetState({
     apiFingerprints: { selected: 'fp-old' },

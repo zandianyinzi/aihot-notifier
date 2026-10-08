@@ -718,7 +718,7 @@ const feedStateScriptIndex = popupHtml.indexOf('<script src="feed-state.js"></sc
 const popupReliabilityScriptIndex = popupHtml.indexOf('<script src="popup-reliability.js"></script>');
 const popupScriptIndex = popupHtml.indexOf('<script src="popup.js"></script>');
 assert(feedStateScriptIndex >= 0 && feedStateScriptIndex < popupReliabilityScriptIndex && feedStateScriptIndex < popupScriptIndex, 'popup 在可靠性与应用脚本前加载共享内容源投影模块');
-assert(/const\s*{\s*normalizeFeedMode,\s*projectHistory\s*}\s*=\s*window\.FeedState/.test(popupJs), 'popup 使用共享内容源投影 contract');
+assert(/const\s*{\s*normalizeFeedMode,\s*normalizeHistoryDays,\s*projectHistory\s*}\s*=\s*window\.FeedState/.test(popupJs), 'popup 使用共享内容源与显示天数 contract');
 assert(/const\s+rawHistory\s*=\s*projectHistory\(data\.history\s*\|\|\s*\[\],\s*data\.feedMode\)/.test(popupJs), 'popup 渲染前按当前内容源投影 canonical history');
 assert(/projectHistory\(history,\s*feedMode\)/.test(backgroundJs), 'background badge 按当前内容源投影 canonical history');
 assert(/feedModeEl\.value\s*=\s*normalizeFeedMode\(data\.feedMode\)/.test(popupJs), '配置加载使用统一内容源归一化');
@@ -806,7 +806,9 @@ assert(/id="interval"[^>]*aria-label="检查频率"/.test(popupHtml), '检查频
 assert(/id="feedMode"[^>]*aria-label="内容源"/.test(popupHtml), '内容源有程序化标签');
 assert(/id="historyDays"[^>]*aria-label="显示天数"/.test(popupHtml), '显示天数有程序化标签');
 assert(/<select class="select-mini" id="historyDays"[^>]*>[\s\S]*?<option value="1" selected>1 天<\/option>[\s\S]*?<option value="2">2 天<\/option>/.test(popupHtml), '显示天数默认选择 1 天');
+assert(/<option value="7">7 天<\/option>/.test(popupHtml), '显示天数支持 7 天');
 assert(/const DEFAULT_HISTORY_DAYS = 1;/.test(popupJs), 'popup 默认显示天数为 1 天');
+assert(/historyDays:\s*normalizeHistoryDays\(data\.historyDays\)/.test(popupJs), 'popup 显示天数使用共享归一化规则');
 assert(/const DEFAULT_HISTORY_DAYS = 1;/.test(backgroundJs), 'background 默认显示天数为 1 天');
 assert(/id="openPositionMode"[^>]*aria-label="定位"/.test(popupHtml), '定位有程序化标签');
 assert(/id="theme"[^>]*aria-label="主题"/.test(popupHtml), '主题有程序化标签');

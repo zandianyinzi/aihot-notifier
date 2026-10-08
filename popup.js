@@ -36,7 +36,7 @@ const watchKeywordsEl = document.getElementById('watchKeywords');
 const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
-const { normalizeFeedMode, projectHistory } = window.FeedState;
+const { normalizeFeedMode, normalizeHistoryDays, projectHistory } = window.FeedState;
 const { getSafeHttpsUrl, openHttpsUrl, runOpenItemMutation, removeOptimisticReadAliases, createConfigMutationController, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, hasActiveWatchRuleMatch, moveWatchRule, captureWatchRuleActionFocus, restoreWatchRuleActionFocus, sortWatchItemsByRulePriority, buildHistoryRenderSignature, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
 const sessionWatchPinTracker = createSessionWatchPinTracker();
 
@@ -558,7 +558,7 @@ function normalizeOpenPositionMode(mode) {
 function getScrollContext(data) {
   return {
     feedMode: normalizeFeedMode(data.feedMode),
-    historyDays: Number(data.historyDays || DEFAULT_HISTORY_DAYS)
+    historyDays: normalizeHistoryDays(data.historyDays)
   };
 }
 
@@ -812,8 +812,7 @@ function applyConfig(data, options = {}) {
   fontSizeEl.value = size;
   applyFontSize(size);
   openPositionModeEl.value = normalizeOpenPositionMode(data.openPositionMode);
-  let days = data.historyDays || DEFAULT_HISTORY_DAYS;
-  if (days > 5) days = 5;
+  const days = normalizeHistoryDays(data.historyDays);
   historyDaysEl.value = String(days);
   renderWatchRules(data.watchRules || []);
 }
@@ -831,7 +830,7 @@ function renderHistory(data, options = {}) {
   const rawHistory = projectHistory(data.history || [], data.feedMode);
   const readIds = data.readIds || [];
   const readAllBefore = getReadAllBefore(data);
-  const historyDays = data.historyDays || DEFAULT_HISTORY_DAYS;
+  const historyDays = normalizeHistoryDays(data.historyDays);
   const watchRules = normalizeWatchRules(data.watchRules || []);
 
   const readIdSet = new Set(readIds);
@@ -1026,7 +1025,7 @@ function normalizeConfigSnapshot(data = {}) {
     fontFamily: normalizeFontFamily(data.fontFamily),
     fontSize: data.fontSize || 'medium',
     openPositionMode: normalizeOpenPositionMode(data.openPositionMode),
-    historyDays: Math.min(Math.max(Number(data.historyDays) || DEFAULT_HISTORY_DAYS, 1), 5)
+    historyDays: normalizeHistoryDays(data.historyDays)
   };
 }
 
@@ -1210,7 +1209,7 @@ async function openHistoryItem(item) {
   });
   const scrollCtx = await chrome.storage.local.get(['feedMode', 'historyDays']);
   writeScrollPosition(
-    { feedMode: normalizeFeedMode(scrollCtx.feedMode), historyDays: scrollCtx.historyDays || DEFAULT_HISTORY_DAYS },
+    { feedMode: normalizeFeedMode(scrollCtx.feedMode), historyDays: normalizeHistoryDays(scrollCtx.historyDays) },
     scrollAnchor
   );
 
