@@ -61,8 +61,8 @@ node screenshot.mjs
 
 ## 关键设计决策
 
-- **已读状态**：`readIds` 保存单条稳定 key（优先 `id`，再 `permalink`，再 `url`，并兼容旧 URL）+ `readAllBefore` 时间戳（批量清除）。两者共同决定是否已读。
-- **存储 vs 显示**：storage 保留 `Math.max(historyDays, 5)` 天数据避免切换天数时丢失；UI 和 badge 按用户设置的 `historyDays` 过滤显示。
+- **已读状态**：`readIds` 保存单条稳定 key（优先 `id`，再 `permalink`，再 `url`，并兼容旧 URL）+ `readAllBefore` 时间戳（批量清除）。两者共同决定是否已读；仍在缓存中的条目保留全部已读 key，缓存外最多保留最近 100 个。
+- **存储 vs 显示**：storage 固定保留最大可选的 7 天窗口内的数据，避免缩短显示天数后切回 7 天时丢失缓存；UI 和 badge 按用户设置的 `historyDays` 过滤显示。旧缓存升级用独立 `historyRetentionVersion` 一次性失效 items ETag 与 `lastItemsPollAt`，由下一次轮询补齐数据，不重置 history 或已读。2500 条和 6 MiB 存储上限仍可能截断窗口内的数据。
 - **API 轮询缓冲**：自动轮询和手动刷新对完整 v1 items URL 使用 URL 级 `ETag`/`If-None-Match`；304 跳过内容处理，200 成功持久化后保存该 URL 的 ETag。首页只保存首页 ETag，不能用续页 ETag 覆盖或补齐。v1 请求固定使用 7 天窗口，不携带 legacy `since` 参数；手动刷新 items 最多拉 3 页。
 - **时间字段**：展示时间优先 `publishedAt`，为空或无效时回退 API `discoveredAt`，最后兼容旧 `indexedAt`；全部无效才跳过。API 收录时间存为 `sourceDiscoveredAt`，本地 `discoveredAt` 保持首次获取时间语义，不得用服务端时间覆盖已读/提醒水位。查询沿用默认 `by=timeline`，列表排序及显示天数按上述展示时间计算。
 - **feedMode 切换**：弹窗先投影已有缓存，后台拉取并合并 canonical history，持久化成功后才提交新的 feedMode；失败保留旧 history 和旧模式。旧请求结果不能覆盖新选择，不能因切换清空历史。

@@ -166,6 +166,14 @@ test('stored historyDays above seven renders only the seven-day window', () => {
   assert.deepEqual(popup.list.querySelectorAll('.item').map(item => item.dataset.key), ['day-six']);
 });
 
+test('warm cache reconciliation keeps more than 100 retained read keys', () => {
+  const popup = createPopup();
+  const readIds = Array.from({ length: 101 }, (_, index) => `read-${index}`);
+  const result = popup.sandbox.reconcileCachedReadIds({ readIds }, { readIds: ['read-100'] });
+  assert.equal(result.data.readIds.length, 101);
+  assert.equal(result.data.readIds[0], 'read-0');
+});
+
 test('refresh keeps non-default font and size in the warm popup cache', async () => {
   const popup = createPopup();
   popup.sandbox.writePopupCache({

@@ -51,7 +51,7 @@ function fixture(options = {}) {
   const tabs = [];
   const writes = [];
   const errors = [];
-  const data = { canonicalHistoryVersion: 1, apiNormalizationVersion: 1, enabled: true,
+  const data = { canonicalHistoryVersion: 1, apiNormalizationVersion: 1, historyRetentionVersion: 1, enabled: true,
     interval: 5, feedMode: 'all', historyDays: 1, history: [], readIds: [], readAllBefore: '',
     readAllBeforeByMode: {}, watchRules: [], watchNotifyState: {}, failCount: 0,
     lastCheck: ago(1), lastItemsPollAt: ago(1), ...clone(options.state || {}) };

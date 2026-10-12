@@ -14,7 +14,6 @@ const DEFAULT_INTERVAL = 5;
 const MIN_INTERVAL = 2;
 const DEFAULT_HISTORY_DAYS = 1;
 const MAX_HISTORY_DAYS = 7;
-const MIN_RETAINED_HISTORY_DAYS = 5;
 const AUTO_POLL_DELAY_BUFFER_MS = 6 * 60 * 60 * 1000;
 const BADGE_COLOR = '#e2231a';
 const MAX_WATCH_NOTIFICATIONS_PER_CYCLE = 3;
@@ -32,6 +31,7 @@ const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
 const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
 const CANONICAL_HISTORY_VERSION = 1;
 const API_NORMALIZATION_VERSION = 1;
+const HISTORY_RETENTION_VERSION = 1;
 const MAX_HISTORY_ENTRIES = 2500;
 const MAX_MANAGED_STORAGE_BYTES = 6 * 1024 * 1024;
 const MAX_TITLE_LENGTH = 500;
@@ -82,13 +82,20 @@ function migrateCanonicalHistoryState(data = {}) {
 function ensureCanonicalHistoryMigration() {
   if (!canonicalHistoryMigrationPromise) {
     const migration = runStateMutation(async () => {
-      const data = await chrome.storage.local.get(['canonicalHistoryVersion', 'apiNormalizationVersion', 'history', 'feedMode']);
+      const data = await chrome.storage.local.get(['canonicalHistoryVersion', 'apiNormalizationVersion', 'historyRetentionVersion', 'history', 'feedMode']);
       const updates = Number(data.canonicalHistoryVersion || 0) < CANONICAL_HISTORY_VERSION
         ? migrateCanonicalHistoryState(data) : {};
       if (Number(data.apiNormalizationVersion || 0) < API_NORMALIZATION_VERSION) {
         // Old ETags can hide items discarded by the previous normalizer.
         Object.assign(updates, {
           apiNormalizationVersion: API_NORMALIZATION_VERSION,
+          apiFingerprintEtags: {},
+          lastItemsPollAt: ''
+        });
+      }
+      if (Number(data.historyRetentionVersion || 0) < HISTORY_RETENTION_VERSION) {
+        Object.assign(updates, {
+          historyRetentionVersion: HISTORY_RETENTION_VERSION,
           apiFingerprintEtags: {},
           lastItemsPollAt: ''
         });
@@ -133,6 +140,15 @@ function getManagedStorageBytes(state) {
   return new TextEncoder().encode(json).length;
 }
 
+function retainReadIdsForHistory(readIds, history, keepUnmatched = true) {
+  const aliases = [...new Set((readIds || []).filter(value => typeof value === 'string'))];
+  const retainedAliases = new Set((history || []).flatMap(item => getItemAliases(item)));
+  const unmatched = keepUnmatched
+    ? new Set(aliases.filter(alias => !retainedAliases.has(alias)).slice(-100))
+    : new Set();
+  return aliases.filter(alias => retainedAliases.has(alias) || unmatched.has(alias));
+}
+
 function boundCanonicalStorageState(state = {}) {
   const originalHistoryLength = Array.isArray(state.history) ? state.history.length : 0;
   let history = (state.history || [])
@@ -140,10 +156,9 @@ function boundCanonicalStorageState(state = {}) {
     .sort((a, b) => getItemTime(b) - getItemTime(a))
     .slice(0, MAX_HISTORY_ENTRIES);
   const buildState = () => {
-    const retainedAliases = new Set(history.flatMap(item => getItemAliases(item)));
     const pruneOrphanReadIds = originalHistoryLength > history.length;
-    const readIds = [...new Set((state.readIds || [])
-      .filter(value => typeof value === 'string' && (!pruneOrphanReadIds || retainedAliases.has(value))))].slice(-100);
+    const readIds = retainReadIdsForHistory(state.readIds, history, !pruneOrphanReadIds);
+    const retainedAliases = new Set(history.flatMap(item => getItemAliases(item)));
     const watchNotifyState = state.retainUnmatchedWatchState
       ? { ...(state.watchNotifyState || {}) }
       : Object.fromEntries(Object.entries(state.watchNotifyState || {})
@@ -841,9 +856,9 @@ async function markWatchViewed(urls, options = {}) {
 
 async function markItemsRead(ids, options = {}) {
   const aliases = [...new Set((Array.isArray(ids) ? ids : [ids]).flatMap(getItemAliases).filter(Boolean))];
-  const { readIds = [] } = await chrome.storage.local.get('readIds');
+  const { readIds = [], history = [] } = await chrome.storage.local.get(['readIds', 'history']);
   const merged = [...new Set([...readIds, ...aliases])];
-  const bounded = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
+  const bounded = retainReadIdsForHistory(merged, history);
   await chrome.storage.local.set({ readIds: bounded });
   if (options.skipBadge !== true) await runPostCommitSideEffect('mark-read badge update', updateBadge);
   return bounded;
@@ -1084,7 +1099,9 @@ function upsertCanonicalItems(state, items, options = {}) {
     });
   }
 
-  const cutoff = Date.now() - Math.max(historyDays, MIN_RETAINED_HISTORY_DAYS) * 24 * 60 * 60 * 1000;
+  // Cache the widest selectable window so reducing historyDays does not discard
+  // items that should reappear when the user expands the display window.
+  const cutoff = Date.now() - MAX_HISTORY_DAYS * 24 * 60 * 60 * 1000;
   const retainedHistory = history
     .filter(item => isWithinHistoryWindow(item, cutoff))
     .sort((a, b) => getItemTime(b) - getItemTime(a));
@@ -2042,8 +2059,9 @@ async function handleInstalled(details) {
 chrome.runtime.onInstalled.addListener((details) => runMigratedStateMutation(() => handleInstalled(details)));
 
 chrome.runtime.onStartup.addListener(() => runMigratedStateMutation(async () => {
-  await recoverAllFeedContinuationStatus();
   await migrateReadAllBefore();
+  await runPostCommitSideEffect('startup badge update', updateBadge);
+  await recoverAllFeedContinuationStatus();
   await setupAlarm();
 }));
 

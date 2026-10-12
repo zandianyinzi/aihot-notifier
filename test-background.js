@@ -397,16 +397,23 @@ async function runTests() {
   await sendMessage({ type: 'pollNow' });
   assert(storageData.history.some(item => item.id === 'six-day-item'), '选择 7 天时第 6 天的内容保留在 history');
 
-  console.log('\n[短显示窗口沿用五天存储保留基线]');
+  console.log('\n[短显示窗口仍缓存七天内容]');
   const sixDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+  const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
   resetState({
     historyDays: 1,
     history: [{
-      id: 'six-day-expired',
+      id: 'six-day-retained',
       title: '旧历史条目',
-      url: 'https://example.com/six-day-expired',
+      url: 'https://example.com/six-day-retained',
       time: sixDaysAgo,
       discoveredAt: sixDaysAgo
+    }, {
+      id: 'eight-day-expired',
+      title: '过期历史条目',
+      url: 'https://example.com/eight-day-expired',
+      time: eightDaysAgo,
+      discoveredAt: eightDaysAgo
     }]
   });
   fetchImpl = () => Promise.resolve({
@@ -414,7 +421,8 @@ async function runTests() {
     json: () => Promise.resolve(v1Page([v1Item({ id: 'recent-item' })]))
   });
   await sendMessage({ type: 'pollNow' });
-  assert(!storageData.history.some(item => item.id === 'six-day-expired'), '选择 1 天时第 6 天的内容超过五天存储保留基线');
+  assert(storageData.history.some(item => item.id === 'six-day-retained'), '选择 1 天时仍缓存第 6 天的内容以供切换显示天数');
+  assert(!storageData.history.some(item => item.id === 'eight-day-expired'), '超过最大显示窗口的第 8 天内容被清理');
 
   console.log('\n[API v1 无序分页不提前截断]');
   resetState({ apiFingerprints: { selected: 'fp-old' }, historyDays: 5 });
@@ -1193,6 +1201,21 @@ async function runTests() {
 
   console.log('\n[全部续拉生命周期与可选失败隔离]');
   resetState({
+    history: [{
+      id: 'startup-badge-item',
+      title: '启动角标条目',
+      source: '测试来源',
+      url: 'https://example.com/startup-badge-item',
+      selected: true,
+      time: new Date().toISOString(),
+      discoveredAt: new Date().toISOString()
+    }],
+    readIds: []
+  });
+  await onStartupHandler();
+  assert(badgeTexts.at(-1) === '1', 'worker 启动时立即按已缓存 history 更新未读 badge');
+
+  resetState({
     feedMode: 'all',
     allFeedContinuation: {
       active: false,
@@ -1571,10 +1594,23 @@ async function runTests() {
   const [canonicalRaceResult, readRaceResult, watchRaceResult, rulesRaceResult] = await Promise.all([canonicalPopupRace, readRace, watchRace, rulesRace]);
   assert(canonicalRaceResult.ok === true && readRaceResult.ok === true && watchRaceResult.ok === true && rulesRaceResult.ok === true, '读、特关查看与规则消息在 canonical 写入后依次成功');
   assert(storageData.history.some(item => item.id === 'popup-race-new-item'), 'popup mutation 不覆盖 concurrent canonical history');
-  assert(storageData.readIds.length === 100 && storageData.readIds.includes('race-read-key') && storageData.readIds.includes('https://example.com/race-read') && !storageData.readIds.includes('bounded-0'), 'markItemsRead 合并并按现有上限保留最近 100 个 alias');
+  assert(storageData.readIds.length === 100 && storageData.readIds.includes('race-read-key') && storageData.readIds.includes('https://example.com/race-read') && !storageData.readIds.includes('bounded-0'), 'markItemsRead 合并并保留最近 100 个缓存外 alias');
   assert(Boolean(storageData.watchNotifyState['race-watch']?.viewedAt), 'markWatchViewed 在队列内重读并保留 canonical watch state');
   assert(storageData.watchRules.length === 1 && storageData.watchRules[0].id === 'new-rule' && storageData.history.some(item => item.id === 'race-watch'), 'saveWatchRules 不覆盖 concurrent history/read/watch state');
   storageSetImpl = null;
+
+  console.log('\n[七天缓存内逐条已读超过 100 条]');
+  const manyReadIds = Array.from({ length: 101 }, (_, index) => `read-${index}`);
+  const manyReadTime = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+  resetState({
+    historyDays: 7,
+    history: manyReadIds.map(id => ({ id, selected: true, url: `https://example.com/${id}`, time: manyReadTime, discoveredAt: manyReadTime }))
+  });
+  await sendMessage({ type: 'markItemsRead', ids: manyReadIds });
+  assert(manyReadIds.every(id => storageData.readIds.includes(id)) && badgeTexts.at(-1) === '', '第 101 条已读不会让仍在缓存中的首条重新计入角标');
+  fetchImpl = () => Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([])) });
+  await sendMessage({ type: 'pollNow' });
+  assert(manyReadIds.every(id => storageData.readIds.includes(id)) && badgeTexts.at(-1) === '', '下一次持久化仍保留七天缓存内的全部已读标记');
 
   console.log('\n[全部已读后切源保持已读]');
   const originalDiscoveredAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
@@ -3003,6 +3039,25 @@ async function runTests() {
   upgradeRequests.length = 0;
   await sendMessage({ type: 'pollNow' });
   assert(upgradeRequests[0] === 'W/"old-selected"' && storageData.lastItemsPollAt === afterUpgradePoll, 'worker 重启后不重复清空已迁移缓存，正常复用 304');
+
+  console.log('\n[保留窗口升级补齐旧缓存]');
+  resetState({
+    canonicalHistoryVersion: 1,
+    apiNormalizationVersion: 1,
+    historyDays: 1,
+    apiFingerprintEtags: { [selectedCacheUrl]: 'W/"five-day-cache"' },
+    lastItemsPollAt: new Date().toISOString()
+  });
+  delete require.cache[require.resolve('./background.js')];
+  require('./background.js');
+  await sendMessage({ type: 'configChanged' });
+  assert(storageData.historyRetentionVersion === 1 && Object.keys(storageData.apiFingerprintEtags).length === 0 && !storageData.lastItemsPollAt, '旧缓存升级时一次性失效 ETag 和补拉水位');
+  const sixDayBackfill = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+  fetchImpl = async (_url, options = {}) => options.headers?.['If-None-Match']
+    ? { status: 304, headers: new Headers({ ETag: 'W/"five-day-cache"' }) }
+    : { ok: true, status: 200, headers: new Headers({ ETag: 'W/"seven-day-cache"' }), json: async () => v1Page([v1Item({ id: 'backfilled-day-six', publishedAt: sixDayBackfill })]) };
+  await sendMessage({ type: 'pollNow' });
+  assert(storageData.history.some(item => item.id === 'backfilled-day-six'), '升级后首次刷新补回原先被五天规则删除的第六天内容');
 
   console.log(`\n${'='.repeat(40)}`);
   console.log(`结果: ${passed} passed, ${failed} failed`);

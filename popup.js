@@ -740,8 +740,7 @@ function isWithinDisplayWindow(item, cutoff) {
 }
 
 function mergeReadIds(current = [], cached = []) {
-  const merged = [...new Set([...current, ...cached])];
-  return merged.length > 100 ? merged.slice(merged.length - 100) : merged;
+  return [...new Set([...current, ...cached])];
 }
 
 function sameStringArray(a = [], b = []) {
