@@ -14,6 +14,8 @@ Chrome 扩展（Manifest V3），通过 aihot.news API 获取 AI HOT 资讯并�
 # 打包为 zip（排除无关文件）
 ./pack.sh
 # Windows/PowerShell 无 bash 时使用 Compress-Archive，保持包内只含 manifest、JS、HTML、icons/
+# 打包后校验：文件集合等于 pack.sh 白名单、内容与工作区一致、引用的脚本和图标都在包内
+node scripts/verify-package.mjs
 
 # 单元测试（纯逻辑验证，不需要浏览器）
 node test.js
@@ -89,7 +91,8 @@ node screenshot.mjs
 发布时按顺序执行：
 1. 按发布语义升级 `manifest.json` 中的版本号
 2. 打包（`bash pack.sh` 或 PowerShell `Compress-Archive`）
-3. commit + push 源码与发布 ZIP；上传商店及审核是独立步骤
+3. 运行 `node scripts/verify-package.mjs`，未通过不得提交 ZIP
+4. commit + push 源码与发布 ZIP；上传商店及审核是独立步骤
 
 ## 提交与 Pull Request 规范
 

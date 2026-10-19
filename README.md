@@ -66,8 +66,9 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - `node screenshot.mjs`：重新生成 Chrome Web Store 截图和宣传图；首次使用前执行 `npm install --no-save puppeteer`。
 - `node scripts/sync-theme-preview.mjs`：将最新 `popup.html` 同步到主题比较预览，避免评审模板与扩展界面漂移。
 - `bash pack.sh`：生成可上传 Chrome Web Store 的 `aihot-notifier.zip`；Windows 无 bash 时可用 PowerShell `Compress-Archive` 打包同一文件集合。
+- `node scripts/verify-package.mjs`：发布前校验 ZIP，要求文件集合与 `pack.sh` 白名单一致、每个文件与工作区逐字节相同、`importScripts` / `<script src>` / 图标引用均已打包、版本与 `manifest.json` 一致、`host_permissions` 未扩大，且路径不含反斜杠或下划线开头的文件名；任一项不满足即以非零状态退出。
 
-仅在明确发布时升级 `manifest.json` 版本号，随后运行测试、打包、提交并推送源码与发布 ZIP；推送不代表已上传或通过 Chrome Web Store 审核。打包文件白名单以 `pack.sh` 为准，禁止打入调试脚本、测试、依赖或浏览器 profile。
+仅在明确发布时升级 `manifest.json` 版本号，随后运行测试、打包、运行 `node scripts/verify-package.mjs`、提交并推送源码与发布 ZIP；推送不代表已上传或通过 Chrome Web Store 审核。打包文件白名单以 `pack.sh` 为准，禁止打入调试脚本、测试、依赖或浏览器 profile。
 
 `check-changes.sh` 是语法和基础逻辑的快速检查，不替代上面的通知、后台及弹窗测试。公开隐私政策源文件为根目录 [privacy-policy.html](privacy-policy.html)，`store/privacy-policy.html` 是商店素材副本，修改时同步内容。
 
