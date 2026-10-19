@@ -6,12 +6,12 @@ zip -r aihot-notifier.zip \
   manifest.json \
   background.js \
   feed-state.js \
+  watch-rules.js \
   popup.html \
   popup-log.js \
   popup-boot.js \
   popup-reliability.js \
   popup.js \
-  fonts/ \
   icons/ \
   -x "*.DS_Store"
 echo "✓ 打包完成: aihot-notifier.zip"

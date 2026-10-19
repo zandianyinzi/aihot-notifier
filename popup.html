@@ -21,14 +21,9 @@
       --text-unread-2: #c3bfb3;
       --text-unread-3: #9f9b8f;
       --text-read: #a7a398;
-      --text-read-hover: #bdb9b0;
       --accent: #b5a58a;
       --accent-soft: rgba(181,165,138,0.12);
-      --rail: #c7ae78;
-      --rail-strong: #8f7950;
       --scrollbar: #2b2a26;
-      --hot: #ff5520;
-      --hot-soft: rgba(255,85,32,0.10);
       --state-ok: #91b89c;
       --state-ok-soft: rgba(145,184,156,0.22);
       --state-ok-softer: rgba(145,184,156,0.12);
@@ -41,7 +36,6 @@
       --cat-paper: #92b59e;
       --cat-tips: #cd9f99;
       --cat-default: #95958f;
-      --shadow: 0 1px 3px rgba(0,0,0,0.32);
       --rule-source: #b1ada3;
       --rule-author: #cbc6b9;
       --brand-hot: #e85500;
@@ -65,14 +59,9 @@
       --text-unread-2: #c0c4ba;
       --text-unread-3: #9ba294;
       --text-read: #a3a99c;
-      --text-read-hover: #bdb9b0;
       --accent: #a5b595;
       --accent-soft: rgba(165,181,149,0.12);
-      --rail: #b3c596;
-      --rail-strong: #71845d;
       --scrollbar: #242f25;
-      --hot: #d8955f;
-      --hot-soft: rgba(216,149,95,0.13);
       --state-ok: #8dbca6;
       --state-ok-soft: rgba(141,188,166,0.22);
       --state-ok-softer: rgba(141,188,166,0.12);
@@ -85,7 +74,6 @@
       --cat-paper: #9fb68b;
       --cat-tips: #c39c94;
       --cat-default: #99a18f;
-      --shadow: 0 1px 3px rgba(0,0,0,0.34);
       --rule-source: #aeb7a3;
       --rule-author: #c2cab5;
       --brand-hot: #e85500;
@@ -109,14 +97,9 @@
       --text-unread-2: #bec4cc;
       --text-unread-3: #9aa3af;
       --text-read: #a2a9b2;
-      --text-read-hover: #aab2bb;
       --accent: #aab8c8;
       --accent-soft: rgba(170,184,200,0.12);
-      --rail: #b8c9dd;
-      --rail-strong: #73879e;
       --scrollbar: #282d36;
-      --hot: #ff8a45;
-      --hot-soft: rgba(255,138,69,0.13);
       --state-ok: #94b8a5;
       --state-ok-soft: rgba(148,184,165,0.22);
       --state-ok-softer: rgba(148,184,165,0.12);
@@ -129,7 +112,6 @@
       --cat-paper: #9abaa8;
       --cat-tips: #caa0a3;
       --cat-default: #9ca6b4;
-      --shadow: 0 2px 8px rgba(0,0,0,0.40);
       --rule-source: #abb5c1;
       --rule-author: #c7d0dc;
       --brand-hot: #e85500;
@@ -153,14 +135,9 @@
       --text-unread-2: #bdc9c4;
       --text-unread-3: #98a7a1;
       --text-read: #a0aba8;
-      --text-read-hover: #c9d1d9;
       --accent: #91b8b1;
       --accent-soft: rgba(145,184,177,0.12);
-      --rail: #9ac9bf;
-      --rail-strong: #5b8d88;
       --scrollbar: #203034;
-      --hot: #ff7a45;
-      --hot-soft: rgba(255,122,69,0.14);
       --state-ok: #8cb5a1;
       --state-ok-soft: rgba(140,181,161,0.22);
       --state-ok-softer: rgba(140,181,161,0.12);
@@ -173,7 +150,6 @@
       --cat-paper: #93b8a1;
       --cat-tips: #c49a94;
       --cat-default: #98aaaa;
-      --shadow: 0 8px 24px rgba(1,4,9,0.38);
       --rule-source: #a3babd;
       --rule-author: #bdccca;
       --brand-hot: #e85500;
@@ -431,6 +407,23 @@
 
     #pollNow .loading-ring {
       stroke-dasharray: 53.4 0;
+    }
+
+    /* The ring's open gap ends at 12 o'clock; the arrowhead sits on that leading end and
+       points clockwise, so it only reads as "refreshing" while the ring spins. */
+    #pollNow .refresh-arrow {
+      opacity: 0;
+      transition: opacity var(--motion-loading-finish) ease-out;
+    }
+
+    #pollNow.is-loading .refresh-arrow {
+      opacity: 1;
+    }
+
+    #pollNow.is-loading-finishing .refresh-arrow {
+      opacity: 0;
+      /* Fade out before the ring finishes closing past the arrow and the icon resets to 0°. */
+      transition-duration: calc(var(--motion-loading-finish) * 0.6);
     }
 
     #pollNow.is-loading .refresh-icon {
@@ -847,6 +840,23 @@
     .watch-rules-list.has-scroll-tail {
       -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);
       mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);
+    }
+
+    /* Mirror of the tail fade: shown once the list has scrolled away from its first rule. */
+    .watch-rules-list.has-scroll-head {
+      -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);
+      mask-image: linear-gradient(to top, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);
+    }
+
+    .watch-rules-list.has-scroll-head.has-scroll-tail {
+      -webkit-mask-image: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.35) 12px, #000 32px, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);
+      mask-image: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.35) 12px, #000 32px, #000 calc(100% - 32px), rgba(0, 0, 0, 0.35) calc(100% - 12px), transparent);
+    }
+
+    /* Keyboard focus must never sit inside a faded edge; drop the fades while navigating. */
+    .watch-rules-list:is(.has-scroll-head, .has-scroll-tail):has(:focus-visible) {
+      -webkit-mask-image: none;
+      mask-image: none;
     }
 
     .watch-rules-list::-webkit-scrollbar { width: 0; height: 0; }
@@ -1310,6 +1320,7 @@
   <script src="popup-log.js"></script>
   <script src="popup-boot.js"></script>
   <script src="feed-state.js"></script>
+  <script src="watch-rules.js"></script>
   <script src="popup-reliability.js"></script>
 </head>
   <body style="width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: var(--bg, #111110); color-scheme: var(--color-scheme, dark);">
@@ -1342,7 +1353,7 @@
         <svg viewBox="0 0 24 24"><path d="M5 20h14"/><path d="M12 4v12"/><path d="m7 11 5 5 5-5"/></svg>
       </button>
       <button class="btn-icon" id="pollNow" title="刷新" aria-label="刷新">
-        <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><circle class="loading-ring" cx="12" cy="12" r="8.5"/></svg>
+        <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><circle class="loading-ring" cx="12" cy="12" r="8.5"/><path class="refresh-arrow" d="M9.8 1.3 12.5 3.5 9.8 5.7"/></svg>
       </button>
       <button class="btn-icon" id="settingsBtn" title="设置" aria-label="设置" aria-controls="settingsPanel" aria-expanded="false">
         <svg viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="8" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="10" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg>

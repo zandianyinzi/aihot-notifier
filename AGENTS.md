@@ -13,7 +13,7 @@ Chrome 扩展（Manifest V3），通过 aihot.news API 获取 AI HOT 资讯并�
 ```bash
 # 打包为 zip（排除无关文件）
 ./pack.sh
-# Windows/PowerShell 无 bash 时使用 Compress-Archive，保持包内只含 manifest、JS、HTML、fonts/、icons/
+# Windows/PowerShell 无 bash 时使用 Compress-Archive，保持包内只含 manifest、JS、HTML、icons/
 
 # 单元测试（纯逻辑验证，不需要浏览器）
 node test.js
@@ -21,6 +21,7 @@ node test-notification.js
 node test-notification-reliability.js
 node test-popup-ui.js
 node test-feed-state.js
+node test-watch-rules.js
 node test-popup-reliability.js
 node test-popup-scroll.js
 node test-background.js
@@ -37,6 +38,7 @@ node screenshot.mjs
 - **background.js** — Service Worker。定时轮询 API、去重、存储 history、发通知、管理 badge 计数。核心函数：`pollForUpdates()`（定时触发）、`manualPoll()`（用户手动刷新）、`resetAndPoll()`（切换 feedMode 时拉取并合并 canonical history）、`updateBadge()`（badge 未读数）。
 - **popup.html + popup.js** — 弹窗 UI。读取 storage 渲染资讯列表，管理已读状态和设置面板。通知开关/轮询间隔变更通过 `chrome.runtime.sendMessage` 通知 background；外观类设置仅本地保存和重渲染。设置面板按 `常规 / 外观 / 特关 / 调试` 分组，打开设置时默认不展开任何分组。
 - **feed-state.js / popup-reliability.js** — 分别提供共享内容源投影，以及弹窗异步加载、回滚、特关会话置顶和滚动恢复控制器。
+- **watch-rules.js** — 后台与弹窗共享的特关规则归一化、匹配和添加合并逻辑；修改匹配语义只改这里，并运行 `node test-watch-rules.js`。
 - **manifest.json** — 权限：alarms、notifications、storage。host_permissions 仅为 `https://aihot.news/*`。
 
 ## 代码风格与命名约定

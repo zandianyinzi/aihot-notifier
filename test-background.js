@@ -319,6 +319,27 @@ async function runTests() {
   assert(bounded.history.length <= 2500 && bounded.history[0].id === 'bound-0', 'canonical history applies deterministic newest-first count cap');
   assert(bounded.history.every(item => item.title.length <= 500 && item.source.length <= 300 && item.summary.length <= 3000), 'canonical history caps persisted text fields');
   assert(!bounded.watchNotifyState.orphan && bounded.watchNotifyState['bound-0'], 'trimming removes orphan watch state while retaining survivor state');
+  {
+    // Contract: trimming keeps the latest 100 out-of-cache read keys, including keys of trimmed items.
+    const plainHistory = Array.from({ length: 2600 }, (_, index) => ({
+      id: `plain-${index}`, title: 't', time: new Date(Date.now() - index * 1000).toISOString(), discoveredAt: new Date(Date.now() - index * 1000).toISOString()
+    }));
+    const orphanReadIds = Array.from({ length: 150 }, (_, index) => `orphan-${index}`);
+    const trimmed = backgroundApi.boundCanonicalStorageState({
+      history: plainHistory,
+      readIds: ['plain-0', ...orphanReadIds, 'plain-2599']
+    });
+    assert(trimmed.history.length === 2500 && trimmed.readIds.includes('plain-0'), 'trimming keeps read keys of retained items');
+    assert(trimmed.readIds.includes('plain-2599'), 'a recently read trimmed item key survives as an out-of-cache key');
+    assert(!trimmed.readIds.includes('orphan-0') && trimmed.readIds.includes('orphan-149'), 'out-of-cache read keys stay capped at the latest 100');
+    assert(trimmed.readIds.length === 101, `trimmed readIds = retained + 100 latest out-of-cache keys: ${trimmed.readIds.length}`);
+    // Realistic order: the oldest (trimmed) item was read first, so it is the first key dropped.
+    const earlyRead = backgroundApi.boundCanonicalStorageState({
+      history: plainHistory,
+      readIds: ['plain-2599', ...orphanReadIds, 'plain-0']
+    });
+    assert(!earlyRead.readIds.includes('plain-2599') && earlyRead.readIds.includes('plain-0'), 'a trimmed item read early falls outside the latest 100 out-of-cache keys');
+  }
   assert(new TextEncoder().encode(JSON.stringify({ history: bounded.history, readIds: bounded.readIds, watchNotifyState: bounded.watchNotifyState, lastItems: bounded.lastItems })).length <= 6 * 1024 * 1024, 'canonical managed state stays within UTF-8 storage budget');
   let quotaAttempts = 0;
   storageSetImpl = values => {
@@ -1588,7 +1609,8 @@ async function runTests() {
   assert(await waitFor(() => canonicalPopupRaceCommitStarted), 'canonical poll 已进入延迟提交');
   const readRace = sendMessageWithTimeout({ type: 'markItemsRead', ids: ['race-read-key', 'https://example.com/race-read'] });
   const watchRace = sendMessageWithTimeout({ type: 'markWatchViewed', urls: ['race-watch'] });
-  const nextRaceRules = [{ id: 'new-rule', source: '新来源', author: '', keywords: ['模型'], enabled: true }];
+  // Still matches race-watch, so the retag keeps (and must not clobber) its viewed state.
+  const nextRaceRules = [{ id: 'new-rule', source: '旧来源', author: '', keywords: [], enabled: true }];
   const rulesRace = sendMessageWithTimeout({ type: 'saveWatchRules', watchRules: nextRaceRules });
   releaseCanonicalPopupRace();
   const [canonicalRaceResult, readRaceResult, watchRaceResult, rulesRaceResult] = await Promise.all([canonicalPopupRace, readRace, watchRace, rulesRace]);

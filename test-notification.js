@@ -329,21 +329,23 @@ async function runTests() {
   await autoPoll();
   assert(notificationsCreated.length === 0, '已查看的特关不重复通知');
   const repeat = storageData.history[1];
-  storageData.watchNotifyState[repeat.id] = { ...storageData.watchNotifyState[repeat.id], nextNotifyAt: new Date(Date.now() - 60 * 1000).toISOString(), notifyCount: 1, viewedAt: '' };
+  storageData.watchNotifyState[repeat.id] = { ...storageData.watchNotifyState[repeat.id], nextNotifyAt: new Date(Date.now() - 60 * 1000).toISOString(), notifyCount: 0, viewedAt: '' };
   notificationsCreated = [];
   await autoPoll();
-  assert(notificationsCreated[0]?.title.startsWith('特关：'), `重复提醒标题不含提醒二字: ${notificationsCreated[0]?.title}`);
-  assert(!notificationsCreated[0]?.title.includes('提醒：'), `重复提醒标题删除提醒二字: ${notificationsCreated[0]?.title}`);
+  assert(notificationsCreated[0]?.title.startsWith('特关：'), `待发特关提醒标题不含提醒二字: ${notificationsCreated[0]?.title}`);
+  assert(!notificationsCreated[0]?.title.includes('提醒：'), `待发特关提醒标题删除提醒二字: ${notificationsCreated[0]?.title}`);
+  assert(storageData.watchNotifyState[repeat.id]?.notifyCount === 1 && storageData.watchNotifyState[repeat.id]?.nextNotifyAt === '', '首次提醒后不再安排后续提醒');
   const stopped = storageData.history[2];
-  storageData.watchNotifyState[stopped.id] = { ...storageData.watchNotifyState[stopped.id], nextNotifyAt: '', notifyCount: 3, viewedAt: '' };
+  // Legacy 8h schedule: notified once, nextNotifyAt already due.
+  storageData.watchNotifyState[stopped.id] = { ...storageData.watchNotifyState[stopped.id], nextNotifyAt: new Date(Date.now() - 60 * 1000).toISOString(), notifyCount: 1, viewedAt: '' };
   notificationsCreated = [];
   await autoPoll();
-  assert(notificationsCreated.length === 0, '特关第三次提醒后停止重复提醒');
+  assert(notificationsCreated.length === 0, '旧版 8h/24h 计划残留的提醒不再发送');
   storageData.watchRules = [{ id: 'wr_x', source: 'X', author: '', keywords: [], enabled: false }];
-  storageData.watchNotifyState[repeat.id] = { ...storageData.watchNotifyState[repeat.id], nextNotifyAt: new Date(Date.now() - 60 * 1000).toISOString(), notifyCount: 1, viewedAt: '' };
+  storageData.watchNotifyState[repeat.id] = { ...storageData.watchNotifyState[repeat.id], nextNotifyAt: new Date(Date.now() - 60 * 1000).toISOString(), notifyCount: 0, viewedAt: '' };
   notificationsCreated = [];
   await autoPoll();
-  assert(notificationsCreated.length === 0, '停用规则后不再重复提醒');
+  assert(notificationsCreated.length === 0, '停用规则后不再提醒');
 
   console.log('\n[标准 upsert 通知分类与隐藏提醒]');
   const retainedUrl = 'https://example.com/retained-new-match';

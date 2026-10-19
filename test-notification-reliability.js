@@ -36,8 +36,9 @@ function entry(id, extra = {}) {
     time: ago(9), discoveredAt: ago(9), watchMatched: true, watchRuleIds: ['watch-x'], ...extra };
 }
 function dueState() {
-  return { ruleIds: ['watch-x'], firstMatchedAt: ago(9), notifyCount: 1,
-    lastNotifiedAt: ago(9), nextNotifyAt: ago(1), viewedAt: '' };
+  // A matched item whose single notice is still pending (e.g. after a manual refresh).
+  return { ruleIds: ['watch-x'], firstMatchedAt: ago(9), notifyCount: 0,
+    lastNotifiedAt: '', nextNotifyAt: ago(9), viewedAt: '' };
 }
 function response(items = [], extra = {}) {
   return { ok: true, status: 200, headers: { get: name => name.toLowerCase() === 'etag' ? 'W/"head"' : '' },
@@ -161,11 +162,20 @@ test('a delayed unread badge write cannot overwrite a committed read', { timeout
   assert.equal(f.control.badge, '');
 });
 
-test('a successful 200 poll still delivers an overdue watch reminder', { timeout: 3000 }, async () => {
+test('a successful 200 poll still delivers a pending watch notice', { timeout: 3000 }, async () => {
   const f = fixture({ state: { history: [entry('old')], watchRules: [rule], watchNotifyState: { old: dueState() } } });
   await f.poll();
   assert.deepEqual(f.notifications.map(item => item.message), ['old']);
-  assert.equal(f.data.watchNotifyState.old.notifyCount, 2);
+  assert.equal(f.data.watchNotifyState.old.notifyCount, 1);
+  assert.equal(f.data.watchNotifyState.old.nextNotifyAt, '');
+});
+
+test('legacy 8h/24h reminder schedules are not delivered', { timeout: 3000 }, async () => {
+  const legacy = { ...dueState(), notifyCount: 1, lastNotifiedAt: ago(9), nextNotifyAt: ago(1) };
+  const f = fixture({ state: { history: [entry('old')], watchRules: [rule], watchNotifyState: { old: legacy } } });
+  await f.poll();
+  assert.equal(f.notifications.length, 0);
+  assert.equal(f.data.watchNotifyState.old.notifyCount, 1);
 });
 
 test('new watch notices and old reminders share a three-notice cycle budget', { timeout: 3000 }, async () => {
@@ -494,4 +504,51 @@ test('persistent watch progress storage failure has bounded retries without an A
   assert.notEqual(f.data.lastItemsPollAt, before);
   assert.ok(Object.values(f.data.apiFingerprintEtags || {}).includes('W/"head"'));
   assert.equal(progressAttempts, 2);
+});
+
+
+test('saving rules retags cached items silently and drops tags of unmatched items', { timeout: 3000 }, async () => {
+  const f = fixture({ state: {
+    history: [entry('was-watch'), entry('plain', { source: '公众号：卡兹克', watchMatched: undefined, watchRuleIds: undefined })],
+    watchRules: [rule], watchNotifyState: { 'was-watch': dueState() }
+  } });
+  const result = await f.send({ type: 'saveWatchRules', watchRules: [{ id: 'gzh', source: '公众号', author: '', keywords: [], enabled: true }] });
+  assert.equal(result.ok, true);
+  const byId = Object.fromEntries(f.data.history.map(item => [item.id, item]));
+  assert.equal(byId.plain.watchMatched, true);
+  assert.deepEqual(byId.plain.watchRuleIds, ['gzh']);
+  assert.equal(byId['was-watch'].watchMatched, undefined);
+  assert.equal(f.data.watchNotifyState['was-watch'], undefined);
+  assert.equal(f.data.retainUnmatchedWatchState, undefined);
+  await f.poll();
+  assert.equal(f.notifications.filter(item => item.title.startsWith('特关')).length, 0);
+});
+
+test('items first matched outside the display window never notify after widening historyDays', { timeout: 3000 }, async () => {
+  const f = fixture({ items: [apiItem('old-pub', { publishedAt: ago(30) })], state: { watchRules: [rule], historyDays: 1 } });
+  await f.poll();
+  assert.equal(f.notifications.length, 0);
+  assert.ok(f.data.watchNotifyState['old-pub'].suppressedAt);
+  f.data.historyDays = 7;
+  await f.poll();
+  assert.equal(f.notifications.filter(item => item.title.startsWith('特关')).length, 0);
+});
+
+test('clicking a watch notification marks the item read as well as viewed', { timeout: 3000 }, async () => {
+  const f = clickedFixture();
+  await f.click('aihot-watch-click');
+  assert.equal(f.tabs.length, 1);
+  assert.ok(f.data.watchNotifyState.watched.viewedAt);
+  assert.ok(f.data.readIds.includes('watched'));
+});
+
+
+test('saving rules without tag changes writes only watchRules', { timeout: 3000 }, async () => {
+  const f = fixture({ state: { history: [entry('stay')], watchRules: [rule], watchNotifyState: { stay: dueState() } } });
+  f.writes.length = 0;
+  await f.send({ type: 'saveWatchRules', watchRules: [rule, { id: 'extra', source: '公众号', author: '', keywords: [], enabled: false }] });
+  const ruleWrites = f.writes.filter(values => 'watchRules' in values);
+  assert.equal(ruleWrites.length, 1);
+  assert.deepEqual(Object.keys(ruleWrites[0]), ['watchRules']);
+  assert.equal(f.data.retainUnmatchedWatchState, undefined);
 });

@@ -49,6 +49,7 @@ function createPopup(savedStorage = new Map()) {
     list.lastScrollBehavior = behavior;
   };
   let items = [];
+  const activeElement = { current: null };
   Object.defineProperty(list, 'innerHTML', {
     set(html) {
       items = [...html.matchAll(/class="(item [^"]*)" data-key="([^"]*)" data-url="([^"]*)"(?: data-watch-pinned="([^"]*)")?/g)]
@@ -64,7 +65,8 @@ function createPopup(savedStorage = new Map()) {
           getBoundingClientRect: () => ({
             top: index * 100 - list.scrollTop,
             bottom: (index + 1) * 100 - list.scrollTop
-          })
+          }),
+          focus(options) { activeElement.current = this; this.lastFocusOptions = options; }
         }));
       list.scrollHeight = items.length * 100;
     }
@@ -88,6 +90,7 @@ function createPopup(savedStorage = new Map()) {
   };
   let booting = true;
   const timers = new Map();
+  const frames = [];
   let timerId = 0;
   const chrome = {
     runtime: {
@@ -110,7 +113,8 @@ function createPopup(savedStorage = new Map()) {
     console, URL, chrome, performance,
     window: {
       PopupReliability: require('./popup-reliability.js'),
-      FeedState: require('./feed-state.js')
+      FeedState: require('./feed-state.js'),
+      WatchRules: require('./watch-rules.js')
     },
     document: { getElementById: getElement, documentElement: createElement() },
     localStorage: {
@@ -120,7 +124,7 @@ function createPopup(savedStorage = new Map()) {
     },
     ResizeObserver: class { observe() {} },
     PerformanceObserver: class { observe() {} },
-    requestAnimationFrame() {},
+    requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
     setTimeout: callback => { timers.set(++timerId, callback); return timerId; },
     clearTimeout: id => timers.delete(id)
   });
@@ -129,6 +133,10 @@ function createPopup(savedStorage = new Map()) {
   sandbox.renderHistory(data);
   return {
     sandbox, data, list, chrome, savedStorage, getElement,
+    activeElement: () => activeElement.current,
+    frameCount: () => frames.length,
+    flushFrames: () => frames.splice(0).forEach(callback => callback()),
+    scroll: () => { list.dispatch('scroll'); frames.splice(0).forEach(callback => callback()); },
     save: () => sandbox.writeScrollPosition(data),
     refresh: () => getElement('pollNow').dispatch('click'),
     position: () => JSON.parse(savedStorage.get(scrollKey) || 'null'),
@@ -199,7 +207,7 @@ test('refresh keeps non-default font and size in the warm popup cache', async ()
 test('refresh saves immediately even while the scroll debounce and request are pending', async () => {
   const popup = createPopup();
   popup.list.scrollTop = 125;
-  popup.list.dispatch('scroll');
+  popup.scroll();
   let finish;
   popup.chrome.runtime.sendMessage = () => new Promise(resolve => { finish = resolve; });
   const refresh = popup.refresh();
@@ -219,7 +227,7 @@ test('refresh persists the latest reading position after inserted items shift th
   const refresh = popup.refresh();
   // The reader continues scrolling during the request. Commit must use this position.
   popup.list.scrollTop = 325;
-  popup.list.dispatch('scroll');
+  popup.scroll();
   popup.data.history.unshift({
     id: 'new-item', url: 'https://example.com/new', title: 'New item', time: new Date().toISOString()
   });
@@ -295,6 +303,18 @@ test('unread jump uses instant scrolling', () => {
   assert.equal(popup.list.lastScrollBehavior, 'auto');
 });
 
+test('unread jump moves keyboard focus to the target item without re-scrolling', () => {
+  const popup = createPopup();
+  popup.data.readIds = ['item-0', 'item-2', 'item-3', 'item-4', 'item-5', 'item-6', 'item-7', 'item-8', 'item-9'];
+  popup.sandbox.renderHistory(popup.data);
+  popup.list.scrollTop = 500;
+  popup.sandbox.jumpToUnread();
+  const target = popup.activeElement();
+  assert.equal(target?.dataset.key, 'item-1');
+  assert.equal(target.lastFocusOptions?.preventScroll, true);
+  assert.equal(popup.getElement('jumpToUnread').classList.contains('visible'), false);
+});
+
 test('unread navigator hides while any unread is visible', () => {
   const popup = createPopup();
   popup.data.readIds = ['item-0', 'item-2', 'item-3', 'item-5', 'item-6', 'item-7', 'item-8', 'item-9'];
@@ -303,10 +323,10 @@ test('unread navigator hides while any unread is visible', () => {
   assert.equal(button.classList.contains('visible'), false);
 
   popup.list.scrollTop = 200;
-  popup.list.dispatch('scroll');
+  popup.scroll();
   assert.equal(button.classList.contains('visible'), true);
   popup.list.scrollTop = 300;
-  popup.list.dispatch('scroll');
+  popup.scroll();
   assert.equal(button.classList.contains('visible'), false);
 });
 
@@ -316,12 +336,12 @@ test('unread jump advances from the current position and wraps', () => {
   popup.sandbox.renderHistory(popup.data);
 
   popup.list.scrollTop = 200;
-  popup.list.dispatch('scroll');
+  popup.scroll();
   assert.equal(popup.sandbox.jumpToUnread(), 'item-4');
   assert.equal(popup.list.scrollTop, 394);
 
   popup.list.scrollTop = 900;
-  popup.list.dispatch('scroll');
+  popup.scroll();
   assert.equal(popup.sandbox.jumpToUnread(), 'item-1');
   assert.equal(popup.list.scrollTop, 94);
 });
@@ -350,4 +370,35 @@ test('refreshing after a watch item is read does not follow its old session pin 
   const reopened = createPopup(popup.savedStorage);
   reopened.sandbox.renderHistory(popup.data, { applyInitialPosition: true });
   assert.equal(reopened.list.scrollTop, 25);
+});
+
+test('a burst of scroll events is handled once per animation frame', () => {
+  const popup = createPopup();
+  popup.data.readIds = ['item-0', 'item-2', 'item-3', 'item-5', 'item-6', 'item-7', 'item-8', 'item-9'];
+  popup.sandbox.renderHistory(popup.data);
+  popup.flushFrames();
+  const button = popup.getElement('jumpToUnread');
+  popup.list.scrollTop = 200;
+  for (let index = 0; index < 5; index++) popup.list.dispatch('scroll');
+  assert.equal(popup.frameCount(), 1);
+  assert.equal(button.classList.contains('visible'), false);
+  popup.flushFrames();
+  assert.equal(button.classList.contains('visible'), true);
+});
+
+
+test('watch rule list toggles symmetric head and tail fades with its scroll position', () => {
+  const popup = createPopup();
+  const list = popup.getElement('watchRulesList');
+  Object.assign(list, { scrollHeight: 600, clientHeight: 168 });
+  const fades = () => [list.classList.contains('has-scroll-head'), list.classList.contains('has-scroll-tail')];
+  list.scrollTop = 0;
+  list.dispatch('scroll');
+  assert.deepEqual(fades(), [false, true]);
+  list.scrollTop = 200;
+  list.dispatch('scroll');
+  assert.deepEqual(fades(), [true, true]);
+  list.scrollTop = 432;
+  list.dispatch('scroll');
+  assert.deepEqual(fades(), [true, false]);
 });

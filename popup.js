@@ -37,6 +37,7 @@ const addWatchRuleBtn = document.getElementById('addWatchRule');
 const popupStatusEl = document.getElementById('popupStatus');
 const popupReliability = window.PopupReliability;
 const { normalizeFeedMode, normalizeHistoryDays, projectHistory } = window.FeedState;
+const { splitWatchKeywords, normalizeWatchRuleList, mergeWatchRuleInput, removeWatchRuleKeyword } = window.WatchRules;
 const { getSafeHttpsUrl, openHttpsUrl, runOpenItemMutation, removeOptimisticReadAliases, createConfigMutationController, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, hasActiveWatchRuleMatch, moveWatchRule, captureWatchRuleActionFocus, restoreWatchRuleActionFocus, sortWatchItemsByRulePriority, buildHistoryRenderSignature, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
 const sessionWatchPinTracker = createSessionWatchPinTracker();
 
@@ -70,6 +71,8 @@ const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
 
 let cachedReadIds = new Set();
 let unreadJumpTimer = 0;
+let historyScrollFrameScheduled = false;
+let pendingHistoryScrollTrusted = false;
 let lastRenderSignature = '';
 let scrollSaveTimer = 0;
 let scrollPersistenceSuppressed = false;
@@ -315,26 +318,7 @@ function formatDateTime(isoStr) {
 }
 
 
-function splitWatchKeywords(value) {
-  if (Array.isArray(value)) return value.flatMap(v => splitWatchKeywords(v)).filter(Boolean);
-  return String(value || '').split(/[,，]/).map(v => v.trim()).filter(Boolean);
-}
-
-function normalizeText(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function normalizeWatchRules(rules) {
-  if (!Array.isArray(rules)) return [];
-  return rules.map((rule, index) => ({
-    id: String(rule.id || `wr_${index}`),
-    source: String(rule.source || '').trim(),
-    author: String(rule.author || '').trim(),
-    keywords: splitWatchKeywords(rule.keywords),
-    enabled: rule.enabled !== false,
-    createdAt: rule.createdAt || ''
-  }));
-}
+const normalizeWatchRules = normalizeWatchRuleList;
 
 function getWatchRuleLabel(rule) {
   const sourceText = rule.source ? `来源：${rule.source}` : '来源不限';
@@ -343,43 +327,11 @@ function getWatchRuleLabel(rule) {
   return [sourceText, authorText, keywordText].join('；');
 }
 
-function mergeWatchRuleInput(rules, input) {
-  const normalized = normalizeWatchRules(rules);
-  const source = String(input.source || '').trim();
-  const author = String(input.author || '').trim();
-  const keywords = splitWatchKeywords(input.keywords);
-  if (!source && !author && keywords.length === 0) return normalized;
-  const sameRule = normalized.find(rule => normalizeText(rule.source) === normalizeText(source) && normalizeText(rule.author) === normalizeText(author));
-  if (!sameRule) {
-    return [
-      ...normalized,
-      {
-        id: `wr_${Date.now()}`,
-        source,
-        author,
-        keywords,
-        enabled: true,
-        createdAt: new Date().toISOString()
-      }
-    ];
-  }
-  const mergedKeywords = [...sameRule.keywords];
-  for (const keyword of keywords) {
-    if (!mergedKeywords.some(existing => normalizeText(existing) === normalizeText(keyword))) mergedKeywords.push(keyword);
-  }
-  return normalized.map(rule => rule.id === sameRule.id ? { ...rule, keywords: mergedKeywords } : rule);
-}
-
-function removeWatchRuleKeyword(rules, ruleId, keywordIndex) {
-  return normalizeWatchRules(rules)
-    .map(rule => rule.id === ruleId ? { ...rule, keywords: rule.keywords.filter((_, index) => index !== keywordIndex) } : rule)
-    .filter(rule => rule.source || rule.author || rule.keywords.length > 0);
-}
-
 function updateWatchRulesScrollHint() {
   if (!watchRulesList) return;
   const hasScrollTail = watchRulesList.scrollHeight - watchRulesList.scrollTop - watchRulesList.clientHeight > 1;
   watchRulesList.classList.toggle('has-scroll-tail', hasScrollTail);
+  watchRulesList.classList.toggle('has-scroll-head', watchRulesList.scrollTop > 1);
 }
 
 function updateSettingsScrollHint() {
@@ -480,12 +432,14 @@ function renderItemHtml(item, isUnread, options = {}) {
   const title = escapeHtml(item.title);
   const source = escapeHtml(item.source || '');
   const tagHtml = cat.label ? `<span class="cat-tag ${cat.cls}">${cat.label}</span>` : '';
-  const watchTagHtml = item.watchMatched ? '<span class="watch-badge">特关</span>' : '';
+  // Tag only items still matched by an enabled rule, consistent with pinning.
+  const isWatch = options.isWatch === undefined ? item.watchMatched === true : options.isWatch === true;
+  const watchTagHtml = isWatch ? '<span class="watch-badge">特关</span>' : '';
   const summary = escapeHtml(item.summary || '');
   const summaryHtml = summary ? `<div class="item-summary">${summary}</div>` : '';
   const stateKey = getItemStateKey(item);
   const openUrl = getItemOpenUrl(item);
-  return `<div class="item ${isUnread ? 'unread' : 'read'} ${item.watchMatched ? 'watch-item' : ''}" data-key="${escapeHtml(stateKey)}" data-url="${escapeHtml(openUrl)}"${options.watchPinned ? ' data-watch-pinned="true"' : ''} role="link" tabindex="0">
+  return `<div class="item ${isUnread ? 'unread' : 'read'} ${isWatch ? 'watch-item' : ''}" data-key="${escapeHtml(stateKey)}" data-url="${escapeHtml(openUrl)}"${options.watchPinned ? ' data-watch-pinned="true"' : ''} role="link" tabindex="0">
     <div class="item-body">
       <div class="item-title">${options.prefix || ''}${title}</div>
       ${summaryHtml}
@@ -498,22 +452,6 @@ function renderItemHtml(item, isUnread, options = {}) {
       </div>
     </div>
   </div>`;
-}
-
-async function markWatchUrlsViewed(urls) {
-  const list = Array.isArray(urls) ? urls.filter(Boolean) : [urls].filter(Boolean);
-  if (list.length === 0) return;
-  try {
-    const response = await chrome.runtime.sendMessage({ type: 'markWatchViewed', urls: list });
-    if (!response?.ok) throw new Error(response?.error || 'Failed to mark watch items viewed');
-  } catch (_e) {
-    showPopupStatus('特关状态更新失败，请重试。');
-  }
-}
-
-async function markWatchItemsViewed(items) {
-  const keys = (items || []).flatMap(item => getItemAliases(item)).filter(Boolean);
-  await markWatchUrlsViewed([...new Set(keys)]);
 }
 
 function getCategory(category) {
@@ -897,12 +835,12 @@ function renderHistory(data, options = {}) {
 
   let html = '';
   pinnedWatch.forEach(item => {
-    html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime), { watchPinned: true });
+    html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime), { watchPinned: true, isWatch: true });
   });
 
   displayHistory.filter(item => !pinnedKeys.has(getItemStateKey(item))).forEach(item => {
     const isUnread = !isReadFast(item, cachedReadIds, readAllBeforeTime);
-    html += renderItemHtml(item, isUnread);
+    html += renderItemHtml(item, isUnread, { isWatch: hasActiveWatchRuleMatch(item, watchRules) });
   });
 
   historyList.innerHTML = html;
@@ -983,6 +921,9 @@ function jumpToUnread() {
   refreshUnreadNavigatorFromDom();
   historyList.querySelectorAll('.item.is-jump-target').forEach(item => item.classList.remove('is-jump-target'));
   next.classList.add('is-jump-target');
+  // The navigator hides itself once an unread item is visible; move focus to the target
+  // so keyboard and screen-reader users keep a reading position.
+  if (typeof next.focus === 'function') next.focus({ preventScroll: true });
   if (unreadJumpTimer) clearTimeout(unreadJumpTimer);
   unreadJumpTimer = setTimeout(() => {
     next.classList.remove('is-jump-target');
@@ -1322,11 +1263,18 @@ if (settingsInnerEl) {
 }
 
 document.getElementById('copyLogs').addEventListener('click', function() {
+  const button = this;
   const log = window.__popupPerf && window.__popupPerf.snapshot ? window.__popupPerf.snapshot().join('\n') : '';
-  navigator.clipboard.writeText(log).then(() => {
-    this.textContent = '成功';
-    setTimeout(() => { this.textContent = '拷贝'; }, 1500);
-  });
+  const showLabel = label => {
+    button.textContent = label;
+    setTimeout(() => { button.textContent = '拷贝'; }, 1500);
+  };
+  Promise.resolve()
+    .then(() => navigator.clipboard.writeText(log))
+    .then(() => showLabel('成功'), () => {
+      showLabel('失败');
+      showPopupStatus('拷贝日志失败，请重试。');
+    });
 });
 
 
@@ -1339,8 +1287,21 @@ if (addWatchRuleBtn) {
     try {
       await enqueuePopupMutation(async () => {
         const { watchRules = [] } = await chrome.storage.local.get('watchRules');
-        const nextRules = mergeWatchRuleInput(watchRules, { source, author, keywords });
-        await saveWatchRules(nextRules, { scrollToEnd: true });
+        const { rules: nextRules, outcome, ruleId } = mergeWatchRuleInput(watchRules, { source, author, keywords });
+        if (outcome === 'covered' || outcome === 'duplicate') {
+          // Nothing to save: an enabled rule with the same source and author already covers this input.
+          showPopupStatus(outcome === 'covered'
+            ? '已有相同来源和作者、且不限关键词的规则，已覆盖这些关键词。'
+            : '已有相同的特关规则。');
+          return;
+        }
+        // Highlight the rule that absorbed the input (re-enabled or merged) instead of a
+        // status message, which the storage-triggered reload would clear immediately.
+        await saveWatchRules(nextRules, {
+          scrollToEnd: outcome === 'added',
+          movedRuleId: outcome === 'added' ? undefined : ruleId
+        });
+        if (outcome !== 'added') watchRulesList?.querySelector(`[data-rule-id="${CSS.escape(ruleId)}"]`)?.scrollIntoView?.({ block: 'nearest' });
         watchKeywordsEl.value = '';
       });
     } catch (_e) {
@@ -1441,9 +1402,20 @@ historyDaysEl.addEventListener('change', () => {
 });
 
 historyList.addEventListener('scroll', event => {
+  // Coalesce bursts of scroll events into one layout read per frame.
+  pendingHistoryScrollTrusted = pendingHistoryScrollTrusted || event?.isTrusted === true;
+  if (historyScrollFrameScheduled) return;
+  historyScrollFrameScheduled = true;
+  requestAnimationFrame(handleHistoryScrollFrame);
+}, { passive: true });
+
+function handleHistoryScrollFrame() {
+  historyScrollFrameScheduled = false;
+  const trusted = pendingHistoryScrollTrusted;
+  pendingHistoryScrollTrusted = false;
   logPerf('scroll-event', {
     scrollTop: Math.round(historyList.scrollTop * 10) / 10,
-    trusted: event?.isTrusted === true,
+    trusted,
     mode: normalizeOpenPositionMode(openPositionModeEl.value)
   });
   refreshUnreadNavigatorFromDom();
@@ -1453,7 +1425,7 @@ historyList.addEventListener('scroll', event => {
     historyDays: Number(historyDaysEl.value)
   };
   scheduleScrollPositionWrite(data);
-}, { passive: true });
+}
 
 scrollToTopBtn.addEventListener('click', () => scrollHistoryTo(0));
 scrollToBottomBtn.addEventListener('click', () => scrollHistoryTo(historyList.scrollHeight));

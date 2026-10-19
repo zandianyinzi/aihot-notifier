@@ -1030,6 +1030,17 @@ function testHistoryRenderSignatureIncludesWatchRuleMembership() {
   assert.notStrictEqual(lowOnly, highAndLow, 'changing matched watch-rule membership invalidates the cached render');
   assert.strictEqual(highAndLow, sameMembershipDifferentOrder, 'watch-rule membership order does not cause a redundant render');
   assert.notStrictEqual(legacyWithoutRuleIds, explicitNoMatches, 'legacy fallback and an explicit empty match set produce different renders');
+
+  const longSummary = '摘'.repeat(3000);
+  const withSummary = buildHistoryRenderSignature([{ ...item, summary: longSummary }], ...args);
+  const editedSummary = buildHistoryRenderSignature([{ ...item, summary: `${longSummary}改` }], ...args);
+  const editedTitle = buildHistoryRenderSignature([{ ...item, title: 'AI news!' }], ...args);
+  const movedField = buildHistoryRenderSignature([{ ...item, title: 'AI', source: ' news' }], ...args);
+  assert.ok(!withSummary.includes(longSummary.slice(0, 50)), 'signature does not embed full summary text');
+  assert.ok(withSummary.length < 400, `signature stays small for long summaries: ${withSummary.length}`);
+  assert.notStrictEqual(withSummary, editedSummary, 'summary edits still invalidate the cached render');
+  assert.notStrictEqual(lowOnly, editedTitle, 'title edits still invalidate the cached render');
+  assert.notStrictEqual(lowOnly, movedField, 'text moved between fields invalidates the cached render');
 }
 
 async function testMarkAllReadMutationSeparatesCommitAndReloadFailure() {

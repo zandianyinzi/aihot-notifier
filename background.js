@@ -2,6 +2,10 @@ const feedState = typeof importScripts === 'function'
   ? (importScripts('feed-state.js'), globalThis.FeedState)
   : require('./feed-state.js');
 const { normalizeFeedMode, normalizeHistoryDays, projectHistory } = feedState;
+const watchRulesApi = typeof importScripts === 'function'
+  ? (importScripts('watch-rules.js'), globalThis.WatchRules)
+  : require('./watch-rules.js');
+const { normalizeWatchRuleList, getEnabledWatchRules, matchWatchRules, getWatchAuthorLabel } = watchRulesApi;
 
 const API_BASE = 'https://aihot.news/api/v1/items';
 const API_WINDOW = '7d';
@@ -28,7 +32,8 @@ const RETRY_AFTER_FALLBACK_MS = 45 * 1000;
 const TEMPORARY_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const MAX_FAILURE_BACKOFF_MS = 60 * 60 * 1000;
 const ITEMS_SAFETY_POLL_MS = 6 * 60 * 60 * 1000;
-const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
+// Watch items notify once, as soon as they are first matched. Later reminders were removed.
+const WATCH_REMINDER_DELAYS = [0];
 const CANONICAL_HISTORY_VERSION = 1;
 const API_NORMALIZATION_VERSION = 1;
 const HISTORY_RETENTION_VERSION = 1;
@@ -150,14 +155,14 @@ function retainReadIdsForHistory(readIds, history, keepUnmatched = true) {
 }
 
 function boundCanonicalStorageState(state = {}) {
-  const originalHistoryLength = Array.isArray(state.history) ? state.history.length : 0;
   let history = (state.history || [])
     .map(item => truncatePersistedValue(item))
     .sort((a, b) => getItemTime(b) - getItemTime(a))
     .slice(0, MAX_HISTORY_ENTRIES);
   const buildState = () => {
-    const pruneOrphanReadIds = originalHistoryLength > history.length;
-    const readIds = retainReadIdsForHistory(state.readIds, history, !pruneOrphanReadIds);
+    // Trimmed items fall into the bounded out-of-cache set (latest 100 keys by first-read
+    // order), matching the documented contract. 100 short keys are negligible in the budget.
+    const readIds = retainReadIdsForHistory(state.readIds, history);
     const retainedAliases = new Set(history.flatMap(item => getItemAliases(item)));
     const watchNotifyState = state.retainUnmatchedWatchState
       ? { ...(state.watchNotifyState || {}) }
@@ -190,9 +195,11 @@ function isQuotaStorageError(error) {
 }
 
 async function persistCanonicalState(updates = {}) {
+  // retainUnmatchedWatchState is a bounding hint only; never persist it as a storage key.
+  const { retainUnmatchedWatchState: _retainHint, ...storedUpdates } = updates;
   const bounded = boundCanonicalStorageState(updates);
   const payload = {
-    ...updates,
+    ...storedUpdates,
     history: bounded.history,
     readIds: bounded.readIds,
     watchNotifyState: bounded.watchNotifyState,
@@ -206,10 +213,11 @@ async function persistCanonicalState(updates = {}) {
     if (!isQuotaStorageError(error) || bounded.history.length <= 1) throw error;
     const retryState = boundCanonicalStorageState({
       ...bounded,
+      retainUnmatchedWatchState: updates.retainUnmatchedWatchState === true,
       history: bounded.history.slice(0, Math.max(1, Math.floor(bounded.history.length / 2)))
     });
     const retryPayload = {
-      ...updates,
+      ...storedUpdates,
       history: retryState.history,
       readIds: retryState.readIds,
       watchNotifyState: retryState.watchNotifyState,
@@ -555,75 +563,8 @@ function isCompleteSelectedSnapshot(items, mode, supportsConsistentSnapshot = SU
     items?.truncated !== true;
 }
 
-function splitWatchKeywords(value) {
-  if (Array.isArray(value)) {
-    return value
-      .flatMap(v => splitWatchKeywords(v))
-      .filter(Boolean);
-  }
-  return String(value || '')
-    .split(/[,，]/)
-    .map(v => v.trim())
-    .filter(Boolean);
-}
-
-function normalizeText(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function normalizeWatchRules(rules) {
-  if (!Array.isArray(rules)) return [];
-  return rules
-    .map((rule, index) => {
-      const source = String(rule.source || '').trim();
-      const author = String(rule.author || '').trim();
-      const keywords = splitWatchKeywords(rule.keywords);
-      return {
-        id: String(rule.id || `wr_${index}`),
-        source,
-        author,
-        keywords,
-        enabled: rule.enabled !== false,
-        createdAt: rule.createdAt || ''
-      };
-    })
-    .filter(rule => rule.enabled && (rule.source || rule.author || rule.keywords.length > 0));
-}
-
-function parseSourceParts(source) {
-  const text = String(source || '').trim();
-  const parts = text.split(/[:：]/);
-  if (parts.length < 2) return { sourceType: text, authorText: text };
-  return {
-    sourceType: parts[0].trim(),
-    authorText: parts.slice(1).join('：').trim()
-  };
-}
-
-function includesText(haystack, needle) {
-  const normalizedNeedle = normalizeText(needle);
-  if (!normalizedNeedle) return true;
-  return normalizeText(haystack).includes(normalizedNeedle);
-}
-
-function matchWatchRules(item, rules) {
-  const normalizedRules = normalizeWatchRules(rules);
-  if (normalizedRules.length === 0) return [];
-
-  const source = item.source || '';
-  const parts = parseSourceParts(source);
-  const keywordText = `${item.title || ''}\n${item.summary || ''}`;
-
-  return normalizedRules.filter(rule => {
-    if (rule.source && !includesText(parts.sourceType, rule.source)) return false;
-    if (rule.author && !includesText(parts.authorText || source, rule.author)) return false;
-    if (rule.keywords.length > 0 && !rule.keywords.some(keyword => includesText(keywordText, keyword))) return false;
-    return true;
-  });
-}
-
 function getActiveWatchMatchIds(historyItem, watchRules) {
-  const normalizedRules = normalizeWatchRules(watchRules);
+  const normalizedRules = getEnabledWatchRules(watchRules);
   if (!historyItem || !historyItem.watchMatched || !Array.isArray(historyItem.watchRuleIds) || historyItem.watchRuleIds.length === 0) {
     return [];
   }
@@ -660,6 +601,10 @@ function buildWatchStateForItem(existingState, item, ruleIds, now) {
 
 function shouldNotifyWatchState(state, nowMs) {
   if (!state || isWatchViewed(state)) return false;
+  // Items first matched outside the display window are tagged silently.
+  if (state.suppressedAt) return false;
+  // Stored states from the old 8h/24h schedule may still carry a future nextNotifyAt.
+  if (Number(state.notifyCount || 0) >= WATCH_REMINDER_DELAYS.length) return false;
   const nextNotifyAt = Object.prototype.hasOwnProperty.call(state, 'nextNotifyAt') ? state.nextNotifyAt : state.firstMatchedAt;
   const next = new Date(nextNotifyAt || 0).getTime();
   return next > 0 && next <= nowMs;
@@ -676,8 +621,7 @@ function advanceWatchNotifyState(state, now) {
 }
 
 function getWatchNotificationTitle(item) {
-  const ruleLabel = parseSourceParts(item.source || '').authorText || item.source || '特关';
-  return `特关：${ruleLabel}`;
+  return `特关：${getWatchAuthorLabel(item.source) || '特关'}`;
 }
 
 async function rememberNotificationUrl(id, url) {
@@ -886,22 +830,41 @@ async function openItem(urlValue, ids) {
   }
 }
 
-function normalizeStoredWatchRules(rules) {
-  if (!Array.isArray(rules)) return [];
-  return rules.map((rule, index) => ({
-    id: String(rule?.id || `wr_${index}`),
-    source: String(rule?.source || '').trim(),
-    author: String(rule?.author || '').trim(),
-    keywords: splitWatchKeywords(rule?.keywords),
-    enabled: rule?.enabled !== false,
-    createdAt: rule?.createdAt || ''
-  })).filter(rule => rule.source || rule.author || rule.keywords.length > 0);
+function retagHistoryForWatchRules(history, watchNotifyState, watchRules, now) {
+  const nextWatchNotifyState = { ...(watchNotifyState || {}) };
+  let changed = false;
+  const nextHistory = (history || []).map(item => {
+    const ruleIds = matchWatchRules(item, watchRules).map(rule => rule.id);
+    const { key, state } = findWatchState(nextWatchNotifyState, item);
+    if (ruleIds.length === 0) {
+      if (!item.watchMatched && !Object.prototype.hasOwnProperty.call(item, 'watchRuleIds')) return item;
+      // No longer matched: drop the tag and any pending notice for this item.
+      const { watchMatched, watchRuleIds, watchMatchedAt, ...rest } = item;
+      getItemAliases(item).forEach(alias => { delete nextWatchNotifyState[alias]; });
+      changed = true;
+      return rest;
+    }
+    const previous = Array.isArray(item.watchRuleIds) ? item.watchRuleIds : [];
+    if (item.watchMatched === true && previous.length === ruleIds.length && ruleIds.every(id => previous.includes(id))) return item;
+    if (state) nextWatchNotifyState[key] = { ...state, ruleIds };
+    changed = true;
+    // Cached items matched by a rule edit are tagged and pinned, but never notified.
+    return { ...item, watchMatched: true, watchRuleIds: ruleIds, watchMatchedAt: item.watchMatched === true && item.watchMatchedAt ? item.watchMatchedAt : now };
+  });
+  return { history: nextHistory, watchNotifyState: nextWatchNotifyState, changed };
 }
 
 async function saveWatchRules(rules) {
-  const { watchRules: storedWatchRules = [] } = await chrome.storage.local.get('watchRules');
-  const watchRules = normalizeStoredWatchRules(Array.isArray(rules) ? rules : storedWatchRules);
-  await chrome.storage.local.set({ watchRules });
+  const { watchRules: storedWatchRules = [], history = [], readIds = [], watchNotifyState = {} } = await chrome.storage.local.get(['watchRules', 'history', 'readIds', 'watchNotifyState']);
+  const watchRules = normalizeWatchRuleList(Array.isArray(rules) ? rules : storedWatchRules);
+  const retagged = retagHistoryForWatchRules(history, watchNotifyState, watchRules, new Date().toISOString());
+  if (retagged.changed) {
+    // Reordering or toggling rules usually leaves tags unchanged; only rewrite history when needed,
+    // and keep the rewrite inside the shared storage budget.
+    await persistCanonicalState({ watchRules, history: retagged.history, readIds, watchNotifyState: retagged.watchNotifyState, retainUnmatchedWatchState: true });
+  } else {
+    await chrome.storage.local.set({ watchRules });
+  }
   await runPostCommitSideEffect('watch rules badge update', updateBadge);
   return watchRules;
 }
@@ -985,13 +948,15 @@ function mergeWatchStates(states, item, watchRules) {
   const viewedAt = earliestIso(valid.map(state => state.viewedAt));
   const notifyCount = Math.max(0, ...valid.map(state => Number(state.notifyCount || 0)));
   const lastNotifiedAt = latestIso(valid.map(state => state.lastNotifiedAt));
+  const suppressedAt = earliestIso(valid.map(state => state.suppressedAt));
   return {
     ruleIds: matchWatchRules(item, watchRules).map(rule => rule.id),
     firstMatchedAt,
     viewedAt,
     notifyCount,
     lastNotifiedAt,
-    nextNotifyAt: viewedAt ? '' : getNextWatchNotifyAt(firstMatchedAt, notifyCount, lastNotifiedAt)
+    ...(suppressedAt ? { suppressedAt } : {}),
+    nextNotifyAt: viewedAt || suppressedAt ? '' : getNextWatchNotifyAt(firstMatchedAt, notifyCount, lastNotifiedAt)
   };
 }
 
@@ -1024,6 +989,7 @@ function upsertCanonicalItems(state, items, options = {}) {
   const discoveredAt = options.discoveredAt || new Date().toISOString();
   const matchedAt = options.matchedAt || (typeof discoveredAt === 'string' ? discoveredAt : new Date().toISOString());
   const historyDays = normalizeHistoryDays(options.historyDays);
+  const displayCutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
   const history = [...(state.history || [])];
   const readIds = new Set(state.readIds || []);
   const watchRules = state.watchRules || [];
@@ -1064,7 +1030,11 @@ function upsertCanonicalItems(state, items, options = {}) {
     if (priorWatchStates.length > 0) {
       watchNotifyState[canonicalKey] = mergeWatchStates(priorWatchStates, canonical, watchRules);
     } else if (isInserted && watchMatches.length > 0) {
-      watchNotifyState[canonicalKey] = buildWatchStateForItem(null, canonical, watchMatches.map(rule => rule.id), matchedAt);
+      const state = buildWatchStateForItem(null, canonical, watchMatches.map(rule => rule.id), matchedAt);
+      // Out-of-window items must not notify later when the user widens historyDays.
+      watchNotifyState[canonicalKey] = isWithinDisplayWindow(canonical, displayCutoff)
+        ? state
+        : { ...state, nextNotifyAt: '', suppressedAt: matchedAt };
     }
 
     if (canonical.id && safeAliases.some(alias => readIds.has(alias))) readIds.add(canonical.id);
@@ -1990,9 +1960,13 @@ chrome.notifications.onClicked.addListener((notificationId) => runMigratedStateM
     const url = getSafeHttpsUrl(notificationUrlMap[notificationId] || lastItems[0]?.url);
     if (url) {
       await chrome.tabs.create({ url });
+      // Opening from a notification counts as reading, matching the popup.
+      const stateKey = notificationStateKeyMap[notificationId];
+      await markItemsRead([stateKey, url], { skipBadge: true });
       if (notificationId.startsWith('aihot-watch-')) {
-        await markWatchViewed([notificationStateKeyMap[notificationId], url]);
+        await markWatchViewed([stateKey, url], { skipBadge: true });
       }
+      await runPostCommitSideEffect('notification click badge update', updateBadge);
       await forgetNotificationUrl(notificationId);
     }
   }

@@ -25,9 +25,13 @@
     return `[POPUP][perf] ${JSON.stringify(entry)}`;
   }
 
+  // Fixed-size ring buffer: keep the newest entries so long sessions do not grow memory.
+  const MAX_LOG_ENTRIES = 500;
+
   function log(phase, fields = {}) {
     const line = serializeEntry(phase, fields);
     state.logs.push(line);
+    if (state.logs.length > MAX_LOG_ENTRIES) state.logs.splice(0, state.logs.length - MAX_LOG_ENTRIES);
     console.log(line);
     return line;
   }

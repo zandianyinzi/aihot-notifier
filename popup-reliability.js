@@ -374,6 +374,22 @@
       .map(entry => entry.item);
   }
 
+  // 32-bit FNV-1a over the rendered text fields. Keeps the signature small for large
+  // histories (summaries can be 3000 chars each) while still detecting content edits.
+  function hashRenderedText(...values) {
+    let hash = 0x811c9dc5;
+    values.forEach(value => {
+      const text = String(value ?? '');
+      for (let index = 0; index < text.length; index++) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+      }
+      hash ^= 0x1f; // field separator
+      hash = Math.imul(hash, 0x01000193);
+    });
+    return (hash >>> 0).toString(36);
+  }
+
   function buildHistoryRenderSignature(history, historyDays, watchRules, isRead = () => false) {
     return JSON.stringify({
       historyDays,
@@ -384,10 +400,7 @@
         item?.id || '',
         item?.permalink || '',
         item?.time,
-        item?.title,
-        item?.source || '',
-        item?.category || '',
-        item?.summary || '',
+        hashRenderedText(item?.title, item?.source || '', item?.category || '', item?.summary || ''),
         item?.watchMatched ? '1' : '',
         Array.isArray(item?.watchRuleIds)
           ? [...new Set(item.watchRuleIds.map(ruleId => String(ruleId)))].sort()

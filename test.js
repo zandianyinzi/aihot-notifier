@@ -95,7 +95,7 @@ function calcManualSince(lastCheck, lastItemsPollAt = '') {
   return calcSinceTime(lastItemsPollAt || lastCheck, 5);
 }
 
-const WATCH_REMINDER_DELAYS = [0, 8 * 60 * 60 * 1000, 24 * 60 * 60 * 1000];
+const WATCH_REMINDER_DELAYS = [0];
 
 function splitWatchKeywords(value) {
   if (Array.isArray(value)) return value.flatMap(v => splitWatchKeywords(v)).filter(Boolean);
@@ -126,6 +126,8 @@ function normalizeWatchRuleRecords(rules) {
   });
 }
 
+// Historical model of the original watch-rule semantics (substring matching, plain merge).
+// Current behavior lives in watch-rules.js and is verified by test-watch-rules.js.
 function mergeWatchRuleInput(rules, input, nowIso = '2026-06-26T00:00:00.000Z') {
   const normalized = normalizeWatchRuleRecords(rules);
   const source = String(input.source || '').trim();
@@ -191,6 +193,7 @@ function getNextWatchNotifyAt(firstMatchedAt, notifyCount, referenceNow) {
 
 function shouldNotifyWatchState(state, nowMs) {
   if (!state || state.viewedAt) return false;
+  if (Number(state.notifyCount || 0) >= WATCH_REMINDER_DELAYS.length) return false;
   const nextNotifyAt = Object.prototype.hasOwnProperty.call(state, 'nextNotifyAt') ? state.nextNotifyAt : state.firstMatchedAt;
   const next = new Date(nextNotifyAt || 0).getTime();
   return next > 0 && next <= nowMs;
@@ -812,9 +815,8 @@ console.log('\n[特别关注-提醒节奏]');
 (function() {
   const first = '2026-06-26T02:00:00.000Z';
   assert(getNextWatchNotifyAt(first, 0, first) === first, '首次提醒立即');
-  assert(getNextWatchNotifyAt(first, 1, first) === '2026-06-26T10:00:00.000Z', '第二次提醒间隔8小时');
-  assert(getNextWatchNotifyAt(first, 2, first) === '2026-06-27T02:00:00.000Z', '第三次提醒间隔24小时');
-  assert(getNextWatchNotifyAt(first, 3, '2026-06-27T02:00:00.000Z') === '', '第三次后停止提醒');
+  assert(getNextWatchNotifyAt(first, 1, first) === '', '首次提醒后不再安排后续提醒');
+  assert(!shouldNotifyWatchState({ firstMatchedAt: first, nextNotifyAt: '2026-06-26T10:00:00.000Z', notifyCount: 1, viewedAt: '' }, new Date('2026-06-26T11:00:00.000Z').getTime()), '旧版 8h 计划残留不再提醒');
   assert(!shouldNotifyWatchState({ firstMatchedAt: first, nextNotifyAt: '', viewedAt: '' }, new Date('2026-06-28T02:00:00.000Z').getTime()), '没有下次提醒时间时不再提醒');
 })();
 
