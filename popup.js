@@ -21,6 +21,7 @@ const fontSizeEl = document.getElementById('fontSize');
 const openPositionModeEl = document.getElementById('openPositionMode');
 const historyDaysEl = document.getElementById('historyDays');
 const jumpToUnreadBtn = document.getElementById('jumpToUnread');
+const brandLink = document.getElementById('brandLink');
 const markAllReadBtn = document.getElementById('markAllRead');
 const scrollToTopBtn = document.getElementById('scrollToTop');
 const scrollToBottomBtn = document.getElementById('scrollToBottom');
@@ -63,6 +64,9 @@ const POPUP_SCROLL_SAVE_DELAY_MS = 200;
 const BUTTON_RESULT_CLASSES = ['is-result-accent', 'is-result-danger', 'is-result-ok'];
 const BUTTON_TRANSIENT_CLASSES = ['is-loading', ...BUTTON_RESULT_CLASSES];
 const buttonLoadingCleanups = new WeakMap();
+const buttonResultCleanups = new WeakMap();
+// Refresh and feed-mode switching share one spinner; it stops only after every owner ends.
+const buttonLoadingStates = new WeakMap();
 const BUTTON_RESULT_MIN_MS = 600;
 const BUTTON_RESULT_MAX_MS = 1400;
 const BUTTON_RESULT_TARGET_TOTAL_MS = 1800;
@@ -99,43 +103,109 @@ const allFeedContinuationStatusController = createAllFeedContinuationStatusContr
 
 function clearButtonFeedback(button) {
   buttonLoadingCleanups.get(button)?.();
-  button.classList.remove(...BUTTON_TRANSIENT_CLASSES, 'is-loading-finishing');
+  buttonResultCleanups.get(button)?.();
+  button.classList.remove(...BUTTON_TRANSIENT_CLASSES, 'is-loading-finishing', 'is-confirmed');
   button.style.removeProperty('--control-result-duration');
 }
 
-function finishButtonLoading(button) {
-  if (!button.classList.contains('is-loading') || button.classList.contains('is-loading-finishing')) return;
+function startButtonSpin(button) {
   const indicator = button.querySelector('.refresh-icon');
-  const ring = button.querySelector('.loading-ring');
-  if (!indicator || !ring) {
+  // A new request during the spin-down resumes from the current pose instead of jumping to 0°.
+  const resumeDegrees = indicator && button.classList.contains('is-loading-finishing')
+    ? readRotationDegrees(getComputedStyle(indicator).transform)
+    : 0;
+  clearButtonFeedback(button);
+  if (indicator) {
+    if (resumeDegrees > 0) {
+      indicator.style.animationDelay = `${-(resumeDegrees / 360) * readLoadingTurnMs(button)}ms`;
+    } else {
+      indicator.style.removeProperty('animation-delay');
+    }
+  }
+  button.classList.add('is-loading');
+}
+
+function beginButtonLoading(button, owner) {
+  let state = buttonLoadingStates.get(button);
+  if (!state) {
+    state = { owners: new Set(), startedAt: Date.now(), failed: false };
+    buttonLoadingStates.set(button, state);
+    startButtonSpin(button);
+  }
+  state.owners.add(owner);
+}
+
+function endButtonLoading(button, owner, ok) {
+  const state = buttonLoadingStates.get(button);
+  if (!state || !state.owners.delete(owner)) return;
+  if (!ok) state.failed = true;
+  if (state.owners.size > 0) return;
+  buttonLoadingStates.delete(button);
+  showButtonResult(button, state.failed ? 'is-result-danger' : 'is-result-accent', Date.now() - state.startedAt);
+}
+
+// Quadratic ease-out: starts at 2x the average speed and ends at zero, so a spin-down
+// that covers `d` degrees in `2d / v` ms continues seamlessly from the linear spin `v`.
+const REFRESH_SPIN_DOWN_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
+// Below this remaining angle the spin-down adds one extra turn instead of braking hard.
+const REFRESH_SPIN_DOWN_MIN_DEG = 30;
+
+function readRotationDegrees(transform) {
+  const match = /^matrix\(\s*([-\d.e]+)\s*,\s*([-\d.e]+)/.exec(transform || '');
+  if (!match) return 0;
+  const degrees = Math.atan2(Number(match[2]), Number(match[1])) * 180 / Math.PI;
+  return (degrees + 360) % 360;
+}
+
+function readLoadingTurnMs(button) {
+  const value = getComputedStyle(button).getPropertyValue('--motion-loading').trim();
+  const amount = parseFloat(value);
+  if (!Number.isFinite(amount) || amount <= 0) return 800;
+  return value.endsWith('ms') ? amount : amount * 1000;
+}
+
+function finishButtonLoading(button) {
+  if (!button.classList.contains('is-loading')) return;
+  const indicator = button.querySelector('.refresh-icon');
+  const prefersReducedMotion = typeof matchMedia === 'function'
+    && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!indicator || typeof indicator.animate !== 'function' || prefersReducedMotion) {
     button.classList.remove('is-loading', 'is-loading-finishing');
     return;
   }
 
   let settled = false;
+  let spinDown = null;
   const cleanup = () => {
     if (settled) return;
     settled = true;
-    ring.removeEventListener('animationend', onRingClosed);
-    indicator.style.removeProperty('transform');
-    ring.style.removeProperty('stroke-dasharray');
+    // Cancelling leaves no transform, i.e. 0°, which is the same pose as 360°.
+    spinDown?.cancel();
     if (buttonLoadingCleanups.get(button) === cleanup) buttonLoadingCleanups.delete(button);
     button.classList.remove('is-loading-finishing', 'is-loading');
   };
-  const onRingClosed = event => {
-    if (event.target === ring && event.animationName === 'loading-ring-close') cleanup();
-  };
 
-  const currentTransform = getComputedStyle(indicator).transform;
-  const currentDasharray = getComputedStyle(ring).strokeDasharray;
-  indicator.style.transform = currentTransform;
-  ring.style.strokeDasharray = currentDasharray;
+  const startDegrees = readRotationDegrees(getComputedStyle(indicator).transform);
+  // The computed angle belongs to this frame's animation time. Pin the spin-down to that same
+  // time: if the list render keeps the main thread busy before the swap reaches the compositor,
+  // the spin-down starts part-way through instead of rewinding to startDegrees.
+  const startTime = document.timeline?.currentTime;
+  let remainingDegrees = 360 - startDegrees;
+  if (remainingDegrees < REFRESH_SPIN_DOWN_MIN_DEG) remainingDegrees += 360;
+  const degreesPerMs = 360 / readLoadingTurnMs(button);
+  const duration = (2 * remainingDegrees) / degreesPerMs;
+
   buttonLoadingCleanups.set(button, cleanup);
+  // Drop is-loading now: its accent color would reappear if the result animation ends before
+  // the spin-down. The WAAPI animation drives rotation without any CSS class.
+  button.classList.remove('is-loading');
   button.classList.add('is-loading-finishing');
-  ring.addEventListener('animationend', onRingClosed);
-  requestAnimationFrame(() => {
-    if (!settled && getComputedStyle(ring).animationName === 'none') cleanup();
-  });
+  spinDown = indicator.animate([
+    { transform: `rotate(${startDegrees}deg)` },
+    { transform: `rotate(${startDegrees + remainingDegrees}deg)` }
+  ], { duration, easing: REFRESH_SPIN_DOWN_EASING });
+  if (Number.isFinite(startTime)) spinDown.startTime = startTime;
+  spinDown.onfinish = cleanup;
 }
 
 function waitForNextPaint() {
@@ -199,19 +269,28 @@ function getButtonResultDuration(elapsedMs) {
 }
 
 function removeClassAfterAnimation(button, className, onCleanup) {
+  buttonResultCleanups.get(button)?.();
   let cleaned = false;
+  const detach = () => {
+    button.removeEventListener('animationend', cleanup);
+    if (buttonResultCleanups.get(button) === detach) buttonResultCleanups.delete(button);
+  };
   const cleanup = event => {
     if (event?.target && event.target !== button) return;
     if (cleaned) return;
     cleaned = true;
-    button.removeEventListener('animationend', cleanup);
+    detach();
     button.classList.remove(className);
     if (onCleanup) onCleanup();
   };
 
+  buttonResultCleanups.set(button, () => {
+    cleaned = true;
+    detach();
+  });
   button.addEventListener('animationend', cleanup);
   requestAnimationFrame(() => {
-    if (getComputedStyle(button).animationName === 'none') cleanup();
+    if (!cleaned && getComputedStyle(button).animationName === 'none') cleanup();
   });
 }
 
@@ -220,14 +299,17 @@ function showButtonResult(button, className, elapsedMs) {
   button.classList.remove(...BUTTON_RESULT_CLASSES);
   button.style.setProperty('--control-result-duration', `${getButtonResultDuration(elapsedMs)}ms`);
   button.classList.add(className);
+  const isMarkAllRead = button.id === 'markAllRead';
+  // Keeps renderHistory from hiding the button (display:none) mid-animation, which would cancel
+  // the animation without an animationend and leave the result class behind.
+  if (isMarkAllRead) button.classList.add('is-confirmed');
   removeClassAfterAnimation(button, className, () => {
     button.style.removeProperty('--control-result-duration');
+    if (!isMarkAllRead) return;
+    button.classList.remove('is-confirmed');
     // Only hide mark-all-read button after animation if there are no unread items
-    if (button.id === 'markAllRead') {
-      const unreadItems = document.querySelectorAll('.item.unread');
-      if (unreadItems.length === 0) {
-        button.classList.remove('visible');
-      }
+    if (document.querySelectorAll('.item.unread').length === 0) {
+      button.classList.remove('visible');
     }
   });
 }
@@ -815,6 +897,7 @@ function renderHistory(data, options = {}) {
       markAllReadBtn.classList.remove('visible');
     }
     updateUnreadNavigator(0);
+    updateBrandUnreadState([]);
     applyRenderPosition(data, options);
     updateHistoryScrollControls();
     lastRenderSignature = signature;
@@ -897,6 +980,57 @@ function isHistoryItemVisible(item) {
 function refreshUnreadNavigatorFromDom() {
   const unreadItems = Array.from(historyList.querySelectorAll('.item.unread'));
   updateUnreadNavigator(unreadItems.length, unreadItems.some(isHistoryItemVisible));
+  updateBrandUnreadState(unreadItems);
+}
+
+// Logo dot breathes while the list has any unread item; it rests once all are read.
+// Stopping waits for the current breath to reach its rest frame (sped up so it takes at most
+// BRAND_DOT_STOP_MAX_MS), because the 0%/100% keyframe equals the static dot.
+const BRAND_DOT_STOP_MAX_MS = 600;
+// ease-in-out keeps the first 10% of a breath within ~0.02 scale of the rest frame.
+const BRAND_DOT_STOP_NEAR_REST_PROGRESS = 0.1;
+let brandDotStopping = null;
+
+function updateBrandUnreadState(unreadItems) {
+  if (!brandLink || !brandLink.classList) return;
+  const hasUnread = unreadItems.length > 0;
+  if (hasUnread) {
+    cancelBrandDotStop();
+    brandLink.classList.add('has-unread');
+    return;
+  }
+  if (!brandLink.classList.contains('has-unread') || brandDotStopping) return;
+
+  const dot = typeof brandLink.querySelector === 'function' ? brandLink.querySelector('.brand-logo-dot') : null;
+  const breath = dot && typeof dot.getAnimations === 'function' ? dot.getAnimations()[0] : null;
+  const timing = breath?.effect?.getComputedTiming?.();
+  if (!breath || !timing || !Number.isFinite(timing.duration) || timing.duration <= 0) {
+    brandLink.classList.remove('has-unread');
+    return;
+  }
+  // Just past the rest frame the dot is visually at rest; stop now rather than run a full breath.
+  if ((timing.progress || 0) < BRAND_DOT_STOP_NEAR_REST_PROGRESS) {
+    brandLink.classList.remove('has-unread');
+    return;
+  }
+
+  const remainingMs = (1 - (timing.progress || 0)) * timing.duration;
+  breath.updatePlaybackRate(Math.max(1, remainingMs / BRAND_DOT_STOP_MAX_MS));
+  const onRest = () => {
+    if (brandDotStopping?.dot !== dot) return;
+    cancelBrandDotStop();
+    brandLink.classList.remove('has-unread');
+  };
+  brandDotStopping = { dot, breath, onRest };
+  dot.addEventListener('animationiteration', onRest);
+}
+
+function cancelBrandDotStop() {
+  if (!brandDotStopping) return;
+  const { dot, breath, onRest } = brandDotStopping;
+  brandDotStopping = null;
+  dot.removeEventListener('animationiteration', onRest);
+  breath.updatePlaybackRate(1);
 }
 
 function jumpToUnread() {
@@ -1213,10 +1347,20 @@ function collapseSettingsGroups() {
 
 function setSettingsOpen(isOpen, { focus = true } = {}) {
   settingsPanelController.setOpen(isOpen, { focus });
+  // With reduced motion the panel has no height transition, so transitionend never refreshes
+  // the list edge controls; refresh them after the layout change instead.
+  if (!hasSettingsPanelTransition()) {
+    requestAnimationFrame(() => updateHistoryScrollControls({ readScrollHeight: false }));
+  }
+}
+
+function hasSettingsPanelTransition() {
+  const durations = getComputedStyle(settingsPanel).transitionDuration || '';
+  return durations.split(',').some(value => parseFloat(value) > 0);
 }
 
 settingsPanel.addEventListener('transitionrun', event => {
-  if (event.propertyName !== 'max-height' || !activeSettingsTrace) return;
+  if (event.propertyName !== 'grid-template-rows' || !activeSettingsTrace) return;
   logPerf('settings-transition-run', {
     id: activeSettingsTrace.id,
     nextOpen: activeSettingsTrace.nextOpen,
@@ -1225,7 +1369,7 @@ settingsPanel.addEventListener('transitionrun', event => {
 });
 
 settingsPanel.addEventListener('transitionend', event => {
-  if (event.propertyName !== 'max-height') return;
+  if (event.propertyName !== 'grid-template-rows') return;
   // The panel remains in normal document flow; only refresh edge controls
   // after its height transition has settled.
   requestAnimationFrame(() => updateHistoryScrollControls({ readScrollHeight: false }));
@@ -1375,12 +1519,12 @@ feedModeSwitchController = createFeedModeSwitchController({
   rollback: async feedMode => {
     feedModeEl.value = feedMode;
   },
-  onSuccess: (failCount, feedbackStartedAt, feedMode) => {
+  onSuccess: (failCount, _feedbackStartedAt, feedMode) => {
     feedModeEl.value = feedMode;
-    showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
+    endButtonLoading(pollBtn, 'feedMode', failCount === 0);
   },
-  onFailure: feedbackStartedAt => {
-    showButtonResult(pollBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
+  onFailure: () => {
+    endButtonLoading(pollBtn, 'feedMode', false);
     showPopupStatus('切换内容源失败，已恢复原选择。');
   }
 });
@@ -1388,8 +1532,7 @@ feedModeSwitchController = createFeedModeSwitchController({
 feedModeEl.addEventListener('change', async () => {
   const feedbackStartedAt = Date.now();
   const nextFeedMode = normalizeFeedMode(feedModeEl.value);
-  clearButtonFeedback(pollBtn);
-  pollBtn.classList.add('is-loading');
+  beginButtonLoading(pollBtn, 'feedMode');
   await feedModeSwitchController.switchFeedMode(nextFeedMode, feedbackStartedAt);
 });
 themeEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
@@ -1432,11 +1575,9 @@ scrollToBottomBtn.addEventListener('click', () => scrollHistoryTo(historyList.sc
 jumpToUnreadBtn.addEventListener('click', jumpToUnread);
 
 pollBtn.addEventListener('click', async () => {
-  const feedbackStartedAt = Date.now();
   // Save synchronously in case the popup closes before the request completes.
   writeScrollPosition({ feedMode: feedModeEl.value, historyDays: Number(historyDaysEl.value) });
-  clearButtonFeedback(pollBtn);
-  pollBtn.classList.add('is-loading');
+  beginButtonLoading(pollBtn, 'refresh');
   pollBtn.disabled = true;
   try {
     const response = await chrome.runtime.sendMessage({ type: 'pollNow' });
@@ -1445,9 +1586,9 @@ pollBtn.addEventListener('click', async () => {
     await loadHistory();
     // A skipped render may emit no scroll event; persist the current anchor explicitly.
     writeScrollPosition({ feedMode: feedModeEl.value, historyDays: Number(historyDaysEl.value) });
-    showButtonResult(pollBtn, failCount === 0 ? 'is-result-accent' : 'is-result-danger', Date.now() - feedbackStartedAt);
+    endButtonLoading(pollBtn, 'refresh', failCount === 0);
   } catch (e) {
-    showButtonResult(pollBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
+    endButtonLoading(pollBtn, 'refresh', false);
     showPopupStatus('刷新失败，请重试。');
   }
   pollBtn.disabled = false;

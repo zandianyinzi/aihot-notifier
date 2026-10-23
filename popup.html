@@ -172,7 +172,6 @@
       --motion-panel: 0.25s;
       --motion-panel-open: 0.18s;
       --motion-loading: 0.8s;
-      --motion-loading-finish: 0.2s;
       --motion-result: 1.2s;
     }
 
@@ -257,6 +256,7 @@
       stroke-linejoin: miter;
     }
 
+    /* All read: the dot keeps its brand red but stays still. */
     .brand-logo-dot {
       fill: var(--brand-hot-dot);
       filter: drop-shadow(0 0 3px var(--brand-hot-glow));
@@ -264,6 +264,10 @@
       transform-origin: center;
       opacity: 0.8;
       transform: scale(0.8);
+    }
+
+    /* Unread: at least one unread item in the list, the dot breathes. */
+    .brand a.has-unread .brand-logo-dot {
       animation: logo-dot-breathe 3.2s ease-in-out infinite;
     }
 
@@ -273,7 +277,7 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .brand-logo-dot {
+      .brand a.has-unread .brand-logo-dot {
         animation: none;
       }
 
@@ -284,9 +288,17 @@
       .skeleton-line,
       .btn-icon.is-result-ok,
       #pollNow.is-result-accent,
+      .btn-mark-read.is-result-accent,
       .btn-icon.is-result-danger,
       .item.is-jump-target {
         animation: none;
+      }
+
+      .settings,
+      .settings.open,
+      .switch-track,
+      .switch-track::after {
+        transition: none;
       }
 
     }
@@ -404,44 +416,28 @@
 
     #pollNow .refresh-icon {
       transform-origin: center;
+      /* Keep the icon on its own layer at rest too. Otherwise the layer is dropped when the
+         spin-down ends and the icon repaints at a different subpixel offset, a visible twitch
+         at 125%/150% display scaling. */
+      will-change: transform;
     }
 
+    /* The ring keeps its gap at 12 o'clock with the arrowhead on the leading end, so the
+       icon reads as "refresh" at rest. Stopping decelerates to the next full turn (driven
+       by finishButtonLoading), which lands exactly on this rest pose. */
+    /* r=8.5 ring (circumference 53.41) with a 45° gap. The dash pattern starts at 3 o'clock,
+       so the offset shifts it to end at 12 o'clock, under the arrowhead. */
     #pollNow .loading-ring {
-      stroke-dasharray: 53.4 0;
-    }
-
-    /* The ring's open gap ends at 12 o'clock; the arrowhead sits on that leading end and
-       points clockwise, so it only reads as "refreshing" while the ring spins. */
-    #pollNow .refresh-arrow {
-      opacity: 0;
-      transition: opacity var(--motion-loading-finish) ease-out;
-    }
-
-    #pollNow.is-loading .refresh-arrow {
-      opacity: 1;
-    }
-
-    #pollNow.is-loading-finishing .refresh-arrow {
-      opacity: 0;
-      /* Fade out before the ring finishes closing past the arrow and the icon resets to 0°. */
-      transition-duration: calc(var(--motion-loading-finish) * 0.6);
+      stroke-dasharray: 46.73 6.68;
+      stroke-dashoffset: 6.68;
     }
 
     #pollNow.is-loading .refresh-icon {
       animation: rotate var(--motion-loading) linear infinite;
     }
 
-    #pollNow.is-loading .loading-ring {
-      stroke-dasharray: 40 13.4;
-      animation: loading-ring-open var(--motion-loading-finish) ease-out forwards;
-    }
-
     #pollNow.is-loading-finishing .refresh-icon {
       animation: none;
-    }
-
-    #pollNow.is-loading-finishing .loading-ring {
-      animation: loading-ring-close var(--motion-loading-finish) ease-out forwards;
     }
 
     #pollNow.is-loading {
@@ -452,20 +448,9 @@
       to { transform: rotate(360deg); }
     }
 
-    @keyframes loading-ring-open {
-      from { stroke-dasharray: 53.4 0; }
-      to { stroke-dasharray: 40 13.4; }
-    }
-
-    @keyframes loading-ring-close {
-      to { stroke-dasharray: 53.4 0; }
-    }
-
     @media (prefers-reduced-motion: reduce) {
       #pollNow.is-loading .refresh-icon,
-      #pollNow.is-loading .loading-ring,
-      #pollNow.is-loading-finishing .refresh-icon,
-      #pollNow.is-loading-finishing .loading-ring {
+      #pollNow.is-loading-finishing .refresh-icon {
         animation: none;
       }
     }
@@ -483,6 +468,19 @@
     .btn-icon.is-result-danger {
       color: var(--state-fail);
       animation: control-result-danger var(--control-result-duration, var(--motion-result)) ease-out forwards;
+    }
+
+    /* Mark-all-read success: a brief accent swell, then fade out. The button stays visible for
+       the whole 750ms; showButtonResult hides it afterwards if nothing is unread. */
+    .btn-mark-read.is-result-accent {
+      color: var(--accent);
+      animation: mark-read-confirm 750ms ease-out forwards;
+    }
+
+    @keyframes mark-read-confirm {
+      0% { background: var(--accent-soft); color: var(--accent); transform: scale(1); opacity: 1; }
+      30% { background: var(--accent-soft); color: var(--accent); transform: scale(1.03); opacity: 1; }
+      100% { background: transparent; color: var(--accent); transform: scale(1); opacity: 0; }
     }
 
     @keyframes control-result-ok {
@@ -516,16 +514,24 @@
     }
 
     /* ---- Settings ---- */
+    /* Grid rows animate the panel's real content height; a max-height cap would spend part of
+       the transition on invisible height (open finishes early, close starts late). */
     .settings {
+      display: grid;
+      grid-template-rows: 0fr;
       overflow: hidden;
-      max-height: 0;
-      transition: max-height var(--motion-panel) ease;
+      transition: grid-template-rows var(--motion-panel) ease;
       background: var(--bg-sub);
     }
 
     .settings.open {
-      max-height: 420px;
-      transition: max-height var(--motion-panel-open) ease-out;
+      grid-template-rows: 1fr;
+      transition: grid-template-rows var(--motion-panel-open) ease-out;
+    }
+
+    .settings-clip {
+      min-height: 0;
+      overflow: hidden;
     }
 
     .settings-inner {
@@ -709,7 +715,7 @@
       background: var(--border);
       border-radius: 18px;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: background var(--motion-panel) ease;
     }
 
     .switch-track::after {
@@ -721,7 +727,7 @@
       left: 2px;
       background: var(--text-2);
       border-radius: 50%;
-      transition: transform 0.2s;
+      transition: transform var(--motion-panel) ease, background var(--motion-panel) ease;
       box-shadow: 0 1px 2px rgba(0,0,0,0.15);
     }
 
@@ -1308,6 +1314,13 @@
       opacity: 1;
     }
 
+    /* The bar switches from display:none, which skips transitions; start the fade from 0. */
+    @starting-style {
+      .popup-status:not(:empty) {
+        opacity: 0;
+      }
+    }
+
     .popup-status.is-error {
       color: var(--state-fail);
     }
@@ -1327,7 +1340,7 @@
   <body style="width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: var(--bg, #111110); color-scheme: var(--color-scheme, dark);">
   <div class="header">
     <div class="brand">
-      <a href="https://aihot.virxact.com/" target="_blank" rel="noopener noreferrer" aria-label="AI HOT">
+      <a id="brandLink" href="https://aihot.virxact.com/" target="_blank" rel="noopener noreferrer" aria-label="AI HOT">
         <svg class="brand-logo" viewBox="24 0 90 128" aria-hidden="true" focusable="false">
           <g class="brand-logo-mark">
             <path d="M35.84 115.2 L62.72 12.8" stroke-width="7"></path>
@@ -1345,7 +1358,7 @@
         <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="2.5"/></svg>
       </button>
       <button class="btn-icon btn-mark-read" id="markAllRead" title="全部已读" aria-label="全部已读">
-        <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><path d="M4 20L20 4"/></svg>
+        <svg viewBox="0 0 24 24"><path d="m2.5 12.5 4.5 4.5 9-10"/><path d="m11.5 16 1 1 9-10"/></svg>
       </button>
       <button class="btn-icon scroll-nav-btn" id="scrollToTop" title="置顶" aria-label="置顶">
         <svg viewBox="0 0 24 24"><path d="M5 4h14"/><path d="M12 20V8"/><path d="m7 13 5-5 5 5"/></svg>
@@ -1363,6 +1376,7 @@
   </div>
 
   <div class="settings" id="settingsPanel" inert>
+    <div class="settings-clip">
     <div class="settings-inner">
       <details class="setting-group" data-setting-group="general">
         <summary class="setting-group-title">常规</summary>
@@ -1468,6 +1482,7 @@
           </div>
         </div>
       </details>
+    </div>
     </div>
   </div>
 

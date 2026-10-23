@@ -80,6 +80,7 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - 主列表 hover 只使用整行轻压暗反馈；未读和特关未读不使用左侧/右侧颜色条，状态由未读底色、标题颜色、置顶和标签表达。标题字重始终为 500，避免已读切换时字宽变化导致换行位移。
 - 日期与时间在条目元信息中统一补零显示为 `MM/DD HH:mm`，沿用元信息的次级文字层级；主列表不显示悬浮日期胶囊。
 - 菜单图标使用原生 `title` 悬浮提示，字体和字号由浏览器/操作系统决定，不跟随扩展设置。
+- Logo 红点始终为品牌红，列表中有未读条目时呼吸，全部已读后静止。
 - 图标按钮使用语义状态类：`is-loading`、`is-result-accent`、`is-result-danger`、`is-result-ok`、`is-confirmed`。
 - 动效时长集中在 CSS token 中：点击反馈 `--motion-tap`、设置面板 `--motion-panel` / `--motion-panel-open`、加载旋转 `--motion-loading`、异步结果 `--motion-result`。
 

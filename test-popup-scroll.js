@@ -33,6 +33,9 @@ function createElement() {
     querySelectorAll: () => [],
     getBoundingClientRect: () => ({ top: 0, bottom: 200 }),
     addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: (type, listener) => {
+      if (listeners.get(type) === listener) listeners.delete(type);
+    },
     dispatch: type => listeners.get(type)?.({ isTrusted: true })
   };
 }

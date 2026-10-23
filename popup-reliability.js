@@ -253,8 +253,8 @@
       item.classList.remove('unread');
       item.classList.add('read');
     });
-    // Don't hide button immediately - visibility will be removed by showButtonConfirm
-    // after the confirmation animation completes, ensuring the user sees the feedback.
+    // Don't hide button immediately - showButtonResult marks it is-confirmed and removes
+    // visibility after the confirmation animation completes, so the user sees the feedback.
 
     return function rollbackOptimisticReadState() {
       changedItems.forEach(item => {
