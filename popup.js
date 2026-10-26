@@ -62,14 +62,22 @@ const POPUP_CACHE_TTL_MS = 30 * 60 * 1000;
 const POPUP_SCROLL_TTL_MS = 30 * 60 * 1000;
 const POPUP_SCROLL_SAVE_DELAY_MS = 200;
 const BUTTON_RESULT_CLASSES = ['is-result-accent', 'is-result-danger', 'is-result-ok'];
-const BUTTON_TRANSIENT_CLASSES = ['is-loading', ...BUTTON_RESULT_CLASSES];
-const buttonLoadingCleanups = new WeakMap();
 const buttonResultCleanups = new WeakMap();
 // Refresh and feed-mode switching share one spinner; it stops only after every owner ends.
 const buttonLoadingStates = new WeakMap();
 const BUTTON_RESULT_MIN_MS = 600;
+// The refresh result color covers the longest landing, so it never clears while the glyph still turns.
+const REFRESH_RESULT_MIN_MS = 900;
 const BUTTON_RESULT_MAX_MS = 1400;
 const BUTTON_RESULT_TARGET_TOTAL_MS = 1800;
+// Quadratic ease-out: starts at twice the average speed and decelerates at a constant rate.
+const REFRESH_BRAKE_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
+// The two-arrow glyph looks the same every half-turn, so any multiple of 180deg is the rest pose.
+const REFRESH_SYMMETRY_DEG = 180;
+// Landings shorter than this would stop abruptly; the longest landing is (180 + 40)deg.
+const REFRESH_MIN_BRAKE_DEG = 40;
+const REFRESH_TURN_FALLBACK_MS = 720;
+const refreshSpinners = new WeakMap();
 const VALID_FONTS = new Set(['system', 'noto-serif', 'lxgw']);
 const VALID_OPEN_POSITION_MODES = new Set(['free', 'unread']);
 
@@ -101,28 +109,107 @@ const allFeedContinuationStatusController = createAllFeedContinuationStatusContr
   showStatus: () => {}
 });
 
-function clearButtonFeedback(button) {
-  buttonLoadingCleanups.get(button)?.();
+function clearButtonResultFeedback(button) {
   buttonResultCleanups.get(button)?.();
-  button.classList.remove(...BUTTON_TRANSIENT_CLASSES, 'is-loading-finishing', 'is-confirmed');
+  button.classList.remove(...BUTTON_RESULT_CLASSES, 'is-confirmed');
   button.style.removeProperty('--control-result-duration');
 }
 
-function startButtonSpin(button) {
-  const indicator = button.querySelector('.refresh-icon');
-  // A new request during the spin-down resumes from the current pose instead of jumping to 0°.
-  const resumeDegrees = indicator && button.classList.contains('is-loading-finishing')
-    ? readRotationDegrees(getComputedStyle(indicator).transform)
-    : 0;
-  clearButtonFeedback(button);
-  if (indicator) {
-    if (resumeDegrees > 0) {
-      indicator.style.animationDelay = `${-(resumeDegrees / 360) * readLoadingTurnMs(button)}ms`;
-    } else {
-      indicator.style.removeProperty('animation-delay');
+function prefersReducedMotion() {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function readMotionMs(element, name, fallbackMs) {
+  const value = getComputedStyle(element).getPropertyValue(name).trim();
+  const amount = parseFloat(value);
+  if (!Number.isFinite(amount) || amount <= 0) return fallbackMs;
+  return value.endsWith('ms') ? amount : amount * 1000;
+}
+
+// The refresh glyph is two 120deg arcs, each ending in a clockwise arrowhead, so it looks the same
+// every half-turn. While loading it spins at a constant speed. To stop, it brakes at a constant rate
+// from that speed onto the next half-turn, which renders the same as the rest pose; the shape never
+// changes. Every hand-off starts the next rotation at the timeline time the outgoing angle was read at.
+function createRefreshSpinner({ icon }, turnMs) {
+  let rotation = null;
+  let braking = false;
+  let fromDeg = 0;
+  let spanDeg = 0;
+
+  const now = () => document.timeline?.currentTime ?? null;
+  const currentDeg = () => {
+    const progress = rotation?.effect?.getComputedTiming().progress;
+    return Number.isFinite(progress) ? (fromDeg + progress * spanDeg) % 360 : 0;
+  };
+  const rotate = (startDeg, span, timing) => {
+    const time = now();
+    const next = icon.animate([
+      { transform: `rotate(${startDeg}deg)` },
+      { transform: `rotate(${startDeg + span}deg)` }
+    ], timing);
+    if (time !== null) next.startTime = time;
+    // Start the next rotation before cancelling the old one so no frame shows the base style.
+    rotation?.cancel();
+    rotation = next;
+    fromDeg = startDeg;
+    spanDeg = span;
+    return next;
+  };
+
+  return {
+    spin() {
+      if (rotation && !braking) return;
+      braking = false;
+      // A request during the landing resumes from the current angle instead of jumping back to 0deg.
+      rotate(currentDeg() % REFRESH_SYMMETRY_DEG, 360, { duration: turnMs, iterations: Infinity, easing: 'linear' });
+    },
+    settle() {
+      if (!rotation || braking) return;
+      const startDeg = currentDeg();
+      let targetDeg = Math.ceil(startDeg / REFRESH_SYMMETRY_DEG) * REFRESH_SYMMETRY_DEG;
+      if (targetDeg - startDeg < REFRESH_MIN_BRAKE_DEG) targetDeg += REFRESH_SYMMETRY_DEG;
+      const span = targetDeg - startDeg;
+      braking = true;
+      // Quadratic ease-out starts at twice its average speed, so this duration keeps the spin speed.
+      const brake = rotate(startDeg, span, {
+        duration: 2 * span * turnMs / 360,
+        easing: REFRESH_BRAKE_EASING,
+        fill: 'forwards'
+      });
+      brake.finished.then(() => {
+        if (rotation !== brake) return;
+        // The glyph rests on a half-turn, so dropping the transform back to 0deg is invisible.
+        brake.cancel();
+        rotation = null;
+        braking = false;
+      }, () => {});
+    },
+    stop() {
+      rotation?.cancel();
+      rotation = null;
+      braking = false;
     }
-  }
+  };
+}
+
+function getRefreshSpinner(button) {
+  if (refreshSpinners.has(button)) return refreshSpinners.get(button);
+  const icon = button.querySelector('.refresh-icon');
+  const spinner = icon && typeof icon.animate === 'function'
+    ? createRefreshSpinner({ icon }, readMotionMs(button, '--motion-loading', REFRESH_TURN_FALLBACK_MS))
+    : null;
+  refreshSpinners.set(button, spinner);
+  return spinner;
+}
+
+function startButtonSpin(button) {
+  clearButtonResultFeedback(button);
   button.classList.add('is-loading');
+  button.setAttribute('aria-busy', 'true');
+  const spinner = getRefreshSpinner(button);
+  if (!spinner) return;
+  if (prefersReducedMotion()) spinner.stop();
+  else spinner.spin();
 }
 
 function beginButtonLoading(button, owner) {
@@ -141,71 +228,17 @@ function endButtonLoading(button, owner, ok) {
   if (!ok) state.failed = true;
   if (state.owners.size > 0) return;
   buttonLoadingStates.delete(button);
+  button.setAttribute('aria-busy', 'false');
   showButtonResult(button, state.failed ? 'is-result-danger' : 'is-result-accent', Date.now() - state.startedAt);
-}
-
-// Quadratic ease-out: starts at 2x the average speed and ends at zero, so a spin-down
-// that covers `d` degrees in `2d / v` ms continues seamlessly from the linear spin `v`.
-const REFRESH_SPIN_DOWN_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
-// Below this remaining angle the spin-down adds one extra turn instead of braking hard.
-const REFRESH_SPIN_DOWN_MIN_DEG = 30;
-
-function readRotationDegrees(transform) {
-  const match = /^matrix\(\s*([-\d.e]+)\s*,\s*([-\d.e]+)/.exec(transform || '');
-  if (!match) return 0;
-  const degrees = Math.atan2(Number(match[2]), Number(match[1])) * 180 / Math.PI;
-  return (degrees + 360) % 360;
-}
-
-function readLoadingTurnMs(button) {
-  const value = getComputedStyle(button).getPropertyValue('--motion-loading').trim();
-  const amount = parseFloat(value);
-  if (!Number.isFinite(amount) || amount <= 0) return 800;
-  return value.endsWith('ms') ? amount : amount * 1000;
 }
 
 function finishButtonLoading(button) {
   if (!button.classList.contains('is-loading')) return;
-  const indicator = button.querySelector('.refresh-icon');
-  const prefersReducedMotion = typeof matchMedia === 'function'
-    && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (!indicator || typeof indicator.animate !== 'function' || prefersReducedMotion) {
-    button.classList.remove('is-loading', 'is-loading-finishing');
-    return;
-  }
-
-  let settled = false;
-  let spinDown = null;
-  const cleanup = () => {
-    if (settled) return;
-    settled = true;
-    // Cancelling leaves no transform, i.e. 0°, which is the same pose as 360°.
-    spinDown?.cancel();
-    if (buttonLoadingCleanups.get(button) === cleanup) buttonLoadingCleanups.delete(button);
-    button.classList.remove('is-loading-finishing', 'is-loading');
-  };
-
-  const startDegrees = readRotationDegrees(getComputedStyle(indicator).transform);
-  // The computed angle belongs to this frame's animation time. Pin the spin-down to that same
-  // time: if the list render keeps the main thread busy before the swap reaches the compositor,
-  // the spin-down starts part-way through instead of rewinding to startDegrees.
-  const startTime = document.timeline?.currentTime;
-  let remainingDegrees = 360 - startDegrees;
-  if (remainingDegrees < REFRESH_SPIN_DOWN_MIN_DEG) remainingDegrees += 360;
-  const degreesPerMs = 360 / readLoadingTurnMs(button);
-  const duration = (2 * remainingDegrees) / degreesPerMs;
-
-  buttonLoadingCleanups.set(button, cleanup);
-  // Drop is-loading now: its accent color would reappear if the result animation ends before
-  // the spin-down. The WAAPI animation drives rotation without any CSS class.
   button.classList.remove('is-loading');
-  button.classList.add('is-loading-finishing');
-  spinDown = indicator.animate([
-    { transform: `rotate(${startDegrees}deg)` },
-    { transform: `rotate(${startDegrees + remainingDegrees}deg)` }
-  ], { duration, easing: REFRESH_SPIN_DOWN_EASING });
-  if (Number.isFinite(startTime)) spinDown.startTime = startTime;
-  spinDown.onfinish = cleanup;
+  const spinner = getRefreshSpinner(button);
+  if (!spinner) return;
+  if (prefersReducedMotion()) spinner.stop();
+  else spinner.settle();
 }
 
 function waitForNextPaint() {
@@ -260,10 +293,10 @@ function measureSettingsLayoutRead(target, read) {
   return result;
 }
 
-function getButtonResultDuration(elapsedMs) {
+function getButtonResultDuration(elapsedMs, minMs = BUTTON_RESULT_MIN_MS) {
   if (!Number.isFinite(elapsedMs)) return BUTTON_RESULT_MAX_MS;
   return Math.round(Math.max(
-    BUTTON_RESULT_MIN_MS,
+    minMs,
     Math.min(BUTTON_RESULT_MAX_MS, BUTTON_RESULT_TARGET_TOTAL_MS - elapsedMs)
   ));
 }
@@ -297,7 +330,8 @@ function removeClassAfterAnimation(button, className, onCleanup) {
 function showButtonResult(button, className, elapsedMs) {
   finishButtonLoading(button);
   button.classList.remove(...BUTTON_RESULT_CLASSES);
-  button.style.setProperty('--control-result-duration', `${getButtonResultDuration(elapsedMs)}ms`);
+  const minMs = refreshSpinners.get(button) ? REFRESH_RESULT_MIN_MS : BUTTON_RESULT_MIN_MS;
+  button.style.setProperty('--control-result-duration', `${getButtonResultDuration(elapsedMs, minMs)}ms`);
   button.classList.add(className);
   const isMarkAllRead = button.id === 'markAllRead';
   // Keeps renderHistory from hiding the button (display:none) mid-animation, which would cancel

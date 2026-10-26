@@ -394,40 +394,56 @@ assert(hasDeclaration(itemFocusVisibleRule, 'outline-offset', '-2px'), '列表�
 console.log('\n[降低动态效果]');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.brand-logo-dot\s*{[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止 Logo 呼吸动画');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.skeleton-line[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止骨架屏闪烁');
-assert(/#pollNow\.is-loading\s+\.refresh-icon\s*{[\s\S]*animation:\s*rotate/i.test(popupHtml), '请求中旋转单个刷新圆环');
-assert(!/#pollNow\s+\.refresh-icon,[\s\S]*#pollNow\s+\.loading-indicator\s*{[\s\S]*transition:\s*opacity/i.test(popupHtml), '停止交接不使用双圆环透明度叠加');
-assert(!/<svg\s+class="loading-indicator"/.test(popupHtml), '刷新按钮不再渲染第二个加载环');
-assert((popupHtml.match(/<circle\s+class="loading-ring"/g) || []).length === 1, '刷新按钮只渲染一个加载圆环');
-assert(/<svg\s+class="refresh-icon"[^>]*>[\s\S]*<circle\s+class="loading-ring"\s+cx="12"\s+cy="12"\s+r="8\.5"\s*\/>[\s\S]*<\/svg>/.test(popupHtml), '刷新图标使用单个圆环');
-assert(/<svg\s+class="refresh-icon"[^>]*>[\s\S]*<path\s+class="refresh-arrow"[^>]*\/><\/svg>/.test(popupHtml), '刷新图标在旋转圆环内带箭头，随圆环一起旋转');
-assert(!/#pollNow[^{]*\.refresh-arrow\s*{[^}]*opacity/.test(popupHtml), '刷新箭头静止和旋转时都可见');
+assert(/#pollNow\s+\.refresh-icon\s*{[\s\S]*?transform-origin:\s*50%\s+50%/i.test(popupHtml), '刷新图标围绕 SVG 视口几何中心旋转');
+assert(!/<svg\s+class="loading-indicator"/.test(popupHtml), '刷新按钮不渲染第二个加载环');
+assert(!/loading-ring/.test(popupHtml), '刷新图标不再拆分独立旋转的圆环');
+{
+  const refreshSvg = popupHtml.match(/<svg\s+class="refresh-icon"[^>]*>([\s\S]*?)<\/svg>/)?.[1] || '';
+  const arcs = [...refreshSvg.matchAll(/<path\s+class="refresh-arc"\s+d="([^"]+)"/g)];
+  const arrows = [...refreshSvg.matchAll(/<path\s+class="refresh-arrow"\s+d="([^"]+)"/g)].map(match => match[1]);
+  assert(arcs.length === 2 && arrows.length === 2, '刷新图标为两段圆弧加两个箭头，旋转半圈后形态不变');
+  const arrowShape = /^M-?\d+(?:\.\d+)? -?\d+(?:\.\d+)?v-?\d+(?:\.\d+)?h-?\d+(?:\.\d+)?$/;
+  assert(arrows.every(d => arrowShape.test(d)), '刷新箭头路径为 M x y v dy h dx 形式，以下尺寸检查按此解析');
+  const arrowPoints = arrows.flatMap(d => {
+    const [x, y, dy, dx] = (d.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+    return [[x, y], [x, y + dy], [x + dx, y + dy]];
+  });
+  const maxRadius = Math.max(7.5, ...arrowPoints.map(([x, y]) => Math.hypot(x - 12, y - 12)));
+  assert(maxRadius + 0.8 <= 12, `刷新图形含描边落在半径 12 内，整枚旋转不出视口（实测 ${(maxRadius + 0.8).toFixed(2)}）`);
+  const armLength = Math.min(...arrows.map(d => {
+    const [, , dy, dx] = (d.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+    return Math.min(Math.abs(dy), Math.abs(dx));
+  }));
+  assert(armLength >= 2.5, `刷新箭头臂长足以在 16px 下辨认方向（实测 ${armLength.toFixed(2)}）`);
+}
+assert(!/#pollNow[^{}]*\.refresh-arrow\s*{[^}]*opacity/i.test(popupHtml) && !/strokeDasharray|opacity:/.test(popupJs.match(/function createRefreshSpinner[\s\S]*?\nfunction getRefreshSpinner/)?.[0] || ''), '刷新图标停止时只减速，不变形、不淡出箭头');
+assert(/#pollNow:active\s*{[\s\S]*?transform:\s*none/i.test(popupHtml), '刷新按钮按压不缩放，固定在原有槽位');
 assert(/\.watch-rules-list:is\(\.has-scroll-head,\s*\.has-scroll-tail\):has\(:focus-visible\)\s*{[\s\S]*?mask-image:\s*none/.test(popupHtml), '键盘焦点在规则列表内时取消渐隐，焦点框不被淡化');
 assert(/\.watch-rules-list\.has-scroll-head\s*{[\s\S]*?mask-image:\s*linear-gradient\(to top,/.test(popupHtml), '特关规则列表滚离顶部时显示对称的顶部渐隐');
 assert(/\.watch-rules-list\.has-scroll-head\.has-scroll-tail\s*{[\s\S]*?mask-image:\s*linear-gradient\(to bottom,\s*transparent,/.test(popupHtml), '特关规则列表中段同时显示上下渐隐');
 assert(/watchRulesList\.classList\.toggle\('has-scroll-head',\s*watchRulesList\.scrollTop > 1\)/.test(popupJs), '特关规则列表按滚动位置切换顶部渐隐');
-assert(/#pollNow\s+\.loading-ring\s*{[\s\S]*?stroke-dasharray:\s*46\.73\s+6\.68;\s*stroke-dashoffset:\s*6\.68/i.test(popupHtml), '静止圆环保留 45° 箭头缺口，描边终点位于箭头下方');
-assert(!/loading-ring-(open|close)/.test(popupHtml), '刷新圆环不再做缺口开合动画');
-assert(/#pollNow\.is-loading-finishing\s+\.refresh-icon\s*{[\s\S]*animation:\s*none/i.test(popupHtml), '停止时移除 CSS 匀速旋转，交给减速动画');
-assert(/#pollNow\s+\.refresh-icon\s*{[^}]*will-change:\s*transform/i.test(popupHtml), '刷新图标常驻独立图层，停转时不因图层回收重绘而抖动');
-assert(/function\s+finishButtonLoading\(button\)/.test(popupJs) && /finishButtonLoading\(button\)/.test(popupJs), '请求结束使用减速停止流程');
-assert(/const startDegrees = readRotationDegrees\(getComputedStyle\(indicator\)\.transform\);/.test(popupJs), '减速从当前旋转角度开始，不跳回');
-assert(/const startTime = document\.timeline\?\.currentTime;[\s\S]*?spinDown\.startTime = startTime;/.test(popupJs), '减速动画锚定读取角度的帧时间，主线程繁忙时也不回退');
-assert(/let remainingDegrees = 360 - startDegrees;[\s\S]*?\{ transform: `rotate\(\$\{startDegrees \+ remainingDegrees\}deg\)` \}/.test(popupJs), '减速停在整圈位置，与静止姿态重合');
-assert(/const duration = \(2 \* remainingDegrees\) \/ degreesPerMs;/.test(popupJs) && /REFRESH_SPIN_DOWN_EASING = 'cubic-bezier\(0\.333, 0\.667, 0\.667, 1\)'/.test(popupJs), '减速初速度与匀速旋转一致');
-assert(/function finishButtonLoading\(button\)[\s\S]*?const cleanup = \(\) => \{[\s\S]*?spinDown\?\.cancel\(\)/.test(popupJs), '减速结束或被打断时清除动画');
-assert(/function finishButtonLoading\(button\)[\s\S]*?prefers-reduced-motion: reduce[\s\S]*?classList\.remove\('is-loading', 'is-loading-finishing'\)/.test(popupJs), '降低动态效果时直接停止，不做减速');
-assert(/function finishButtonLoading\(button\)[\s\S]*?button\.classList\.remove\('is-loading'\);\s*button\.classList\.add\('is-loading-finishing'\);\s*spinDown = indicator\.animate/.test(popupJs), '进入减速即移除 is-loading，结果动画先结束时图标不闪回强调色');
-assert(/function startButtonSpin\(button\)[\s\S]*?contains\('is-loading-finishing'\)[\s\S]*?readRotationDegrees[\s\S]*?animationDelay = `\$\{-\(resumeDegrees \/ 360\) \* readLoadingTurnMs\(button\)\}ms`/.test(popupJs), '减速中再次加载从当前角度续转，不跳回 0°');
+assert(!/stroke-dasharray:\s*46\.73/.test(popupHtml), '刷新图标不再使用 45° 小缺口');
+assert(!/refresh-orbit|refresh-settle|is-loading-finishing|is-loading-settling|loading-ring-(open|close)/.test(popupHtml + popupJs), '刷新动效全部由 popup.js 的 Web Animations 驱动，不在 CSS 动画之间切换');
+assert(/#pollNow\s+\.refresh-icon\s*{[\s\S]*?will-change:\s*transform/i.test(popupHtml), '刷新图标常驻合成层，开始和停止旋转时不重新栅格化');
+{
+  const spinnerCode = popupJs.match(/function createRefreshSpinner[\s\S]*?\nfunction beginButtonLoading/)?.[0] || '';
+  assert(spinnerCode && !/getComputedStyle\([^)]*\)\.transform|DOMMatrix|addEventListener\('animation(iteration|end)'/.test(spinnerCode), '交接角度取自动画自身进度，不读取变换矩阵或等待 CSS 动画事件');
+}
+assert(/function finishButtonLoading\(button\)[\s\S]*?prefersReducedMotion\(\)[\s\S]*?spinner\.stop\(\)/.test(popupJs) && /function startButtonSpin\(button\)[\s\S]*?prefersReducedMotion\(\)\) spinner\.stop\(\)/.test(popupJs), '降低动态效果时刷新图标不旋转');
+assert(!/BUTTON_RESULT_FADE_END|landingMs/.test(popupJs), '结果色时长只按请求耗时计算，最短时长覆盖刷新图标落定');
+assert(fs.existsSync(require('path').join(__dirname, 'test-refresh-spinner.js')), '刷新动效的交接、减速落定与续转由 test-refresh-spinner.js 覆盖');
+assert(/id="pollNow"[^>]*aria-busy="false"/.test(popupHtml), '刷新按钮声明初始非忙碌状态');
+assert(/function startButtonSpin\(button\)[\s\S]*?setAttribute\('aria-busy',\s*'true'\)/.test(popupJs), '加载开始时同步 aria-busy');
+assert(/function endButtonLoading\(button, owner, ok\)[\s\S]*?setAttribute\('aria-busy',\s*'false'\)/.test(popupJs), '全部加载来源结束后清除 aria-busy');
 assert(/function endButtonLoading\(button, owner, ok\)[\s\S]*?if \(state\.owners\.size > 0\) return;[\s\S]*?showButtonResult\(/.test(popupJs), '刷新与切源共用加载环，全部结束后才停止');
 assert(/beginButtonLoading\(pollBtn, 'refresh'\)/.test(popupJs) && /beginButtonLoading\(pollBtn, 'feedMode'\)/.test(popupJs), '刷新和切源分别登记加载来源');
 assert(!/clearButtonFeedback\(pollBtn\);\s*pollBtn\.classList\.add\('is-loading'\)/.test(popupJs), '不再直接重置刷新按钮加载状态');
 assert(/function removeClassAfterAnimation\(button, className, onCleanup\)\s*{\s*buttonResultCleanups\.get\(button\)\?\.\(\);/.test(popupJs), '新的结果反馈先撤销旧的 animationend 监听');
 assert(/function showButtonResult\(button, className, elapsedMs\)[\s\S]*?if \(isMarkAllRead\) button\.classList\.add\('is-confirmed'\);[\s\S]*?button\.classList\.remove\('is-confirmed'\);/.test(popupJs), '全部已读确认动效期间标记 is-confirmed，渲染不提前隐藏按钮');
-assert(/function clearButtonFeedback\(button\)[\s\S]*?'is-confirmed'/.test(popupJs), '清除按钮反馈时一并移除 is-confirmed');
+assert(/function clearButtonResultFeedback\(button\)[\s\S]*?'is-confirmed'/.test(popupJs), '清除按钮反馈时一并移除 is-confirmed');
 assert(/function setSettingsOpen\([\s\S]*?if \(!hasSettingsPanelTransition\(\)\) \{\s*requestAnimationFrame\(\(\) => updateHistoryScrollControls\(\{ readScrollHeight: false \}\)\);/.test(popupJs), '无高度过渡（减少动态效果）时开合设置面板也刷新列表边缘控件');
 assert(/if \(\(timing\.progress \|\| 0\) < BRAND_DOT_STOP_NEAR_REST_PROGRESS\) \{\s*brandLink\.classList\.remove\('has-unread'\);/.test(popupJs), '红点接近静止帧时直接停止，不多呼吸一轮');
 assert(/function\s+showButtonResult\(button,[\s\S]*?finishButtonLoading\(button\);\s*button\.classList\.remove\(\.\.\.BUTTON_RESULT_CLASSES\)/.test(popupJs), '按钮结果反馈不打断加载环闭合');
-assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*#pollNow\.is-loading\s+\.refresh-icon,[\s\S]*#pollNow\.is-loading-finishing\s+\.refresh-icon\s*{[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止加载环旋转');
 assert(/event\?\.target\s*&&\s*event\.target\s*!==\s*button/.test(popupJs), '按钮结果反馈忽略子元素动画结束事件');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.btn-icon\.is-result-ok[\s\S]*\.btn-icon\.is-result-danger[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止按钮结果动画');
 
@@ -768,7 +784,7 @@ assert(hasDeclaration(unreadNavigatorRule, 'visibility', /hidden/), '跳到未�
 assert(hasDeclaration(unreadNavigatorRule, 'pointer-events', /none/), '跳到未读隐藏时不可交互');
 assert(hasDeclaration(unreadNavigatorVisibleRule, 'visibility', /visible/), '跳到未读目标在屏外时恢复可见');
 assert(/refreshUnreadNavigatorFromDom\(\);/.test(popupJs) && /historyList\.addEventListener\('scroll'/.test(popupJs), '跳到未读随列表滚动刷新可见性');
-assert(/<button\s+class="btn-icon"\s+id="pollNow"\s+title="刷新"\s+aria-label="刷新">/.test(popupHtml), '刷新图标按钮有 aria-label');
+assert(/<button\s+class="btn-icon"\s+id="pollNow"\s+title="刷新"\s+aria-label="刷新"[^>]*>/.test(popupHtml), '刷新图标按钮有 aria-label');
 assert(/<button\s+class="btn-icon"\s+id="settingsBtn"\s+title="设置"\s+aria-label="设置"[^>]*>/.test(popupHtml), '设置图标按钮有 aria-label');
 assert(/id="settingsBtn"[^>]*aria-controls="settingsPanel"[^>]*aria-expanded="false"/.test(popupHtml), '设置按钮声明受控面板且默认折叠');
 assert(/<div class="settings" id="settingsPanel"[^>]*inert/.test(popupHtml), '设置面板默认 inert，关闭时不可聚焦');
@@ -878,6 +894,11 @@ assert(/Windows\/PowerShell 无 bash 时使用 Compress-Archive/.test(agentsMd),
 assert(/设置面板(?:使用原生折叠分组，打开设置时|按 `常规 \/ 外观 \/ 特关 \/ 调试` 分组，)默认不展开任何分组/.test(agentsMd), 'AGENTS 描述设置面板默认不展开');
 assert(!/默认只展开 `常规`/.test(agentsMd), 'AGENTS 不再描述默认展开常规');
 
+console.log('\n[已读层级]');
+assert(/\.item\.read \.item-title\s*{\s*color:\s*color-mix\(in oklab, var\(--text-unread-2\) 75%, var\(--text-read\)\);/.test(popupHtml)
+  && /\.item\.read \.item-summary\s*{\s*color:\s*var\(--text-read\);/.test(popupHtml)
+  && /\.item\.read \.item-meta\s*{\s*color:\s*color-mix\(in oklab, var\(--text-read\) 50%, var\(--text-3\)\);/.test(popupHtml), '已读标题、摘要、元信息只压明度，三层不并档');
+assert(/\.item\.read \.watch-badge\s*{[\s\S]*?color:\s*color-mix\(in srgb, var\(--accent\) 60%, var\(--text-read\)\)/.test(popupHtml) && /\.item\.read \.cat-tag\.cat-model \{ color: color-mix\(in srgb, var\(--cat-model\) 60%, var\(--text-read\)\)/.test(popupHtml), '已读的特关与分类标签保留 60% 色相');
 console.log(`\n${'='.repeat(40)}`);
 console.log(`结果: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

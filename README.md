@@ -61,6 +61,7 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - `node test-watch-rules.js`：验证特关规则匹配精度与添加规则的合并语义。
 - `node test-popup-reliability.js`：验证异步加载、设置回滚和特关置顶等控制器行为。
 - `node test-popup-scroll.js`：加载真实弹窗脚本，验证刷新、重开和特关场景下的阅读位置。
+- `node test-refresh-spinner.js`：加载真实的刷新按钮动效代码，验证旋转、减速落定与再次刷新时的交接。
 - `node test-e2e.js`：请求 `https://aihot.news/api/v1/items`，验证线上 API 数据假设；其中的简化模拟不替代真实后台回归测试。
 - `python3 scripts/generate-logo.py`：重新生成扩展图标 PNG；需要 `Pillow`。
 - `node screenshot.mjs`：重新生成 Chrome Web Store 截图和宣传图；首次使用前执行 `npm install --no-save puppeteer`。
@@ -81,6 +82,7 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - 日期与时间在条目元信息中统一补零显示为 `MM/DD HH:mm`，沿用元信息的次级文字层级；主列表不显示悬浮日期胶囊。
 - 菜单图标使用原生 `title` 悬浮提示，字体和字号由浏览器/操作系统决定，不跟随扩展设置。
 - Logo 红点始终为品牌红，列表中有未读条目时呼吸，全部已读后静止。
+- 刷新按钮为双箭头图标，两段圆弧旋转半圈后形态不变。加载时匀速旋转（`--motion-loading`，0.72s 一圈）；请求结束时从当前转速匀减速，停在最近的半圈位置（至少再转 40°，最长约 0.88s），不变形也不淡出。落定途中再次刷新会从当前角度继续旋转。动效由 `popup.js` 的 Web Animations 驱动。
 - 图标按钮使用语义状态类：`is-loading`、`is-result-accent`、`is-result-danger`、`is-result-ok`、`is-confirmed`。
 - 动效时长集中在 CSS token 中：点击反馈 `--motion-tap`、设置面板 `--motion-panel` / `--motion-panel-open`、加载旋转 `--motion-loading`、异步结果 `--motion-result`。
 
