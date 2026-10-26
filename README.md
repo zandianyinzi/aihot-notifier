@@ -82,6 +82,7 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - 日期与时间在条目元信息中统一补零显示为 `MM/DD HH:mm`，沿用元信息的次级文字层级；主列表不显示悬浮日期胶囊。
 - 菜单图标使用原生 `title` 悬浮提示，字体和字号由浏览器/操作系统决定，不跟随扩展设置。
 - Logo 红点始终为品牌红，列表中有未读条目时呼吸，全部已读后静止。
+- 菜单栏高 38px。Logo 本体高 20px，比 16px 工具图标略高，左边缘与列表文字对齐；红点屏幕尺寸固定，调整 Logo 尺寸时同步换算红点半径。
 - 刷新按钮为双箭头图标，两段圆弧旋转半圈后形态不变。加载时匀速旋转（`--motion-loading`，0.72s 一圈）；请求结束时从当前转速匀减速，停在最近的半圈位置（至少再转 40°，最长约 0.88s），不变形也不淡出。落定途中再次刷新会从当前角度继续旋转。动效由 `popup.js` 的 Web Animations 驱动。
 - 图标按钮使用语义状态类：`is-loading`、`is-result-accent`、`is-result-danger`、`is-result-ok`、`is-confirmed`。
 - 动效时长集中在 CSS token 中：点击反馈 `--motion-tap`、设置面板 `--motion-panel` / `--motion-panel-open`、加载旋转 `--motion-loading`、异步结果 `--motion-result`。

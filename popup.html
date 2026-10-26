@@ -183,7 +183,7 @@
 
 
     [data-font="noto-serif"] { --ff-body: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif; }
-    [data-font="lxgw"] { --ff-body: 'LXGW WenKai TC', 'LXGW WenKai', KaiTi, STKaiti, cursive; }
+    [data-font="lxgw"] { --ff-body: 'LXGW WenKai', 'LXGW WenKai TC', KaiTi, STKaiti, 'Kaiti SC', serif; }
     [data-font="system"] { --ff-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
 
     html, body {
@@ -197,7 +197,7 @@
     }
 
     body {
-      --header-height: 42px;
+      --header-height: 38px;
       display: flex;
       flex-direction: column;
       font-family: var(--ff-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif);
@@ -231,7 +231,10 @@
       height: 30px;
       display: inline-flex;
       align-items: center;
-      justify-content: center;
+      /* The 32px hit area stays; padding puts the glyph at about 12.7px from the popup edge,
+         the list's text edge, where the larger logo already sat. */
+      justify-content: flex-start;
+      padding-left: 5.5px;
       text-decoration: none;
       line-height: 0;
       transition: opacity 0.15s ease;
@@ -241,9 +244,11 @@
       opacity: 0.8;
     }
 
+    /* 25px box -> the mark itself is 20px tall (102.4 of 128 viewBox units), a step above the 16px
+       toolbar icons instead of 1.5x them. */
     .brand-logo {
-      width: 32px;
-      height: 30px;
+      width: 18px;
+      height: 25px;
       display: block;
       flex: none;
       overflow: visible;
@@ -1332,7 +1337,7 @@
             <path d="M85.76 115.2 H93.44" stroke-width="3"></path>
             <path d="M48.64 66.56 H81.92" stroke-width="2"></path>
           </g>
-          <circle class="brand-logo-dot" cx="89.6" cy="15.36" r="8.9"></circle>
+          <circle class="brand-logo-dot" cx="89.6" cy="15.36" r="10.67"></circle>
         </svg>
       </a>
     </div>
