@@ -80,10 +80,13 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - 主题强调反馈使用 `--accent` / `--accent-soft`，失败反馈使用 `--state-fail`。
 - 主列表 hover 只使用整行轻压暗反馈；未读和特关未读不使用左侧/右侧颜色条，状态由未读底色、标题颜色、置顶和标签表达。标题字重始终为 500，避免已读切换时字宽变化导致换行位移。
 - 日期与时间在条目元信息中统一补零显示为 `MM/DD HH:mm`，沿用元信息的次级文字层级；主列表不显示悬浮日期胶囊。
+- 「特关」与分类标签同为实底小标签，字号为元信息字号减 2px，最小 10px。
+- 已读条目的标题、摘要、元信息和标签都向底色后退，元信息与标签对比度保持约 4.5。hover 时已读行压暗到底色的 72%，未读行只压到 90%，保证悬停的未读行仍亮于已读行。
 - 菜单图标使用原生 `title` 悬浮提示，字体和字号由浏览器/操作系统决定，不跟随扩展设置。
 - Logo 红点始终为品牌红，列表中有未读条目时呼吸，全部已读后静止。
 - 菜单栏高 38px。Logo 本体高 20px，比 16px 工具图标略高，左边缘与列表文字对齐；红点屏幕尺寸固定，调整 Logo 尺寸时同步换算红点半径。
 - 刷新按钮为双箭头图标，两段圆弧旋转半圈后形态不变。加载时匀速旋转（`--motion-loading`，0.72s 一圈）；请求结束时从当前转速匀减速，停在最近的半圈位置（至少再转 40°，最长约 0.88s），不变形也不淡出。落定途中再次刷新会从当前角度继续旋转。动效由 `popup.js` 的 Web Animations 驱动。
+- 刷新图标旋转期间不重画：图标在独立合成层上，Chrome 只旋转已有像素，转动中重画的像素落定后会偏约 1px。因此加载色先在静止时画好再开始旋转，加载与结果期间颜色一步切换、不渐变；结果反馈只淡出背景，图标保持强调色，失败用 `--state-fail` 背景和状态栏提示表达，图标本身不变红。
 - 图标按钮使用语义状态类：`is-loading`、`is-result-accent`、`is-result-danger`、`is-result-ok`、`is-confirmed`。
 - 动效时长集中在 CSS token 中：点击反馈 `--motion-tap`、设置面板 `--motion-panel` / `--motion-panel-open`、加载旋转 `--motion-loading`、异步结果 `--motion-result`。
 
@@ -98,7 +101,7 @@ Chrome 浏览器扩展，通过 [aihot.news](https://aihot.news/) 的公开 API 
 - Manifest V3，Service Worker 后台运行
 - 使用 `chrome.alarms` 定时轮询，系统重启后自动恢复
 - 数据存储在浏览器本地存储中，主要使用 `chrome.storage.local`
-- 权限为 `alarms`、`notifications`、`storage`，API 的 `host_permissions` 仅为 `https://aihot.news/*`。弹窗品牌链接目前仍指向 `https://aihot.virxact.com/`，它不参与 API 请求。
+- 权限为 `alarms`、`notifications`、`storage`，API 的 `host_permissions` 仅为 `https://aihot.news/*`。弹窗品牌链接指向 `https://aihot.news/`。
 - 自动轮询和手动刷新直接请求 v1 items。首个完整 URL 使用 URL 级 `ETag` / `If-None-Match`，304 时跳过内容处理；当前不请求独立的 legacy fingerprint 端点，代码中的同名 helper/存储 key 是兼容命名。
 - 首页 304 仅代表首页未变。距离上次完整拉取满 6 小时（或尚无完整拉取记录）时，自动轮询和手动刷新会省略 `If-None-Match`，重新按分页预算拉取；仅完整分页并成功持久化后推进 `lastItemsPollAt`，304、分页截断或失败不会推迟补拉。
 - `apiNormalizationVersion` 单独记录 API 归一化规则版本；旧版本首次启动时在同一次存储写入中清空所有模式的旧 ETag 和 `lastItemsPollAt`，使此前漏掉的条目能够重新拉取。迁移保留既有 history、已读和特关状态，写入失败可重试，worker 重启不重复清理。

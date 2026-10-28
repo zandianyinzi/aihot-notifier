@@ -188,6 +188,9 @@ function createRefreshSpinner({ icon }, turnMs) {
       rotation?.cancel();
       rotation = null;
       braking = false;
+    },
+    isTurning() {
+      return Boolean(rotation);
     }
   };
 }
@@ -208,8 +211,20 @@ function startButtonSpin(button) {
   button.setAttribute('aria-busy', 'true');
   const spinner = getRefreshSpinner(button);
   if (!spinner) return;
-  if (prefersReducedMotion()) spinner.stop();
-  else spinner.spin();
+  if (prefersReducedMotion()) {
+    spinner.stop();
+  } else if (spinner.isTurning()) {
+    // Resuming during a landing keeps turning without a pause; the glyph color is unchanged.
+    spinner.spin();
+  } else {
+    // The glyph sits on its own layer (will-change: transform). Chrome keeps whatever raster it
+    // last made and only rotates it, so a repaint made while the glyph is turned (for example the
+    // loading color) is reused after it lands and shows up to 1px off until the next repaint.
+    // Paint the loading color at rest first, then start turning.
+    waitForNextPaint().then(() => {
+      if (button.classList.contains('is-loading')) spinner.spin();
+    });
+  }
 }
 
 function beginButtonLoading(button, owner) {

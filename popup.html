@@ -293,6 +293,7 @@
       .skeleton-line,
       .btn-icon.is-result-ok,
       #pollNow.is-result-accent,
+      #pollNow.is-result-danger,
       .btn-mark-read.is-result-accent,
       .btn-icon.is-result-danger,
       .item.is-jump-target {
@@ -352,6 +353,15 @@
     /* Refresh does not scale on press, so the spin and the press never stack into a shift. */
     #pollNow:active {
       transform: none;
+    }
+
+    /* While loading and showing a result the refresh glyph switches color in one step: a color
+       transition would repaint the glyph while it turns. See #pollNow.is-result-accent below.
+       At rest the button keeps the shared hover fade. */
+    #pollNow.is-loading,
+    #pollNow.is-result-accent,
+    #pollNow.is-result-danger {
+      transition: background var(--motion-tap) ease;
     }
 
     .btn-mark-read {
@@ -445,14 +455,35 @@
       animation: control-result-ok var(--control-result-duration, var(--motion-result)) ease-out forwards;
     }
 
-    #pollNow.is-result-accent {
-      color: var(--accent);
-      animation: control-result-accent var(--control-result-duration, var(--motion-result)) ease-out forwards;
-    }
-
     .btn-icon.is-result-danger {
       color: var(--state-fail);
       animation: control-result-danger var(--control-result-duration, var(--motion-result)) ease-out forwards;
+    }
+
+    /* The refresh result fades only the background, and the glyph keeps the loading accent color
+       until the class is removed at rest. Any glyph repaint while it still turns (a color animation,
+       or switching to the failure red during the landing) leaves Chrome reusing a raster made at an
+       angle, so the landed glyph sits up to 1px off and snaps back when the result ends. Failure is
+       shown by the red background and the status message. */
+    #pollNow.is-result-accent {
+      color: var(--accent);
+      animation: refresh-result-accent var(--control-result-duration, var(--motion-result)) ease-out forwards;
+    }
+
+    #pollNow.is-result-danger {
+      color: var(--accent);
+      animation: refresh-result-danger var(--control-result-duration, var(--motion-result)) ease-out forwards;
+    }
+
+    @keyframes refresh-result-accent {
+      0%, 45% { background: var(--accent-soft); }
+      82%, 100% { background: transparent; }
+    }
+
+    @keyframes refresh-result-danger {
+      0% { background: var(--state-fail-soft); }
+      45% { background: var(--state-fail-softer); }
+      82%, 100% { background: transparent; }
     }
 
     /* Mark-all-read success: a brief accent swell, then fade out. The button stays visible for
@@ -475,12 +506,6 @@
       100% { background: transparent; color: var(--text-3); }
     }
 
-    @keyframes control-result-accent {
-      0% { background: var(--accent-soft); color: var(--accent); }
-      45% { background: var(--accent-soft); color: var(--accent); }
-      82% { background: transparent; color: var(--text-3); }
-      100% { background: transparent; color: var(--text-3); }
-    }
 
     @keyframes control-result-danger {
       0% { background: var(--state-fail-soft); color: var(--state-fail); }
@@ -1060,7 +1085,7 @@
     }
 
     .watch-badge {
-      font-size: 10px;
+      font-size: max(10px, calc(var(--fs-meta, 12px) - 2px));
       font-weight: 500;
       padding: 1px 6px;
       border-radius: 3px;
@@ -1134,7 +1159,7 @@
     }
 
     .item.read:hover {
-      background: color-mix(in srgb, var(--bg) 86%, #000);
+      background: color-mix(in srgb, var(--bg) 72%, #000);
     }
 
     .item:focus-visible {
@@ -1146,8 +1171,9 @@
       background: var(--bg-unread);
     }
 
+    /* Unread rows press only lightly so a hovered unread row stays lighter than a read row. */
     .item.unread:hover {
-      background: color-mix(in srgb, var(--bg-unread) 84%, #000);
+      background: color-mix(in srgb, var(--bg-unread) 90%, #000);
     }
 
     .item.watch-item.unread {
@@ -1161,26 +1187,28 @@
       color: color-mix(in oklab, var(--text-unread-2) 75%, var(--text-read));
     }
 
+    /* The meta line and its tags step back toward the background too (mixing with --text-read
+       would only grey them, it is about as light as the tag colors). Contrast stays about 4.5. */
     .item.read .item-meta {
-      color: color-mix(in oklab, var(--text-read) 50%, var(--text-3));
+      color: color-mix(in oklab, var(--text-3) 86%, var(--bg));
     }
 
-    .item.read .cat-tag.cat-model { color: color-mix(in srgb, var(--cat-model) 60%, var(--text-read)); background: color-mix(in srgb, var(--cat-model) 5%, transparent); }
-    .item.read .cat-tag.cat-products { color: color-mix(in srgb, var(--cat-products) 60%, var(--text-read)); background: color-mix(in srgb, var(--cat-products) 5%, transparent); }
-    .item.read .cat-tag.cat-industry { color: color-mix(in srgb, var(--cat-industry) 60%, var(--text-read)); background: color-mix(in srgb, var(--cat-industry) 5%, transparent); }
-    .item.read .cat-tag.cat-paper { color: color-mix(in srgb, var(--cat-paper) 60%, var(--text-read)); background: color-mix(in srgb, var(--cat-paper) 5%, transparent); }
-    .item.read .cat-tag.cat-tips { color: color-mix(in srgb, var(--cat-tips) 60%, var(--text-read)); background: color-mix(in srgb, var(--cat-tips) 5%, transparent); }
-    .item.read .cat-tag.cat-default { color: color-mix(in srgb, var(--cat-default) 60%, var(--text-read)); background: color-mix(in srgb, var(--cat-default) 5%, transparent); }
+    .item.read .cat-tag.cat-model { color: color-mix(in oklab, var(--cat-model) 80%, var(--bg)); background: color-mix(in srgb, var(--cat-model) 5%, transparent); }
+    .item.read .cat-tag.cat-products { color: color-mix(in oklab, var(--cat-products) 80%, var(--bg)); background: color-mix(in srgb, var(--cat-products) 5%, transparent); }
+    .item.read .cat-tag.cat-industry { color: color-mix(in oklab, var(--cat-industry) 80%, var(--bg)); background: color-mix(in srgb, var(--cat-industry) 5%, transparent); }
+    .item.read .cat-tag.cat-paper { color: color-mix(in oklab, var(--cat-paper) 80%, var(--bg)); background: color-mix(in srgb, var(--cat-paper) 5%, transparent); }
+    .item.read .cat-tag.cat-tips { color: color-mix(in oklab, var(--cat-tips) 80%, var(--bg)); background: color-mix(in srgb, var(--cat-tips) 5%, transparent); }
+    .item.read .cat-tag.cat-default { color: color-mix(in oklab, var(--cat-default) 86%, var(--bg)); background: color-mix(in srgb, var(--cat-default) 5%, transparent); }
 
-    /* Read tags keep 60% of their hue, enough to tell categories apart without pulling the eye. */
     .item.read .watch-badge {
-      color: color-mix(in srgb, var(--accent) 60%, var(--text-read));
+      color: color-mix(in oklab, var(--accent) 78%, var(--bg));
       background: color-mix(in srgb, var(--accent) 6%, transparent);
     }
 
     /* Category tag */
+    /* Follows the font-size setting, two steps below the meta text, never under 10px. */
     .cat-tag {
-      font-size: 10px;
+      font-size: max(10px, calc(var(--fs-meta, 12px) - 2px));
       font-weight: 500;
       padding: 1px 6px;
       border-radius: 3px;
@@ -1328,7 +1356,7 @@
   <body style="width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: var(--bg, #111110); color-scheme: var(--color-scheme, dark);">
   <div class="header">
     <div class="brand">
-      <a id="brandLink" href="https://aihot.virxact.com/" target="_blank" rel="noopener noreferrer" aria-label="AI HOT">
+      <a id="brandLink" href="https://aihot.news/" target="_blank" rel="noopener noreferrer" aria-label="AI HOT">
         <svg class="brand-logo" viewBox="24 0 90 128" aria-hidden="true" focusable="false">
           <g class="brand-logo-mark">
             <path d="M35.84 115.2 L62.72 12.8" stroke-width="7"></path>

@@ -54,7 +54,7 @@ function v1Item(overrides = {}) {
     source: { name: 'v1 来源', ...source },
     links: {
       original: 'https://example.com/v1-original',
-      aihot: 'https://aihot.virxact.com/items/v1-item',
+      aihot: 'https://aihot.news/items/v1-item',
       ...links
     },
     category: 'industry',
@@ -157,14 +157,14 @@ async function runTests() {
       id: 'new-1',
       title: '测试新闻：Claude 5 发布',
       source: { name: 'Anthropic Blog' },
-      links: { original: 'https://example.com/claude-5', aihot: 'https://aihot.virxact.com/items/new-1' },
+      links: { original: 'https://example.com/claude-5', aihot: 'https://aihot.news/items/new-1' },
       publishedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString()
     }),
     v1Item({
       id: 'new-2',
       title: '测试新闻：GPT-6 发布',
       source: { name: 'OpenAI Blog' },
-      links: { original: 'https://example.com/gpt-6', aihot: 'https://aihot.virxact.com/items/new-2' },
+      links: { original: 'https://example.com/gpt-6', aihot: 'https://aihot.news/items/new-2' },
       publishedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString()
     })
   ];
@@ -180,7 +180,7 @@ async function runTests() {
   assert(firstNotification?.contextMessage === 'Anthropic Blog', '通知来源映射 source.name');
   assert(badgeText === '2' && badgeColor === '#e2231a', `角标显示未读数 2: "${badgeText}"`);
   assert(storageData.history.length === 2 && storageData.history[0].url === 'https://example.com/claude-5', 'history 存入 v1 links.original');
-  assert(storageData.history[0].permalink === 'https://aihot.virxact.com/items/new-1', 'history 保留 v1 links.aihot');
+  assert(storageData.history[0].permalink === 'https://aihot.news/items/new-1', 'history 保留 v1 links.aihot');
 
   console.log('\n[场景1b: 通知显示新增未读，角标显示累计未读]');
   const existingUnread = [0, 1, 2].map(index => v1Item({
@@ -237,7 +237,7 @@ async function runTests() {
 
   console.log('\n[场景5-7: 单条格式、关闭通知与手动刷新]');
   resetState({ apiFingerprints: { selected: 'fp-old' } });
-  useV1Feed([v1Item({ id: 'new-3', title: '单条测试新闻', source: { name: 'Test' }, links: { original: 'https://example.com/single', aihot: 'https://aihot.virxact.com/items/new-3' } })]);
+  useV1Feed([v1Item({ id: 'new-3', title: '单条测试新闻', source: { name: 'Test' }, links: { original: 'https://example.com/single', aihot: 'https://aihot.news/items/new-3' } })]);
   await autoPoll();
   assert(notificationsCreated.length === 1, '单条新消息触发通知');
   assert(notificationsCreated[0]?.title === 'AI HOT 新内容', `单条通知标题: "${notificationsCreated[0]?.title}"`);
@@ -271,7 +271,7 @@ async function runTests() {
 
   console.log('\n[场景10: all 模式新发现旧发布时间不触发未读通知]');
   resetState({ feedMode: 'all', apiFingerprints: { all: 'fp-old' }, readAllBefore: new Date(Date.now() - 60 * 60 * 1000).toISOString() });
-  useV1Feed([v1Item({ id: 'old-new', title: '新发现旧发布时间内容', source: { name: 'AI HOT' }, links: { original: 'https://example.com/old-new', aihot: 'https://aihot.virxact.com/items/old-new' }, publishedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString() })], 'fp-selected');
+  useV1Feed([v1Item({ id: 'old-new', title: '新发现旧发布时间内容', source: { name: 'AI HOT' }, links: { original: 'https://example.com/old-new', aihot: 'https://aihot.news/items/old-new' }, publishedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString() })], 'fp-selected');
   await autoPoll();
   assert(notificationsCreated.length === 0, '当前不可见的旧发布时间新增不触发未读通知');
   assert(storageData.history.length === 1 && Boolean(storageData.history[0].discoveredAt), '新发现条目写入 history 并记录发现时间');
@@ -300,13 +300,13 @@ async function runTests() {
     apiFingerprints: { selected: 'fp-old' },
     watchRules: [{ id: 'wr_khazix', source: '公众号', author: '数字生命卡兹克', keywords: ['Claude Code'], enabled: true }]
   });
-  useV1Feed([v1Item({ id: 'khazix-1', title: 'Claude Code 6个实用Hook玩法', source: { name: '公众号：数字生命卡兹克' }, links: { original: 'https://mp.weixin.qq.com/s/LVj2foSXi_hBRKxjuYaUyw', aihot: 'https://aihot.virxact.com/items/khazix-1' } })]);
+  useV1Feed([v1Item({ id: 'khazix-1', title: 'Claude Code 6个实用Hook玩法', source: { name: '公众号：数字生命卡兹克' }, links: { original: 'https://mp.weixin.qq.com/s/LVj2foSXi_hBRKxjuYaUyw', aihot: 'https://aihot.news/items/khazix-1' } })]);
   await autoPoll();
   assert(notificationsCreated.length === 1 && notificationsCreated[0].title.includes('特关'), '特关只发1条独立通知');
   assert(storageData.history[0].watchMatched === true, 'history 标记特关命中');
   assert(storageData.watchNotifyState['khazix-1']?.notifyCount === 1, '特关通知状态记录次数');
   resetState({ apiFingerprints: { selected: 'fp-old' }, watchRules: [{ id: 'wr_x', source: 'X', author: '', keywords: [], enabled: true }] });
-  useV1Feed([0, 1, 2, 3].map(index => v1Item({ id: `x-${index}`, title: `X热点${index}`, source: { name: 'X：测试账号 (@test)' }, links: { original: `https://x.com/a/status/${index}`, aihot: `https://aihot.virxact.com/items/x-${index}` }, publishedAt: new Date(Date.now() - index * 1000).toISOString() })));
+  useV1Feed([0, 1, 2, 3].map(index => v1Item({ id: `x-${index}`, title: `X热点${index}`, source: { name: 'X：测试账号 (@test)' }, links: { original: `https://x.com/a/status/${index}`, aihot: `https://aihot.news/items/x-${index}` }, publishedAt: new Date(Date.now() - index * 1000).toISOString() })));
   await autoPoll();
   assert(notificationsCreated.length === 3, `特关每轮最多3条: ${notificationsCreated.length}`);
   assert(storageData.history.filter(item => item.watchMatched).length === 4, '超过3条仍全部进入特关历史');
@@ -356,7 +356,7 @@ async function runTests() {
       title: '旧标题',
       source: '普通来源',
       url: retainedUrl,
-      permalink: 'https://aihot.virxact.com/items/retained-new-match',
+      permalink: 'https://aihot.news/items/retained-new-match',
       time: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       discoveredAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       selected: true
@@ -367,7 +367,7 @@ async function runTests() {
     id: 'retained-new-match',
     title: '刷新后标题',
     source: { name: '目标来源' },
-    links: { original: retainedUrl, aihot: 'https://aihot.virxact.com/items/retained-new-match' }
+    links: { original: retainedUrl, aihot: 'https://aihot.news/items/retained-new-match' }
   })]);
   await autoPoll();
   const newlyMatchedRetained = storageData.history.find(item => item.id === 'retained-new-match');
@@ -381,7 +381,7 @@ async function runTests() {
       title: '旧命中条目',
       source: '旧目标来源',
       url: 'https://example.com/stale-watch-match',
-      permalink: 'https://aihot.virxact.com/items/stale-watch-match',
+      permalink: 'https://aihot.news/items/stale-watch-match',
       time: new Date().toISOString(),
       discoveredAt: new Date().toISOString(),
       selected: true,
@@ -394,15 +394,15 @@ async function runTests() {
       'stale-watch-match': { ruleIds: ['wr_stale'], firstMatchedAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(), lastNotifiedAt: '', notifyCount: 0, nextNotifyAt: new Date(Date.now() - 1000).toISOString(), viewedAt: '' }
     }
   });
-  useV1Feed([v1Item({ id: 'stale-watch-match', source: { name: '新非目标来源' }, links: { original: 'https://example.com/stale-watch-match', aihot: 'https://aihot.virxact.com/items/stale-watch-match' } })]);
+  useV1Feed([v1Item({ id: 'stale-watch-match', source: { name: '新非目标来源' }, links: { original: 'https://example.com/stale-watch-match', aihot: 'https://aihot.news/items/stale-watch-match' } })]);
   await autoPoll();
   const noLongerMatched = storageData.history.find(item => item.id === 'stale-watch-match');
   assert(notificationsCreated.length === 0 && noLongerMatched?.watchMatched !== true && !noLongerMatched?.watchRuleIds, '刷新后不再命中的保留条目清除匹配元数据且不提醒');
 
   resetState({ apiFingerprints: { selected: 'fp-old' } });
   useV1Feed([
-    v1Item({ id: 'duplicate-notification', title: '通知旧字段', links: { original: 'https://example.com/duplicate-notification', aihot: 'https://aihot.virxact.com/items/duplicate-notification' } }),
-    v1Item({ id: 'duplicate-notification', title: '通知最终字段', links: { original: 'https://example.com/duplicate-notification', aihot: 'https://aihot.virxact.com/items/duplicate-notification' } })
+    v1Item({ id: 'duplicate-notification', title: '通知旧字段', links: { original: 'https://example.com/duplicate-notification', aihot: 'https://aihot.news/items/duplicate-notification' } }),
+    v1Item({ id: 'duplicate-notification', title: '通知最终字段', links: { original: 'https://example.com/duplicate-notification', aihot: 'https://aihot.news/items/duplicate-notification' } })
   ]);
   await autoPoll();
   assert(storageData.history.length === 1 && notificationsCreated.length === 1 && notificationsCreated[0]?.message === '通知最终字段', '重复 ID 只作为一个 inserted 分类并使用最终字段通知');
@@ -417,7 +417,7 @@ async function runTests() {
       title: '隐藏特关',
       source: '隐藏来源',
       url: 'https://example.com/hidden-watch',
-      permalink: 'https://aihot.virxact.com/items/hidden-watch',
+      permalink: 'https://aihot.news/items/hidden-watch',
       time: new Date().toISOString(),
       discoveredAt: new Date().toISOString(),
       selected: false,
@@ -437,7 +437,7 @@ async function runTests() {
     apiFingerprints: { selected: 'fp-old' },
     watchRules: [{ id: 'wr_silent_paths', source: '静默来源', author: '', keywords: [], enabled: true }]
   });
-  useV1Feed([v1Item({ id: 'manual-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/manual-watch', aihot: 'https://aihot.virxact.com/items/manual-watch' } })]);
+  useV1Feed([v1Item({ id: 'manual-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/manual-watch', aihot: 'https://aihot.news/items/manual-watch' } })]);
   await sendMessage({ type: 'pollNow' });
   assert(notificationsCreated.length === 0 && storageData.watchNotifyState['manual-watch']?.notifyCount === 0, '手动刷新的新特关条目静默建立提醒状态');
 
@@ -451,10 +451,10 @@ async function runTests() {
     const cursor = new URL(url).searchParams.get('cursor');
     if (cursor === 'silent-watch-cursor') {
       continuationRequested = true;
-      return responseForItems([v1Item({ id: 'continuation-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/continuation-watch', aihot: 'https://aihot.virxact.com/items/continuation-watch' } })]);
+      return responseForItems([v1Item({ id: 'continuation-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/continuation-watch', aihot: 'https://aihot.news/items/continuation-watch' } })]);
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
-      v1Item({ id: 'switch-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/switch-watch', aihot: 'https://aihot.virxact.com/items/switch-watch' } })
+      v1Item({ id: 'switch-watch', source: { name: '静默来源' }, links: { original: 'https://example.com/switch-watch', aihot: 'https://aihot.news/items/switch-watch' } })
     ], { hasMore: true, nextCursor: 'silent-watch-cursor' })) });
   };
   await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });

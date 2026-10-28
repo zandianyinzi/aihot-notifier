@@ -96,7 +96,7 @@ function v1Item(overrides = {}) {
     source: { name: 'v1 来源', ...source },
     links: {
       original: 'https://example.com/v1-original',
-      aihot: 'https://aihot.virxact.com/items/v1-item',
+      aihot: 'https://aihot.news/items/v1-item',
       ...links
     },
     category: 'industry',
@@ -383,7 +383,7 @@ async function runTests() {
             source: { name: 'v1 第二来源' },
             links: {
               original: 'https://example.com/v1-second-original',
-              aihot: 'https://aihot.virxact.com/items/v1-second'
+              aihot: 'https://aihot.news/items/v1-second'
             }
           })
         ]))
@@ -403,7 +403,7 @@ async function runTests() {
   assert(v1ItemUrls.length === 2 && isV1ItemsUrl(v1ItemUrls[0], 'selected') && isV1ItemsUrl(v1ItemUrls[1], 'selected', 'v1-next'), '首个 v1 URL 不含 cursor，page.nextCursor 只驱动续页');
   assert(v1ItemUrls.every(url => !new URL(url).searchParams.has('since')), 'v1 items URL 不携带 legacy since 参数');
   assert(storageData.history.length === 2, 'page.hasMore 驱动第二页拉取');
-  assert(storageData.history[0]?.url === 'https://example.com/v1-original' && storageData.history[0]?.permalink === 'https://aihot.virxact.com/items/v1-item', 'links.original 和 links.aihot 映射为历史链接');
+  assert(storageData.history[0]?.url === 'https://example.com/v1-original' && storageData.history[0]?.permalink === 'https://aihot.news/items/v1-item', 'links.original 和 links.aihot 映射为历史链接');
   assert(storageData.history[0]?.source === 'v1 来源', 'source.name 映射为历史来源');
 
   console.log('\n[七天显示窗口保留第六天内容]');
@@ -557,14 +557,14 @@ async function runTests() {
         id: 'v1-aihot-only',
         links: {
           original: '',
-          aihot: 'https://aihot.virxact.com/items/v1-aihot-only'
+          aihot: 'https://aihot.news/items/v1-aihot-only'
         }
       })
     ]))
   });
 
   await sendMessage({ type: 'pollNow' });
-  assert(storageData.history[0]?.url === 'https://aihot.virxact.com/items/v1-aihot-only', '缺少 original 时回退到 links.aihot');
+  assert(storageData.history[0]?.url === 'https://aihot.news/items/v1-aihot-only', '缺少 original 时回退到 links.aihot');
 
   console.log('\n[API v1 条目映射与无效条目]');
   resetState();
@@ -581,7 +581,7 @@ async function runTests() {
           attribution: { name: '原作者', url: 'https://example.com/author' },
           links: {
             original: 'http://example.com/insecure-original',
-            aihot: 'https://aihot.virxact.com/items/v1-mapped'
+            aihot: 'https://aihot.news/items/v1-mapped'
           }
         })
       ]))
@@ -591,7 +591,7 @@ async function runTests() {
   const mappingResponse = await sendMessage({ type: 'pollNow' });
   assert(mappingResponse.ok === true && storageData.history.length === 1, '无效 v1 item 被跳过且有效 item 继续入库');
   assert(storageData.history[0]?.titleEn === 'Original English title' && storageData.history[0]?.attribution?.name === '原作者' && storageData.history[0]?.attribution?.url === 'https://example.com/author', 'originalTitle 和 attribution 映射并持久化到 history');
-  assert(storageData.history[0]?.url === 'https://aihot.virxact.com/items/v1-mapped' && storageData.history[0]?.permalink === 'https://aihot.virxact.com/items/v1-mapped', '非 HTTPS original 回退到 HTTPS aihot');
+  assert(storageData.history[0]?.url === 'https://aihot.news/items/v1-mapped' && storageData.history[0]?.permalink === 'https://aihot.news/items/v1-mapped', '非 HTTPS original 回退到 HTTPS aihot');
 
   console.log('\n[API v1 时间戳验证与回退]');
   resetState({ apiFingerprints: { selected: 'fp-old' } });
@@ -699,7 +699,7 @@ async function runTests() {
       publishedAt: oldInstallPublishedAt,
       links: {
         original: 'https://example.com/install-old-published',
-        aihot: 'https://aihot.virxact.com/items/install-old-published'
+        aihot: 'https://aihot.news/items/install-old-published'
       }
     })]))
   });
@@ -753,7 +753,7 @@ async function runTests() {
   const previousProgressiveHistory = Array.from({ length: 2005 }, (_, index) => ({
     id: `previous-progressive-${index}`,
     url: `https://example.com/previous-progressive-${index}`,
-    permalink: `https://aihot.virxact.com/items/previous-progressive-${index}`,
+    permalink: `https://aihot.news/items/previous-progressive-${index}`,
     time: new Date(Date.now() - index * 1000).toISOString(),
     discoveredAt: new Date(Date.now() - index * 1000).toISOString()
   }));
@@ -813,12 +813,12 @@ async function runTests() {
       if (throttledCursorRequests === 1) return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '0' : '' } });
       return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
         id: 'retry-page-2',
-        links: { original: 'https://example.com/retry-page-2', aihot: 'https://aihot.virxact.com/items/retry-page-2' }
+        links: { original: 'https://example.com/retry-page-2', aihot: 'https://aihot.news/items/retry-page-2' }
       })])) });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
       id: 'retry-page-1',
-      links: { original: 'https://example.com/retry-page-1', aihot: 'https://aihot.virxact.com/items/retry-page-1' }
+      links: { original: 'https://example.com/retry-page-1', aihot: 'https://aihot.news/items/retry-page-1' }
     })], { hasMore: true, nextCursor: 'retry-page-2' })) });
   };
   const rateLimitedResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
@@ -865,7 +865,7 @@ async function runTests() {
     history: [{
       id: 'long-retry-page-2',
       url: 'https://example.com/long-retry-page-2',
-      permalink: 'https://aihot.virxact.com/items/long-retry-page-2',
+      permalink: 'https://aihot.news/items/long-retry-page-2',
       time: longRetryKnownDiscoveredAt,
       discoveredAt: longRetryKnownDiscoveredAt
     }]
@@ -882,12 +882,12 @@ async function runTests() {
       if (longRetryRequests === 1) return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '901' : '' } });
       return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
         id: 'long-retry-page-2',
-        links: { original: 'https://example.com/long-retry-page-2', aihot: 'https://aihot.virxact.com/items/long-retry-page-2' }
+        links: { original: 'https://example.com/long-retry-page-2', aihot: 'https://aihot.news/items/long-retry-page-2' }
       })])) });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
       id: 'long-retry-page-1',
-      links: { original: 'https://example.com/long-retry-page-1', aihot: 'https://aihot.virxact.com/items/long-retry-page-1' }
+      links: { original: 'https://example.com/long-retry-page-1', aihot: 'https://aihot.news/items/long-retry-page-1' }
     })], { hasMore: true, nextCursor: 'long-retry' })) });
   };
   const longRetryResponse = await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
@@ -913,7 +913,7 @@ async function runTests() {
       if (failedSwitchCursorRequests === 1) return Promise.resolve({ ok: false, status: 429, headers: { get: name => name === 'Retry-After' ? '60' : '' } });
       return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
         id: 'preserved-after-failed-switch',
-        links: { original: 'https://example.com/preserved-after-failed-switch', aihot: 'https://aihot.virxact.com/items/preserved-after-failed-switch' }
+        links: { original: 'https://example.com/preserved-after-failed-switch', aihot: 'https://aihot.news/items/preserved-after-failed-switch' }
       })])) });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'preserve-first' })], { hasMore: true, nextCursor: 'preserve-cursor' })) });
@@ -963,7 +963,7 @@ async function runTests() {
       return new Promise(resolve => {
         releaseLiveCursor = () => resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
           id: 'live-cursor-after-failed-switch',
-          links: { original: 'https://example.com/live-cursor-after-failed-switch', aihot: 'https://aihot.virxact.com/items/live-cursor-after-failed-switch' }
+          links: { original: 'https://example.com/live-cursor-after-failed-switch', aihot: 'https://aihot.news/items/live-cursor-after-failed-switch' }
         })])) });
       });
     }
@@ -990,13 +990,13 @@ async function runTests() {
         return new Promise(resolve => {
           releaseStaleRaceCursor = () => resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
             id: 'stale-race-page',
-            links: { original: 'https://example.com/stale-race-page', aihot: 'https://aihot.virxact.com/items/stale-race-page' }
+            links: { original: 'https://example.com/stale-race-page', aihot: 'https://aihot.news/items/stale-race-page' }
           })], { hasMore: true, nextCursor: 'stale-cursor' })) });
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
         id: 'advanced-race-page',
-        links: { original: 'https://example.com/advanced-race-page', aihot: 'https://aihot.virxact.com/items/advanced-race-page' }
+        links: { original: 'https://example.com/advanced-race-page', aihot: 'https://aihot.news/items/advanced-race-page' }
       })], { hasMore: true, nextCursor: 'advanced-cursor' })) });
     }
     if (cursor === 'advanced-cursor') {
@@ -1159,12 +1159,12 @@ async function runTests() {
     if (new URL(url).searchParams.get('cursor') === 'final-page-2') {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
         id: 'final-page-2',
-        links: { original: 'https://example.com/final-page-2', aihot: 'https://aihot.virxact.com/items/final-page-2' }
+        links: { original: 'https://example.com/final-page-2', aihot: 'https://aihot.news/items/final-page-2' }
       })])) });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
       id: 'final-page-1',
-      links: { original: 'https://example.com/final-page-1', aihot: 'https://aihot.virxact.com/items/final-page-1' }
+      links: { original: 'https://example.com/final-page-1', aihot: 'https://aihot.news/items/final-page-1' }
     })], { hasMore: true, nextCursor: 'final-page-2' })) });
   };
   await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
@@ -1327,7 +1327,7 @@ async function runTests() {
       id: 'canonical-before-legacy-fallback',
       title: '已有 canonical 身份',
       url: 'https://example.com/canonical-before-legacy-fallback',
-      permalink: 'https://aihot.virxact.com/items/canonical-before-legacy-fallback',
+      permalink: 'https://aihot.news/items/canonical-before-legacy-fallback',
       time: canonicalDiscoveryWinsAt,
       discoveredAt: canonicalDiscoveryWinsAt
     }],
@@ -1346,7 +1346,7 @@ async function runTests() {
       id: 'canonical-before-legacy-fallback',
       links: {
         original: 'https://example.com/canonical-before-legacy-fallback',
-        aihot: 'https://aihot.virxact.com/items/canonical-before-legacy-fallback'
+        aihot: 'https://aihot.news/items/canonical-before-legacy-fallback'
       }
     })]))
   });
@@ -1361,7 +1361,7 @@ async function runTests() {
     history: [{
       title: '无 ID canonical 记录',
       url: 'https://example.com/canonical-alias',
-      permalink: 'https://aihot.virxact.com/items/original-canonical-alias',
+      permalink: 'https://aihot.news/items/original-canonical-alias',
       time: canonicalAliasDiscovery,
       discoveredAt: canonicalAliasDiscovery
     }],
@@ -1371,7 +1371,7 @@ async function runTests() {
       cursor: 'legacy-alias-cursor',
       retryAttempts: 0,
       retryAt: '',
-      discoveredAtByAlias: { 'permalink:https://aihot.virxact.com/items/incoming-alias': staleLegacyAliasDiscovery }
+      discoveredAtByAlias: { 'permalink:https://aihot.news/items/incoming-alias': staleLegacyAliasDiscovery }
     }
   });
   fetchImpl = () => Promise.resolve({
@@ -1380,7 +1380,7 @@ async function runTests() {
       id: 'canonical-alias-id',
       links: {
         original: 'https://example.com/canonical-alias',
-        aihot: 'https://aihot.virxact.com/items/incoming-alias'
+        aihot: 'https://aihot.news/items/incoming-alias'
       }
     })]))
   });
@@ -1398,7 +1398,7 @@ async function runTests() {
       cursor: 'unique-legacy-alias-cursor',
       retryAttempts: 0,
       retryAt: '',
-      discoveredAtByAlias: { 'permalink:https://aihot.virxact.com/items/unique-legacy-alias': uniqueLegacyAliasDiscovery }
+      discoveredAtByAlias: { 'permalink:https://aihot.news/items/unique-legacy-alias': uniqueLegacyAliasDiscovery }
     }
   });
   fetchImpl = () => Promise.resolve({
@@ -1407,7 +1407,7 @@ async function runTests() {
       id: 'unique-legacy-alias-item',
       links: {
         original: 'https://example.com/unique-legacy-alias',
-        aihot: 'https://aihot.virxact.com/items/unique-legacy-alias'
+        aihot: 'https://aihot.news/items/unique-legacy-alias'
       }
     })]))
   });
@@ -1426,7 +1426,7 @@ async function runTests() {
       retryAttempts: 0,
       retryAt: '',
       discoveredAtByAlias: {
-        'permalink:https://aihot.virxact.com/items/ambiguous-legacy-alias': new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString(),
+        'permalink:https://aihot.news/items/ambiguous-legacy-alias': new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString(),
         'url:https://example.com/ambiguous-legacy-alias': new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString()
       }
     }
@@ -1437,7 +1437,7 @@ async function runTests() {
       id: 'ambiguous-legacy-alias-item',
       links: {
         original: 'https://example.com/ambiguous-legacy-alias',
-        aihot: 'https://aihot.virxact.com/items/ambiguous-legacy-alias'
+        aihot: 'https://aihot.news/items/ambiguous-legacy-alias'
       }
     })]))
   });
@@ -1450,7 +1450,7 @@ async function runTests() {
     title: `续拉历史 ${index + 1}`,
     source: index === 2000 || index === 2362 ? '关注来源' : '其它来源',
     url: `https://example.com/dense-continuation-${index + 1}`,
-    permalink: `https://aihot.virxact.com/items/dense-continuation-${index + 1}`,
+    permalink: `https://aihot.news/items/dense-continuation-${index + 1}`,
     time: new Date(Date.now() - index * 1000).toISOString(),
     discoveredAt: new Date(Date.now() - (index + 1) * 60 * 1000).toISOString(),
     selected: false,
@@ -1485,7 +1485,7 @@ async function runTests() {
       source: { name: '关注来源' },
       links: {
         original: 'https://example.com/dense-continuation-2363',
-        aihot: 'https://aihot.virxact.com/items/dense-continuation-2363'
+        aihot: 'https://aihot.news/items/dense-continuation-2363'
       }
     })]))
   });
@@ -1572,7 +1572,7 @@ async function runTests() {
     history: [{
       id: 'race-watch',
       url: 'https://example.com/race-watch',
-      permalink: 'https://aihot.virxact.com/items/race-watch',
+      permalink: 'https://aihot.news/items/race-watch',
       title: '并发特关条目',
       source: '旧来源',
       time: new Date().toISOString(),
@@ -1644,7 +1644,7 @@ async function runTests() {
       id: 'shared-after-switch',
       title: '切源共享条目',
       url: 'https://example.com/shared-after-switch',
-      permalink: 'https://aihot.virxact.com/items/shared-after-switch',
+      permalink: 'https://aihot.news/items/shared-after-switch',
       time: originalPublishedAt,
       discoveredAt: originalDiscoveredAt,
       selected: true
@@ -1663,7 +1663,7 @@ async function runTests() {
           selected: true,
           links: {
             original: 'https://example.com/shared-after-switch',
-            aihot: 'https://aihot.virxact.com/items/shared-after-switch'
+            aihot: 'https://aihot.news/items/shared-after-switch'
           }
         }),
         v1Item({
@@ -1672,7 +1672,7 @@ async function runTests() {
           publishedAt: originalPublishedAt,
           links: {
             original: 'https://example.com/new-after-switch',
-            aihot: 'https://aihot.virxact.com/items/new-after-switch'
+            aihot: 'https://aihot.news/items/new-after-switch'
           }
         })
       ]))
@@ -1693,7 +1693,7 @@ async function runTests() {
     title: `内容源回归 ${index + 1}`,
     source: index === 2000 || index === 2362 ? '回归关注源' : '回归普通源',
     url: `https://example.com/source-regression-${index + 1}`,
-    permalink: `https://aihot.virxact.com/items/source-regression-${index + 1}`,
+    permalink: `https://aihot.news/items/source-regression-${index + 1}`,
     time: regressionPublishedAt,
     discoveredAt: new Date(Date.now() - (index + 1) * 1000).toISOString(),
     selected: index < 96,
@@ -1752,7 +1752,7 @@ async function runTests() {
       publishedAt: regressionPublishedAt,
       links: {
         original: 'https://example.com/source-regression-new',
-        aihot: 'https://aihot.virxact.com/items/source-regression-new'
+        aihot: 'https://aihot.news/items/source-regression-new'
       }
     }),
     ...regressionHistory.map(item => v1Item({
@@ -1813,7 +1813,7 @@ async function runTests() {
     id: 'deep-selected-item',
     title: '全量历史深层精选',
     url: 'https://example.com/deep-selected-item',
-    permalink: 'https://aihot.virxact.com/items/deep-selected-item',
+    permalink: 'https://aihot.news/items/deep-selected-item',
     time: originalPublishedAt,
     discoveredAt: deepSelectedDiscoveredAt,
     selected: true
@@ -1840,7 +1840,7 @@ async function runTests() {
         publishedAt: originalPublishedAt,
         links: {
           original: 'https://example.com/deep-selected-item',
-          aihot: 'https://aihot.virxact.com/items/deep-selected-item'
+          aihot: 'https://aihot.news/items/deep-selected-item'
         }
       })]))
     });
@@ -1868,7 +1868,7 @@ async function runTests() {
         publishedAt: originalPublishedAt,
         links: {
           original: collidingUrl,
-          aihot: 'https://aihot.virxact.com/items/exact-id-item'
+          aihot: 'https://aihot.news/items/exact-id-item'
         }
       })]))
     });
@@ -1882,8 +1882,8 @@ async function runTests() {
     feedMode: 'all',
     apiFingerprints: { all: 'fp-old' },
     history: [
-      { id: 'exact-refresh', title: '旧标题', source: '旧来源', url: collidingUrl, permalink: 'https://aihot.virxact.com/items/exact-refresh', time: originalPublishedAt, discoveredAt: exactIdDiscoveredAt, selected: true },
-      { id: 'different-id', title: '碰撞条目', source: '其它来源', url: collidingUrl, permalink: 'https://aihot.virxact.com/items/different-id', time: refreshedPublishedAt, discoveredAt: collidingUrlDiscoveredAt, selected: true }
+      { id: 'exact-refresh', title: '旧标题', source: '旧来源', url: collidingUrl, permalink: 'https://aihot.news/items/exact-refresh', time: originalPublishedAt, discoveredAt: exactIdDiscoveredAt, selected: true },
+      { id: 'different-id', title: '碰撞条目', source: '其它来源', url: collidingUrl, permalink: 'https://aihot.news/items/different-id', time: refreshedPublishedAt, discoveredAt: collidingUrlDiscoveredAt, selected: true }
     ]
   });
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
@@ -1895,7 +1895,7 @@ async function runTests() {
       summary: '新摘要',
       selected: false,
       publishedAt: refreshedPublishedAt,
-      links: { original: collidingUrl, aihot: 'https://aihot.virxact.com/items/exact-refresh' }
+      links: { original: collidingUrl, aihot: 'https://aihot.news/items/exact-refresh' }
     })])) });
   const exactRefreshResponse = await sendMessage({ type: 'pollNow' });
   const exactRefreshed = storageData.history.find(item => item.id === 'exact-refresh');
@@ -1905,7 +1905,7 @@ async function runTests() {
   assert(storageData.history[0]?.id === 'exact-refresh' && storageData.history[1]?.id === 'different-id', '刷新后按 getItemTime 降序排序');
 
   const legacyUrl = 'https://example.com/legacy-canonical';
-  const legacyPermalink = 'https://aihot.virxact.com/items/legacy-canonical';
+  const legacyPermalink = 'https://aihot.news/items/legacy-canonical';
   const firstMatchedEarly = new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString();
   const firstMatchedLate = new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString();
   const viewedEarly = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
@@ -1943,8 +1943,8 @@ async function runTests() {
     feedMode: 'all',
     apiFingerprints: { all: 'fp-old' },
     history: [
-      { id: '', title: '歧义1', url: legacyUrl, permalink: 'https://aihot.virxact.com/items/legacy-one', time: originalPublishedAt, discoveredAt: originalDiscoveredAt },
-      { id: '', title: '歧义2', url: legacyUrl, permalink: 'https://aihot.virxact.com/items/legacy-two', time: originalPublishedAt, discoveredAt: exactIdDiscoveredAt }
+      { id: '', title: '歧义1', url: legacyUrl, permalink: 'https://aihot.news/items/legacy-one', time: originalPublishedAt, discoveredAt: originalDiscoveredAt },
+      { id: '', title: '歧义2', url: legacyUrl, permalink: 'https://aihot.news/items/legacy-two', time: originalPublishedAt, discoveredAt: exactIdDiscoveredAt }
     ],
     readIds: [legacyUrl],
     watchRules: [],
@@ -1957,7 +1957,7 @@ async function runTests() {
     : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({
       id: 'ambiguous-api-id',
       title: '新标准条目',
-      links: { original: legacyUrl, aihot: 'https://aihot.virxact.com/items/ambiguous-api-id' }
+      links: { original: legacyUrl, aihot: 'https://aihot.news/items/ambiguous-api-id' }
     })])) });
   await sendMessage({ type: 'pollNow' });
   assert(storageData.history.length === 3 && storageData.history.filter(item => !item.id).length === 2 && storageData.history.some(item => item.id === 'ambiguous-api-id'), '多个无 ID 别名候选有歧义时都不吸收');
@@ -1967,8 +1967,8 @@ async function runTests() {
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
     ? legacyFingerprintResponse('fp-selected', 'fp-duplicate')
     : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
-      v1Item({ id: 'duplicate-id', title: '重复旧字段', links: { original: 'https://example.com/duplicate', aihot: 'https://aihot.virxact.com/items/duplicate-id' } }),
-      v1Item({ id: 'duplicate-id', title: '重复最终字段', links: { original: 'https://example.com/duplicate', aihot: 'https://aihot.virxact.com/items/duplicate-id' } })
+      v1Item({ id: 'duplicate-id', title: '重复旧字段', links: { original: 'https://example.com/duplicate', aihot: 'https://aihot.news/items/duplicate-id' } }),
+      v1Item({ id: 'duplicate-id', title: '重复最终字段', links: { original: 'https://example.com/duplicate', aihot: 'https://aihot.news/items/duplicate-id' } })
     ])) });
   await sendMessage({ type: 'feedModeChanged', feedMode: 'all' });
   assert(storageData.history.length === 1 && storageData.history[0]?.title === '重复最终字段', '同一响应的重复 ID 确定性收敛到最终 API 字段');
@@ -1976,13 +1976,13 @@ async function runTests() {
   resetState({
     feedMode: 'all',
     apiFingerprints: { all: 'fp-old' },
-    history: [{ id: 'duplicate-existing', title: '既有精选', source: 'v1 来源', url: 'https://example.com/duplicate-existing', permalink: 'https://aihot.virxact.com/items/duplicate-existing', time: originalPublishedAt, discoveredAt: originalDiscoveredAt, selected: true }]
+    history: [{ id: 'duplicate-existing', title: '既有精选', source: 'v1 来源', url: 'https://example.com/duplicate-existing', permalink: 'https://aihot.news/items/duplicate-existing', time: originalPublishedAt, discoveredAt: originalDiscoveredAt, selected: true }]
   });
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
     ? legacyFingerprintResponse('fp-selected', 'fp-duplicate-existing')
     : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
-      v1Item({ id: 'duplicate-existing', title: '中间显式降级', selected: false, links: { original: 'https://example.com/duplicate-existing', aihot: 'https://aihot.virxact.com/items/duplicate-existing' } }),
-      v1Item({ id: 'duplicate-existing', title: '最终字段缺失', links: { original: 'https://example.com/duplicate-existing', aihot: 'https://aihot.virxact.com/items/duplicate-existing' } })
+      v1Item({ id: 'duplicate-existing', title: '中间显式降级', selected: false, links: { original: 'https://example.com/duplicate-existing', aihot: 'https://aihot.news/items/duplicate-existing' } }),
+      v1Item({ id: 'duplicate-existing', title: '最终字段缺失', links: { original: 'https://example.com/duplicate-existing', aihot: 'https://aihot.news/items/duplicate-existing' } })
     ])) });
   await sendMessage({ type: 'pollNow' });
   const duplicateExisting = storageData.history.find(item => item.id === 'duplicate-existing');
@@ -1998,18 +1998,18 @@ async function runTests() {
   resetState({
     feedMode: 'all',
     apiFingerprints: { all: 'fp-old' },
-    history: [{ id: 'membership-item', title: '精选条目', source: 'v1 来源', url: 'https://example.com/membership', permalink: 'https://aihot.virxact.com/items/membership-item', time: originalPublishedAt, discoveredAt: originalDiscoveredAt, selected: true }]
+    history: [{ id: 'membership-item', title: '精选条目', source: 'v1 来源', url: 'https://example.com/membership', permalink: 'https://aihot.news/items/membership-item', time: originalPublishedAt, discoveredAt: originalDiscoveredAt, selected: true }]
   });
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
     ? legacyFingerprintResponse('fp-selected', 'fp-missing-membership')
-    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'membership-item', links: { original: 'https://example.com/membership', aihot: 'https://aihot.virxact.com/items/membership-item' } })])) });
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'membership-item', links: { original: 'https://example.com/membership', aihot: 'https://aihot.news/items/membership-item' } })])) });
   await sendMessage({ type: 'pollNow' });
   assert(storageData.history.find(item => item.id === 'membership-item')?.selected === true, 'all 响应缺少 selected 字段时保留原精选成员资格');
   storageData.feedMode = 'selected';
   storageData.apiFingerprints = { selected: 'fp-old' };
   fetchImpl = (url) => url.includes('/api/public/fingerprint')
     ? legacyFingerprintResponse('fp-force-selected', 'fp-all')
-    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'membership-item', selected: false, links: { original: 'https://example.com/membership', aihot: 'https://aihot.virxact.com/items/membership-item' } })])) });
+    : Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([v1Item({ id: 'membership-item', selected: false, links: { original: 'https://example.com/membership', aihot: 'https://aihot.news/items/membership-item' } })])) });
   await sendMessage({ type: 'pollNow' });
   assert(storageData.history.find(item => item.id === 'membership-item')?.selected === true && !Object.prototype.hasOwnProperty.call(storageData.history.find(item => item.id === 'membership-item'), 'selectedPresent'), 'selected 响应强制成员资格且不持久化瞬时字段');
 
@@ -2022,7 +2022,7 @@ async function runTests() {
       title: '已查看续拉特关',
       source: '关注来源',
       url: 'https://example.com/viewed-on-continuation',
-      permalink: 'https://aihot.virxact.com/items/viewed-on-continuation',
+      permalink: 'https://aihot.news/items/viewed-on-continuation',
       time: originalPublishedAt,
       discoveredAt: originalDiscoveredAt,
       watchMatched: true,
@@ -2032,7 +2032,7 @@ async function runTests() {
       title: '隐藏未查看续拉特关',
       source: '关注来源',
       url: 'https://example.com/hidden-unviewed-on-continuation',
-      permalink: 'https://aihot.virxact.com/items/hidden-unviewed-on-continuation',
+      permalink: 'https://aihot.news/items/hidden-unviewed-on-continuation',
       time: originalPublishedAt,
       discoveredAt: originalDiscoveredAt,
       watchMatched: true,
@@ -2080,7 +2080,7 @@ async function runTests() {
             publishedAt: originalPublishedAt,
             links: {
               original: 'https://example.com/viewed-on-continuation',
-              aihot: 'https://aihot.virxact.com/items/viewed-on-continuation'
+              aihot: 'https://aihot.news/items/viewed-on-continuation'
             }
           }), v1Item({
             id: 'hidden-unviewed-on-continuation',
@@ -2089,7 +2089,7 @@ async function runTests() {
             publishedAt: originalPublishedAt,
             links: {
               original: 'https://example.com/hidden-unviewed-on-continuation',
-              aihot: 'https://aihot.virxact.com/items/hidden-unviewed-on-continuation'
+              aihot: 'https://aihot.news/items/hidden-unviewed-on-continuation'
             }
           })]))
         });
@@ -2127,7 +2127,7 @@ async function runTests() {
       id: 'shared-on-continuation',
       title: '续拉共享条目',
       url: 'https://example.com/shared-on-continuation',
-      permalink: 'https://aihot.virxact.com/items/shared-on-continuation',
+      permalink: 'https://aihot.news/items/shared-on-continuation',
       time: originalPublishedAt,
       discoveredAt: continuedOriginalDiscoveredAt,
       selected: true
@@ -2148,7 +2148,7 @@ async function runTests() {
           selected: true,
           links: {
             original: 'https://example.com/shared-on-continuation',
-            aihot: 'https://aihot.virxact.com/items/shared-on-continuation'
+            aihot: 'https://aihot.news/items/shared-on-continuation'
           }
         })]))
       });
@@ -2223,7 +2223,7 @@ async function runTests() {
   const latestWinsHistory = Array.from({ length: 2363 }, (_, index) => ({
     id: `latest-wins-${index + 1}`,
     url: `https://example.com/latest-wins-${index + 1}`,
-    permalink: `https://aihot.virxact.com/items/latest-wins-${index + 1}`,
+    permalink: `https://aihot.news/items/latest-wins-${index + 1}`,
     time: new Date(Date.now() - index * 1000).toISOString(),
     discoveredAt: new Date(Date.now() - index * 60 * 1000).toISOString(),
     selected: index < 96
@@ -2430,14 +2430,14 @@ async function runTests() {
   const selectedSnapshotHistory = () => [{
     id: 'snapshot-present',
     url: 'https://example.com/snapshot-present',
-    permalink: 'https://aihot.virxact.com/items/snapshot-present',
+    permalink: 'https://aihot.news/items/snapshot-present',
     time: new Date().toISOString(),
     discoveredAt: new Date().toISOString(),
     selected: true
   }, {
     id: 'snapshot-absent',
     url: 'https://example.com/snapshot-absent',
-    permalink: 'https://aihot.virxact.com/items/snapshot-absent',
+    permalink: 'https://aihot.news/items/snapshot-absent',
     time: new Date().toISOString(),
     discoveredAt: new Date().toISOString(),
     selected: true
@@ -2675,7 +2675,7 @@ async function runTests() {
           source: { name: 'X：目标作者' },
           links: {
             original: 'https://example.com/v1-watch',
-            aihot: 'https://aihot.virxact.com/items/v1-watch'
+            aihot: 'https://aihot.news/items/v1-watch'
           }
         })
       ]))
@@ -2705,7 +2705,7 @@ async function runTests() {
           publishedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
           links: {
             original: 'https://example.com/v1-old-published-watch',
-            aihot: 'https://aihot.virxact.com/items/v1-old-published-watch'
+            aihot: 'https://aihot.news/items/v1-old-published-watch'
           }
         })
       ]))
@@ -2734,7 +2734,7 @@ async function runTests() {
           source: { name: 'X：目标作者' },
           links: {
             original: 'https://example.com/v1-concurrent-watch',
-            aihot: 'https://aihot.virxact.com/items/v1-concurrent-watch'
+            aihot: 'https://aihot.news/items/v1-concurrent-watch'
           }
         })
       ]))
@@ -2825,14 +2825,14 @@ async function runTests() {
       id: 'v1-retained',
       title: '保留条目',
       url: 'https://example.com/v1-retained',
-      permalink: 'https://aihot.virxact.com/items/v1-retained',
+      permalink: 'https://aihot.news/items/v1-retained',
       source: 'X：目标作者',
       time: new Date().toISOString()
     }],
     watchNotifyState: {
       'v1-retained': { notifyCount: 1 },
       'https://example.com/v1-retained': { notifyCount: 1 },
-      'https://aihot.virxact.com/items/v1-retained': { notifyCount: 1 },
+      'https://aihot.news/items/v1-retained': { notifyCount: 1 },
       'orphan-watch-state': { notifyCount: 1 }
     }
   });
@@ -2845,7 +2845,7 @@ async function runTests() {
           id: 'v1-retained',
           links: {
             original: 'https://example.com/v1-retained',
-            aihot: 'https://aihot.virxact.com/items/v1-retained'
+            aihot: 'https://aihot.news/items/v1-retained'
           },
           source: { name: 'X：目标作者' }
         })
@@ -2855,7 +2855,7 @@ async function runTests() {
 
   const cleanupResponse = await sendMessage({ type: 'pollNow' });
   assert(cleanupResponse.ok === true, '合并已有条目时清理特关状态仍可成功');
-  assert(storageData.watchNotifyState['v1-retained'] && !storageData.watchNotifyState['https://example.com/v1-retained'] && !storageData.watchNotifyState['https://aihot.virxact.com/items/v1-retained'], '合并已有条目后特关状态收敛到标准 ID');
+  assert(storageData.watchNotifyState['v1-retained'] && !storageData.watchNotifyState['https://example.com/v1-retained'] && !storageData.watchNotifyState['https://aihot.news/items/v1-retained'], '合并已有条目后特关状态收敛到标准 ID');
   assert(!storageData.watchNotifyState['orphan-watch-state'], '合并 history 时移除 orphan 特关状态');
 
   console.log('\n[API 失败语义]');

@@ -426,6 +426,26 @@ assert(!/stroke-dasharray:\s*46\.73/.test(popupHtml), '刷新图标不再使用 
 assert(!/refresh-orbit|refresh-settle|is-loading-finishing|is-loading-settling|loading-ring-(open|close)/.test(popupHtml + popupJs), '刷新动效全部由 popup.js 的 Web Animations 驱动，不在 CSS 动画之间切换');
 assert(/#pollNow\s+\.refresh-icon\s*{[\s\S]*?will-change:\s*transform/i.test(popupHtml), '刷新图标常驻合成层，开始和停止旋转时不重新栅格化');
 {
+  // The glyph layer keeps the raster it last made and only rotates it; a repaint while turned
+  // is reused after landing and shows up to 1px off. The glyph must not repaint while it turns.
+  const keyframes = name => popupHtml.match(new RegExp(`@keyframes\\s+${name}\\s*{((?:[^{}]*{[^}]*})*)\\s*}`))?.[1] || '';
+  for (const name of ['refresh-result-accent', 'refresh-result-danger']) {
+    const body = keyframes(name);
+    assert(body && !/\bcolor\s*:/.test(body), `${name} 只淡出背景，不动画图标颜色`);
+  }
+  for (const state of ['is-result-accent', 'is-result-danger']) {
+    const rule = [...popupHtml.matchAll(new RegExp(`#pollNow\\.${state}\\s*{([^}]*)}`, 'g'))]
+      .map(match => match[1]).find(body => /animation:/.test(body)) || '';
+    assert(/animation:\s*refresh-result-/.test(rule) && /color:\s*var\(--accent\)/.test(rule), `刷新按钮 ${state} 期间图标保持加载色，减速途中不改色`);
+  }
+  const lockedTransition = popupHtml.match(/#pollNow\.is-loading,\s*#pollNow\.is-result-accent,\s*#pollNow\.is-result-danger\s*{([^}]*)}/)?.[1] || '';
+  assert(/transition:/.test(lockedTransition) && !/color/.test(lockedTransition), '刷新按钮加载与结果期间颜色一步切换，不与旋转重叠渐变');
+  assert(!/(^|\n)\s*#pollNow\s*{[^}]*transition/.test(popupHtml), '刷新按钮静止时保留通用的悬停颜色渐变');
+  const startSpin = popupJs.match(/function startButtonSpin[\s\S]*?\r?\n}\r?\n/)?.[0] || '';
+  assert(/spinner\.isTurning\(\)\)\s*{[^}]*spinner\.spin\(\)/.test(startSpin), '落定途中再次刷新立即续转，不停顿');
+  assert(/waitForNextPaint\(\)\.then\(\(\)\s*=>\s*{\s*if \(button\.classList\.contains\('is-loading'\)\) spinner\.spin\(\);/.test(startSpin), '从静止开始刷新时先在 0° 画出加载色，再开始旋转');
+}
+{
   const spinnerCode = popupJs.match(/function createRefreshSpinner[\s\S]*?\nfunction beginButtonLoading/)?.[0] || '';
   assert(spinnerCode && !/getComputedStyle\([^)]*\)\.transform|DOMMatrix|addEventListener\('animation(iteration|end)'/.test(spinnerCode), '交接角度取自动画自身进度，不读取变换矩阵或等待 CSS 动画事件');
 }
@@ -525,16 +545,19 @@ assert(hasDeclaration(watchBadgeRule, 'background', /color-mix\(in srgb, var\(--
 assert(hasDeclaration(watchBadgeRule, 'border-radius', '3px'), '特关标签使用与分类一致的圆角长方形');
 assert(hasDeclaration(watchBadgeRule, 'font-weight', '500'), '特关标签使用与分类一致的字重');
 assert(hasDeclaration(watchBadgeRule, 'padding', '1px 6px'), '特关标签使用与分类一致的内边距');
+assert(hasDeclaration(watchBadgeRule, 'font-size', /max\(10px, calc\(var\(--fs-meta, 12px\) - 2px\)\)/), '特关标签字号跟随字号设置');
+const catTagRule = popupHtml.match(/\.cat-tag\s*{([\s\S]*?)}/i)?.[1] || '';
+assert(hasDeclaration(catTagRule, 'font-size', /max\(10px, calc\(var\(--fs-meta, 12px\) - 2px\)\)/), '分类标签字号跟随字号设置');
 assert(!/box-shadow\s*:/.test(watchBadgeRule), '特关标签不使用额外立体效果，保持与分类协调');
 const itemHoverRule = popupHtml.match(/\.item:hover\s*{([\s\S]*?)}/i)?.[1] || '';
 assert(hasDeclaration(itemHoverRule, 'background', /color-mix\(in srgb, var\(--bg-item-hover\) 88%, #000\)/), '条目 hover 使用轻微压暗反馈');
 assert(!readDeclaration(itemHoverRule, 'box-shadow'), '条目 hover 不再使用右侧细线反馈');
 const itemReadHoverRule = popupHtml.match(/\.item\.read:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(itemReadHoverRule, 'background', /color-mix\(in srgb, var\(--bg\) 86%, #000\)/), '已读条目 hover 使用基于背景的轻微压暗反馈');
+assert(hasDeclaration(itemReadHoverRule, 'background', /color-mix\(in srgb, var\(--bg\) 72%, #000\)/), '已读条目 hover 使用基于背景、可感知的压暗反馈');
 assert(!readDeclaration(itemReadHoverRule, 'box-shadow'), '已读条目 hover 不使用额外颜色条反馈');
 
 const itemUnreadHoverRule = popupHtml.match(/\.item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(itemUnreadHoverRule, 'background', /color-mix\(in srgb, var\(--bg-unread\) 84%, #000\)/), '未读条目 hover 在保留未读底色基础上轻微压暗');
+assert(hasDeclaration(itemUnreadHoverRule, 'background', /color-mix\(in srgb, var\(--bg-unread\) 90%, #000\)/), '未读条目 hover 只轻压，仍亮于已读底色');
 assert(!readDeclaration(itemUnreadHoverRule, 'box-shadow'), '未读条目 hover 不再使用右侧细线反馈');
 
 const watchUnreadHoverRule = popupHtml.match(/\.item\.watch-item\.unread:hover\s*{([\s\S]*?)}/i)?.[1] || '';
@@ -897,8 +920,8 @@ assert(!/默认只展开 `常规`/.test(agentsMd), 'AGENTS 不再描述默认展
 console.log('\n[已读层级]');
 assert(/\.item\.read \.item-title\s*{\s*color:\s*color-mix\(in oklab, var\(--text-unread-2\) 75%, var\(--text-read\)\);/.test(popupHtml)
   && /\.item\.read \.item-summary\s*{\s*color:\s*var\(--text-read\);/.test(popupHtml)
-  && /\.item\.read \.item-meta\s*{\s*color:\s*color-mix\(in oklab, var\(--text-read\) 50%, var\(--text-3\)\);/.test(popupHtml), '已读标题、摘要、元信息只压明度，三层不并档');
-assert(/\.item\.read \.watch-badge\s*{[\s\S]*?color:\s*color-mix\(in srgb, var\(--accent\) 60%, var\(--text-read\)\)/.test(popupHtml) && /\.item\.read \.cat-tag\.cat-model \{ color: color-mix\(in srgb, var\(--cat-model\) 60%, var\(--text-read\)\)/.test(popupHtml), '已读的特关与分类标签保留 60% 色相');
+  && /\.item\.read \.item-meta\s*{\s*color:\s*color-mix\(in oklab, var\(--text-3\) 86%, var\(--bg\)\);/.test(popupHtml), '已读标题、摘要、元信息只压明度，三层不并档');
+assert(/\.item\.read \.watch-badge\s*{[\s\S]*?color:\s*color-mix\(in oklab, var\(--accent\) 78%, var\(--bg\)\)/.test(popupHtml) && /\.item\.read \.cat-tag\.cat-model \{ color: color-mix\(in oklab, var\(--cat-model\) 80%, var\(--bg\)\)/.test(popupHtml), '已读的特关与分类标签向底色后退，保留色相');
 console.log(`\n${'='.repeat(40)}`);
 console.log(`结果: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
