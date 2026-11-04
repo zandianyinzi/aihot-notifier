@@ -287,9 +287,10 @@ assert(hasDeclaration(settingsRule, 'grid-template-rows', '0fr') && hasDeclarati
 assert(/<div class="settings" id="settingsPanel"[^>]*>\s*<div class="settings-clip">\s*<div class="settings-inner">/.test(popupHtml), '设置内容包在可收缩的裁剪层内，收起时内边距不外露');
 assert(/settingsPanel\.addEventListener\('transitionend', event => \{\s*if \(event\.propertyName !== 'grid-template-rows'\) return;/.test(popupJs), '设置面板高度过渡结束后刷新列表边缘控件');
 const markReadConfirmRule = popupHtml.match(/\.btn-mark-read\.is-result-accent\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(markReadConfirmRule, 'animation', /mark-read-confirm 750ms ease-out forwards/), '全部已读成功时播放 750ms ease-out 确认动效');
-assert(/@keyframes\s+mark-read-confirm\s*{[\s\S]*?scale\(1\.03\)[\s\S]*?100%\s*{[^}]*opacity:\s*0;/.test(popupHtml), '全部已读确认动效轻微放大到 1.03 后渐隐');
-assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.btn-mark-read\.is-result-accent[\s\S]*?animation:\s*none/.test(popupHtml), '降低动态效果时跳过全部已读确认动效');
+assert(hasDeclaration(markReadConfirmRule, 'animation', /mark-read-confirm 750ms ease-in-out forwards/), '全部已读成功时播放 750ms 确认动效');
+const markReadConfirmKeyframes = popupHtml.match(/@keyframes\s+mark-read-confirm\s*{([\s\S]*?)}\s*}/)?.[1] || '';
+assert(/100%\s*{[^}]*opacity:\s*0;/.test(markReadConfirmKeyframes), '全部已读确认动效保持主题色后渐隐');
+assert(!/transform/.test(markReadConfirmKeyframes), '全部已读确认动效不接管 transform，按压缩放由 :active 独占');
 assert(/\.switch-track::after\s*{[^}]*transition:\s*transform var\(--motion-panel\) ease, background var\(--motion-panel\) ease;/.test(popupHtml), '开关滑块位移与颜色同步过渡');
 assert(/@starting-style\s*{\s*\.popup-status:not\(:empty\)\s*{\s*opacity:\s*0;/.test(popupHtml), '状态栏出现时从透明淡入');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.settings,\s*\.settings\.open,[\s\S]*?transition:\s*none/.test(popupHtml), '降低动态效果时设置面板直接展开收起');
@@ -392,8 +393,23 @@ assert(hasDeclaration(itemFocusVisibleRule, 'outline', /1px\s+solid\s+var\(--acc
 assert(hasDeclaration(itemFocusVisibleRule, 'outline-offset', '-2px'), '列表条目键盘焦点描边内收，避免改变布局');
 
 console.log('\n[降低动态效果]');
-assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.brand-logo-dot\s*{[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止 Logo 呼吸动画');
-assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.skeleton-line[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止骨架屏闪烁');
+const reducedMotionMarker = '@media (prefers-reduced-motion: reduce)';
+const reducedMotionStart = popupHtml.indexOf(reducedMotionMarker);
+const reducedMotionBlock = (() => {
+  if (reducedMotionStart < 0) return { body: '', end: -1 };
+  let depth = 0;
+  for (let i = popupHtml.indexOf('{', reducedMotionStart); i < popupHtml.length; i++) {
+    if (popupHtml[i] === '{') depth++;
+    if (popupHtml[i] === '}' && --depth === 0) return { body: popupHtml.slice(reducedMotionStart, i + 1), end: i + 1 };
+  }
+  return { body: '', end: -1 };
+})();
+assert(reducedMotionStart >= 0 && popupHtml.indexOf(reducedMotionMarker, reducedMotionStart + 1) < 0, '降低动态效果规则集中在一个媒体查询块');
+assert(reducedMotionBlock.end > 0 && /^\s*<\/style>/.test(popupHtml.slice(reducedMotionBlock.end)), '降低动态效果块位于样式表末尾，覆盖同优先级的动效规则');
+assert(/:root\s*{[^}]*--control-active-scale:\s*1;/.test(reducedMotionBlock.body), '降低动态效果时按压不缩放');
+assert(/\.brand a\.has-unread \.brand-logo-dot,\s*\.skeleton-line\s*{\s*animation:\s*none;/.test(reducedMotionBlock.body), '降低动态效果时停止 Logo 呼吸和骨架屏闪烁');
+assert(/\.setting-group-title::after\s*{\s*transition:\s*border-color var\(--motion-tap\) ease;\s*}/.test(reducedMotionBlock.body), '降低动态效果时分组箭头直接旋转，颜色仍渐变');
+assert(!/is-result-|is-jump-target|is-moved/.test(reducedMotionBlock.body), '降低动态效果时保留一次性的颜色与透明度结果反馈');
 assert(/#pollNow\s+\.refresh-icon\s*{[\s\S]*?transform-origin:\s*50%\s+50%/i.test(popupHtml), '刷新图标围绕 SVG 视口几何中心旋转');
 assert(!/<svg\s+class="loading-indicator"/.test(popupHtml), '刷新按钮不渲染第二个加载环');
 assert(!/loading-ring/.test(popupHtml), '刷新图标不再拆分独立旋转的圆环');
@@ -417,7 +433,10 @@ assert(!/loading-ring/.test(popupHtml), '刷新图标不再拆分独立旋转的
   assert(armLength >= 2.5, `刷新箭头臂长足以在 16px 下辨认方向（实测 ${armLength.toFixed(2)}）`);
 }
 assert(!/#pollNow[^{}]*\.refresh-arrow\s*{[^}]*opacity/i.test(popupHtml) && !/strokeDasharray|opacity:/.test(popupJs.match(/function createRefreshSpinner[\s\S]*?\nfunction getRefreshSpinner/)?.[0] || ''), '刷新图标停止时只减速，不变形、不淡出箭头');
-assert(/#pollNow:active\s*{[\s\S]*?transform:\s*none/i.test(popupHtml), '刷新按钮按压不缩放，固定在原有槽位');
+assert(!/#pollNow:active\s*{[^}]*transform:\s*none/i.test(popupHtml), '刷新按钮与其他图标按钮共用按压缩放');
+const pollBusyTransition = popupHtml.match(/#pollNow\.is-loading,\s*#pollNow\.is-result-accent,\s*#pollNow\.is-result-danger\s*{([^}]*)}/)?.[1] || '';
+assert(/transition:[^;]*transform var\(--motion-release\) ease-out/.test(pollBusyTransition) && !/transition:[^;]*color var/.test(pollBusyTransition), '刷新加载与结果期间保留按压回弹过渡，颜色仍一步切换');
+assert(/#pollNow:is\(\.is-loading, \.is-result-accent, \.is-result-danger\):active\s*{[^}]*transform var\(--motion-press\) ease-out/.test(popupHtml), '刷新加载与结果期间按下仍使用按下时长');
 assert(/\.watch-rules-list:is\(\.has-scroll-head,\s*\.has-scroll-tail\):has\(:focus-visible\)\s*{[\s\S]*?mask-image:\s*none/.test(popupHtml), '键盘焦点在规则列表内时取消渐隐，焦点框不被淡化');
 assert(/\.watch-rules-list\.has-scroll-head\s*{[\s\S]*?mask-image:\s*linear-gradient\(to top,/.test(popupHtml), '特关规则列表滚离顶部时显示对称的顶部渐隐');
 assert(/\.watch-rules-list\.has-scroll-head\.has-scroll-tail\s*{[\s\S]*?mask-image:\s*linear-gradient\(to bottom,\s*transparent,/.test(popupHtml), '特关规则列表中段同时显示上下渐隐');
@@ -465,7 +484,6 @@ assert(/function setSettingsOpen\([\s\S]*?if \(!hasSettingsPanelTransition\(\)\)
 assert(/if \(\(timing\.progress \|\| 0\) < BRAND_DOT_STOP_NEAR_REST_PROGRESS\) \{\s*brandLink\.classList\.remove\('has-unread'\);/.test(popupJs), '红点接近静止帧时直接停止，不多呼吸一轮');
 assert(/function\s+showButtonResult\(button,[\s\S]*?finishButtonLoading\(button\);\s*button\.classList\.remove\(\.\.\.BUTTON_RESULT_CLASSES\)/.test(popupJs), '按钮结果反馈不打断加载环闭合');
 assert(/event\?\.target\s*&&\s*event\.target\s*!==\s*button/.test(popupJs), '按钮结果反馈忽略子元素动画结束事件');
-assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.btn-icon\.is-result-ok[\s\S]*\.btn-icon\.is-result-danger[\s\S]*animation:\s*none/i.test(popupHtml), '降低动态效果时停止按钮结果动画');
 
 console.log('\n[主列表滚动]');
 const mainListRule = popupHtml.match(/\.list\s*{([\s\S]*?)}/i)?.[1] || '';
@@ -671,7 +689,6 @@ assert(/moveWatchRule\(rules,\s*ruleId,\s*-1\)/.test(popupJs) && /moveWatchRule\
 assert(/restoreWatchRuleActionFocus\(watchRulesList,\s*focusRuleId,\s*focusAction\)/.test(popupJs), '规则重排及后续存储刷新后恢复同一规则的操作焦点');
 assert(/watch-rule-card[^`]*?\$\{rule\.id === options\.movedRuleId \? 'is-moved' : ''}/.test(popupJs), '移动后的规则获得一次性反馈状态');
 assert(/@keyframes\s+watch-rule-moved/.test(popupHtml), '规则移动使用克制的背景与边框反馈');
-assert(/prefers-reduced-motion:[\s\S]*?\.watch-rule-card\.is-moved[\s\S]*?animation:\s*none/i.test(popupHtml), '降低动态效果时停止规则移动动画');
 assert(/sortWatchItemsByRulePriority\(sessionWatchPinTracker/.test(popupJs), '置顶消息按特关优先级排序');
 assert(/buildHistoryRenderSignature\(\s*history,\s*historyDays,\s*watchRules/.test(popupJs), '渲染缓存签名包含特关规则命中集合');
 assert(/<button class="btn-mini watch-rule-btn" data-action="delete" title="删除"[^>]*>×<\/button>/.test(popupJs), '删除规则使用轻量 × 操作');

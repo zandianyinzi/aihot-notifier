@@ -169,6 +169,10 @@
       --control-icon-stroke: 1.6;
       --control-active-scale: 0.9;
       --motion-tap: 0.15s;
+      /* Press scale: quick in so it follows the finger, a little slower out so the spring-back
+         reads as one; below ~80ms the release looks like a jump. Colors keep --motion-tap. */
+      --motion-press: 80ms;
+      --motion-release: 120ms;
       --motion-panel: 0.25s;
       --motion-panel-open: 0.18s;
       --motion-loading: 0.72s;
@@ -281,34 +285,6 @@
       50% { opacity: 0.6; transform: scale(0.6); filter: drop-shadow(0 0 3px var(--brand-hot-glow)); }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-      .brand a.has-unread .brand-logo-dot {
-        animation: none;
-      }
-
-      .watch-rule-card.is-moved {
-        animation: none;
-      }
-
-      .skeleton-line,
-      .btn-icon.is-result-ok,
-      #pollNow.is-result-accent,
-      #pollNow.is-result-danger,
-      .btn-mark-read.is-result-accent,
-      .btn-icon.is-result-danger,
-      .item.is-jump-target {
-        animation: none;
-      }
-
-      .settings,
-      .settings.open,
-      .switch-track,
-      .switch-track::after {
-        transition: none;
-      }
-
-    }
-
     .actions {
       display: flex;
       align-items: center;
@@ -333,7 +309,7 @@
       transition:
         background var(--motion-tap) ease,
         color var(--motion-tap) ease,
-        transform var(--motion-tap) ease;
+        transform var(--motion-release) ease-out;
     }
 
     .btn-icon:hover {
@@ -346,22 +322,28 @@
       outline-offset: 2px;
     }
 
+    /* A transition takes its timing from the state being entered: press uses this rule, release
+       uses the base .btn-icon rule. */
     .btn-icon:active {
       transform: scale(var(--control-active-scale));
-    }
-
-    /* Refresh does not scale on press, so the spin and the press never stack into a shift. */
-    #pollNow:active {
-      transform: none;
+      transition:
+        background var(--motion-tap) ease,
+        color var(--motion-tap) ease,
+        transform var(--motion-press) ease-out;
     }
 
     /* While loading and showing a result the refresh glyph switches color in one step: a color
        transition would repaint the glyph while it turns. See #pollNow.is-result-accent below.
-       At rest the button keeps the shared hover fade. */
+       At rest the button keeps the shared hover fade. The press scale keeps its own timing in
+       these states too, so a press during a feed switch or the result color still eases. */
     #pollNow.is-loading,
     #pollNow.is-result-accent,
     #pollNow.is-result-danger {
-      transition: background var(--motion-tap) ease;
+      transition: background var(--motion-tap) ease, transform var(--motion-release) ease-out;
+    }
+
+    #pollNow:is(.is-loading, .is-result-accent, .is-result-danger):active {
+      transition: background var(--motion-tap) ease, transform var(--motion-press) ease-out;
     }
 
     .btn-mark-read {
@@ -405,7 +387,7 @@
         background var(--motion-tap) ease,
         color var(--motion-tap) ease,
         border-color var(--motion-tap) ease,
-        transform var(--motion-tap) ease;
+        transform var(--motion-release) ease-out;
     }
 
     .btn-mini:hover {
@@ -421,6 +403,11 @@
 
     .btn-mini:active {
       transform: scale(var(--control-active-scale));
+      transition:
+        background var(--motion-tap) ease,
+        color var(--motion-tap) ease,
+        border-color var(--motion-tap) ease,
+        transform var(--motion-press) ease-out;
     }
 
 
@@ -486,17 +473,21 @@
       82%, 100% { background: transparent; }
     }
 
-    /* Mark-all-read success: a brief accent swell, then fade out. The button stays visible for
-       the whole 750ms; showButtonResult hides it afterwards if nothing is unread. */
+    /* Mark-all-read success: hold the accent, then fade out. The button stays visible for the
+       whole 750ms; showButtonResult hides it afterwards if nothing is unread.
+       Press and result own separate properties: the shared :active press owns transform (driven
+       by its transition), the result owns color, background and opacity. The commit may land
+       before or after release, and neither motion interrupts the other. The fade starts at rest
+       after the hold, so there is no step between the two. */
     .btn-mark-read.is-result-accent {
       color: var(--accent);
-      animation: mark-read-confirm 750ms ease-out forwards;
+      background: var(--accent-soft);
+      animation: mark-read-confirm 750ms ease-in-out forwards;
     }
 
     @keyframes mark-read-confirm {
-      0% { background: var(--accent-soft); color: var(--accent); transform: scale(1); opacity: 1; }
-      30% { background: var(--accent-soft); color: var(--accent); transform: scale(1.03); opacity: 1; }
-      100% { background: transparent; color: var(--accent); transform: scale(1); opacity: 0; }
+      0%, 25% { opacity: 1; }
+      100% { opacity: 0; }
     }
 
     @keyframes control-result-ok {
@@ -1345,6 +1336,32 @@
       color: var(--accent);
     }
 
+    /* ---- Reduced motion ----
+       Kept last so it wins over the equal-specificity rules above. It turns off movement (scale,
+       rotation, sliding, panel height) and looping pulses. One-shot color and opacity feedback
+       stays: result colors, the mark-all-read fade, the jump and moved-rule highlights. They do
+       not move anything and are the only signal that an action took effect. */
+    @media (prefers-reduced-motion: reduce) {
+      :root {
+        --control-active-scale: 1;
+      }
+
+      .brand a.has-unread .brand-logo-dot,
+      .skeleton-line {
+        animation: none;
+      }
+
+      .settings,
+      .settings.open,
+      .switch-track,
+      .switch-track::after {
+        transition: none;
+      }
+
+      .setting-group-title::after {
+        transition: border-color var(--motion-tap) ease;
+      }
+    }
 
   </style>
   <script src="popup-log.js"></script>
