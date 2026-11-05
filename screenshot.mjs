@@ -29,14 +29,14 @@ const MARQUEE_WIDTH = 1400;
 const MARQUEE_HEIGHT = 560;
 
 const mockItems = [
-  { title: 'OpenAI 发布 GPT-5 Turbo，推理能力提升 3 倍', summary: '新模型在数学推理和代码生成上有显著提升，支持 100 万 token 上下文窗口', category: '模型', minutesAgo: 30 },
-  { title: 'Anthropic Claude 4 系列全面开放 API 调用', summary: '包括 Opus、Sonnet、Haiku 三个版本，企业用户可直接迁移', category: '产品', minutesAgo: 60 },
-  { title: 'Google DeepMind 发布新一代 AlphaFold，蛋白质预测精度再创新高', summary: '新模型可预测蛋白质与药物分子的相互作用，有望加速新药研发', category: '论文', minutesAgo: 90 },
-  { title: '国内首个千亿参数开源模型发布，支持 32K 上下文', summary: '性能对标 GPT-4，完全开源可商用，社区生态建设中', category: '模型', minutesAgo: 120 },
-  { title: 'Cursor 推出 AI Agent 模式，可自主完成复杂编程任务', summary: '集成多步推理和自动调试能力，开发者生产力大幅提升', category: '产品', minutesAgo: 180 },
-  { title: 'Meta 开源视频生成模型 Movie Gen，支持 30 秒高清视频', summary: '支持文本到视频、图片到视频、视频编辑等多种模式', category: '模型', minutesAgo: 240 },
-  { title: '如何用 Claude Code 提升 10 倍编程效率', summary: '实战技巧分享：合理使用上下文、编写 CLAUDE.md、善用 slash commands', category: '技巧与观点', minutesAgo: 300 },
-  { title: 'AI 芯片市场格局变化：英伟达份额首次跌破 80%', summary: 'AMD、Intel 和多家国产芯片厂商加速追赶，市场竞争加剧', category: '行业', minutesAgo: 360 },
+  { title: 'OpenAI 发布 GPT-5 Turbo，推理能力提升 3 倍', summary: '新模型在数学推理和代码生成上有显著提升，支持 100 万 token 上下文窗口', category: '模型', source: 'OpenAI 官网', minutesAgo: 30 },
+  { title: 'Anthropic Claude 4 系列全面开放 API 调用', summary: '包括 Opus、Sonnet、Haiku 三个版本，企业用户可直接迁移', category: '产品', source: 'Anthropic 官网', minutesAgo: 60 },
+  { title: 'Google DeepMind 发布新一代 AlphaFold，蛋白质预测精度再创新高', summary: '新模型可预测蛋白质与药物分子的相互作用，有望加速新药研发', category: '论文', source: 'DeepMind 博客', minutesAgo: 90 },
+  { title: '国内首个千亿参数开源模型发布，支持 32K 上下文', summary: '性能对标 GPT-4，完全开源可商用，社区生态建设中', category: '模型', source: '量子位', minutesAgo: 120 },
+  { title: 'Cursor 推出 AI Agent 模式，可自主完成复杂编程任务', summary: '集成多步推理和自动调试能力，开发者生产力大幅提升', category: '产品', source: 'X：Cursor (@cursor_ai)', minutesAgo: 180 },
+  { title: 'Meta 开源视频生成模型 Movie Gen，支持 30 秒高清视频', summary: '支持文本到视频、图片到视频、视频编辑等多种模式', category: '模型', source: 'Meta AI 博客', minutesAgo: 240 },
+  { title: '如何用 Claude Code 提升 10 倍编程效率', summary: '实战技巧分享：合理使用上下文、编写 CLAUDE.md、善用 slash commands', category: '技巧', source: '公众号：AI 工具派', minutesAgo: 300 },
+  { title: 'AI 芯片市场格局变化：英伟达份额首次跌破 80%', summary: 'AMD、Intel 和多家国产芯片厂商加速追赶，市场竞争加剧', category: '行业', source: '36氪', minutesAgo: 360 },
 ];
 
 const catClass = {
@@ -44,7 +44,8 @@ const catClass = {
   '产品': 'cat-products',
   '行业': 'cat-industry',
   '论文': 'cat-paper',
-  '技巧与观点': 'cat-tips',
+  '技巧': 'cat-tips',
+  '观点': 'cat-tips',
 };
 
 const themes = [
@@ -177,6 +178,7 @@ function buildWrapperHtml(theme) {
               <div class="item-summary">${item.summary}</div>
               <div class="item-meta">
                 <span class="cat-tag ${cls}">${item.category}</span>
+                <span class="item-source">${item.source}</span>
                 <span class="sep"></span>
                 <span class="item-datetime">${timeStr}</span>
               </div>
@@ -310,6 +312,7 @@ function buildWrapperHtml(theme) {
             <div class="item-summary">${item.summary}</div>
             <div class="item-meta">
               <span class="cat-tag ${cls}">${item.category}</span>
+              <span class="item-source">${item.source}</span>
               <span class="sep"></span>
               <span class="item-datetime">${timeStr}</span>
             </div>
@@ -481,6 +484,7 @@ function buildWrapperHtml(theme) {
             <div class="item-summary">${item.summary}</div>
             <div class="item-meta">
               <span class="cat-tag ${cls}">${item.category}</span>
+              <span class="item-source">${item.source}</span>
               <span class="sep"></span>
               <span class="item-datetime">${timeStr}</span>
             </div>
