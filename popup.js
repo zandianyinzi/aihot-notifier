@@ -49,7 +49,8 @@ const CATEGORY_MAP = {
   'industry': { cls: 'cat-industry', label: '行业' },
   'paper': { cls: 'cat-paper', label: '论文' },
   'tip': { cls: 'cat-tips', label: '技巧' },
-  'tips': { cls: 'cat-tips', label: '技巧' }
+  'tips': { cls: 'cat-tips', label: '技巧' },
+  'opinion': { cls: 'cat-tips', label: '观点' }
 };
 
 const VALID_THEMES = new Set(['dark', 'green-dark', 'chrome-dark', 'slate-night']);

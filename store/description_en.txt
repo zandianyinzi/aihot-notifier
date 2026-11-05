@@ -8,7 +8,7 @@ Automatically tracks the latest AI updates and delivers desktop notifications, s
 • Click notifications or list items to jump directly to the source
 • News list with title + summary, grouped by date with MM/DD labels
 • Read/unread state persists across browser restarts
-• Category tags (Model / Product / Industry / Paper / Tips) for quick scanning
+• Category tags (Model / Product / Industry / Paper / Tips / Opinion) for quick scanning
 
 ✦ Personalization
 

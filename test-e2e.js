@@ -184,7 +184,7 @@ function simulateResetAndPoll(apiItems, historyDays) {
     const allCombined = [...selected, ...all];
     const categories = new Set(allCombined.map(i => i.category).filter(Boolean));
     console.log(`  API 中出现的分类: ${[...categories].join(', ')}`);
-    const knownCats = ['model', 'ai-models', 'ai-products', 'industry', 'paper', 'tip', 'tips'];
+    const knownCats = ['model', 'ai-models', 'ai-products', 'industry', 'paper', 'tip', 'tips', 'opinion'];
     const unknownCats = [...categories].filter(c => !knownCats.includes(c));
     if (unknownCats.length > 0) {
       console.log(`  ⚠ 未知分类: ${unknownCats.join(', ')}（扩展中会显示为无标签）`);
