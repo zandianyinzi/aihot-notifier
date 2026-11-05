@@ -759,8 +759,8 @@ assert(!/\.skeleton-item:last-child\s*{[^}]*box-shadow:\s*none/i.test(popupHtml)
 assert(sizeRules.length === 5 && sizeRules.every(([, , body]) => /--skeleton-title-h\s*:/.test(body) && /--skeleton-summary-h\s*:/.test(body) && /--skeleton-meta-h\s*:/.test(body)), '五档字号都定义随字号缩放的骨架高度');
 assert(sizeRules.every(([, size, body]) => hasDeclaration(body, '--skeleton-meta-h', expectedSkeletonMetaHeights[size])), '五档骨架元信息高度使用随字号缩放的 cap-height 细条');
 assert(hasDeclaration(skeletonTitleRule, 'height', /var\(--skeleton-title-h\)/), '骨架标题使用字号对应高度');
-assert(hasDeclaration(skeletonSummaryRule, 'height', /var\(--skeleton-summary-h\)/) && hasDeclaration(skeletonSummaryRule, 'margin-top', '6px'), '骨架摘要匹配真实摘要行高与间距');
-assert(hasDeclaration(skeletonMetaRule, 'height', /var\(--skeleton-meta-h\)/) && hasDeclaration(skeletonMetaRule, 'margin-top', '6px'), '骨架元信息匹配真实元信息行高与间距');
+assert(hasDeclaration(skeletonSummaryRule, 'height', /var\(--skeleton-summary-h\)/) && hasDeclaration(skeletonSummaryRule, 'margin-top', '4px'), '骨架摘要匹配真实摘要行高与间距');
+assert(hasDeclaration(skeletonMetaRule, 'height', /var\(--skeleton-meta-h\)/) && hasDeclaration(skeletonMetaRule, 'margin-top', '8px'), '骨架元信息匹配真实元信息行高与间距');
 assert(/\.settings-inner\s*{[\s\S]*?max-height:[\s\S]*?overflow-y:\s*auto/.test(popupHtml), '设置面板内容可滚动');
 console.log('\n[popup首帧初始化顺序]');
 assert(/function\s+waitForNextPaint\(\)/.test(popupJs), '存在首帧让步 helper');
@@ -936,7 +936,7 @@ assert(!/默认只展开 `常规`/.test(agentsMd), 'AGENTS 不再描述默认展
 
 console.log('\n[已读层级]');
 assert(/\.item\.read \.item-title\s*{\s*color:\s*color-mix\(in oklab, var\(--text-unread-2\) 75%, var\(--text-read\)\);/.test(popupHtml)
-  && /\.item\.read \.item-summary\s*{\s*color:\s*var\(--text-read\);/.test(popupHtml)
+  && /\.item\.read \.item-summary\s*{\s*color:\s*color-mix\(in oklab, var\(--text-read\) 90%, var\(--bg\)\);/.test(popupHtml)
   && /\.item\.read \.item-meta\s*{\s*color:\s*color-mix\(in oklab, var\(--text-3\) 86%, var\(--bg\)\);/.test(popupHtml), '已读标题、摘要、元信息只压明度，三层不并档');
 assert(/\.item\.read \.watch-badge\s*{[\s\S]*?color:\s*color-mix\(in oklab, var\(--accent\) 78%, var\(--bg\)\)/.test(popupHtml) && /\.item\.read \.cat-tag\.cat-model \{ color: color-mix\(in oklab, var\(--cat-model\) 80%, var\(--bg\)\)/.test(popupHtml), '已读的特关与分类标签向底色后退，保留色相');
 console.log(`\n${'='.repeat(40)}`);

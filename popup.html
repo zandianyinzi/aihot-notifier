@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html data-theme="dark" data-font="system" data-size="medium" style="width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: #111110; color-scheme: dark;">
+<html lang="zh-CN" data-theme="dark" data-font="system" data-size="medium" style="width: 420px; min-width: 420px; height: 600px; min-height: 600px; background: #111110; color-scheme: dark;">
 <head>
   <meta charset="utf-8">
   <meta name="color-scheme" content="dark">
@@ -156,11 +156,14 @@
       --brand-hot-dot: #e40012;
       --brand-hot-glow: rgba(228,0,18,0.30);
     }
-    [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-meta: 11px; --item-pad: 12px; --skeleton-title-h: 13px; --skeleton-summary-h: 12px; --skeleton-meta-h: 10px; }
-    [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-meta: 12px; --item-pad: 12px; --skeleton-title-h: 14px; --skeleton-summary-h: 13px; --skeleton-meta-h: 10px; }
-    [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-meta: 13px; --item-pad: 12px; --skeleton-title-h: 15px; --skeleton-summary-h: 14px; --skeleton-meta-h: 11px; }
-    [data-size="xlarge"] { --fs-base: 17px; --fs-title: 17px; --fs-meta: 14px; --item-pad: 12px; --skeleton-title-h: 17px; --skeleton-summary-h: 15px; --skeleton-meta-h: 12px; }
-    [data-size="xxlarge"] { --fs-base: 19px; --fs-title: 19px; --fs-meta: 15px; --item-pad: 12px; --skeleton-title-h: 19px; --skeleton-summary-h: 16px; --skeleton-meta-h: 13px; }
+    /* Summaries are the longest reading text (median about 130 characters, four lines), so they sit
+       one step (1px) above the meta line instead of sharing its size. Title sizes are unchanged:
+       1px above summaries up to large, 2px and 3px at xlarge and xxlarge. */
+    [data-size="small"] { --fs-base: 13px; --fs-title: 13px; --fs-summary: 12px; --fs-meta: 11px; --item-pad: 12px; --skeleton-title-h: 13px; --skeleton-summary-h: 12px; --skeleton-meta-h: 10px; }
+    [data-size="medium"] { --fs-base: 14px; --fs-title: 14px; --fs-summary: 13px; --fs-meta: 12px; --item-pad: 12px; --skeleton-title-h: 14px; --skeleton-summary-h: 13px; --skeleton-meta-h: 10px; }
+    [data-size="large"] { --fs-base: 15px; --fs-title: 15px; --fs-summary: 14px; --fs-meta: 13px; --item-pad: 12px; --skeleton-title-h: 15px; --skeleton-summary-h: 14px; --skeleton-meta-h: 11px; }
+    [data-size="xlarge"] { --fs-base: 17px; --fs-title: 17px; --fs-summary: 15px; --fs-meta: 14px; --item-pad: 12px; --skeleton-title-h: 17px; --skeleton-summary-h: 15px; --skeleton-meta-h: 12px; }
+    [data-size="xxlarge"] { --fs-base: 19px; --fs-title: 19px; --fs-summary: 16px; --fs-meta: 15px; --item-pad: 12px; --skeleton-title-h: 19px; --skeleton-summary-h: 16px; --skeleton-meta-h: 13px; }
 
     :root {
       --control-size: 30px;
@@ -188,7 +191,12 @@
 
     [data-font="noto-serif"] { --ff-body: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif; }
     [data-font="lxgw"] { --ff-body: 'LXGW WenKai', 'LXGW WenKai TC', KaiTi, STKaiti, 'Kaiti SC', serif; }
-    [data-font="system"] { --ff-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+    /* CJK faces come before any Latin-only face so one font sets the whole line. With 'Segoe UI'
+       first, weight 500 on Windows picked Segoe UI Semibold for Latin but Microsoft YaHei Regular
+       for Han (YaHei has no medium), so English words in titles looked bolder than the Chinese.
+       Faces with a real medium (PingFang, Noto/Source Han Sans) win when present; stock Windows
+       falls to YaHei UI, whose own Latin glyphs keep the line uniform. */
+    [data-font="system"] { --ff-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Source Han Sans SC', 'Noto Sans CJK SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'; }
 
     html, body {
       width: 420px;
@@ -204,7 +212,7 @@
       --header-height: 38px;
       display: flex;
       flex-direction: column;
-      font-family: var(--ff-body, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif);
+      font-family: var(--ff-body, sans-serif);
       font-size: var(--fs-base, 14px);
       font-weight: 400;
       color: var(--text);
@@ -374,9 +382,12 @@
       display: flex;
     }
 
+    /* Fixed line boxes keep control heights the same whichever face the font stack resolves to;
+       without them YaHei, Segoe UI and Noto Sans SC gave 26, 27 and 28px buttons. */
     .btn-mini {
       font-size: 11px;
       font-family: inherit;
+      line-height: 15px;
       padding: 5px 8px;
       border: 1px solid var(--border);
       border-radius: 5px;
@@ -746,7 +757,10 @@
       outline-offset: 2px;
     }
 
+    /* Chrome ignores line-height on <select>, so the box height is fixed directly (29px is the
+       Segoe UI height this control was designed at); the text stays centered. */
     .select-mini {
+      height: 29px;
       font-size: 11px;
       font-family: inherit;
       padding: 5px 8px;
@@ -788,6 +802,7 @@
       min-width: 0;
       font-size: 11px;
       font-family: inherit;
+      line-height: 15px;
       padding: 5px 7px;
       border: 1px solid var(--border);
       border-radius: 5px;
@@ -1078,6 +1093,8 @@
     .watch-badge {
       font-size: max(10px, calc(var(--fs-meta, 12px) - 2px));
       font-weight: 500;
+      line-height: 1.4;
+      line-height: round(1.4em, 1px);
       padding: 1px 6px;
       border-radius: 3px;
       flex-shrink: 0;
@@ -1117,8 +1134,8 @@
     }
 
     .skeleton-title { width: 78%; height: var(--skeleton-title-h); }
-    .skeleton-summary { width: 94%; height: var(--skeleton-summary-h); margin-top: 6px; }
-    .skeleton-meta { width: 36%; height: var(--skeleton-meta-h); margin-top: 6px; }
+    .skeleton-summary { width: 94%; height: var(--skeleton-summary-h); margin-top: 4px; }
+    .skeleton-meta { width: 36%; height: var(--skeleton-meta-h); margin-top: 8px; }
 
     .skeleton-item:nth-child(2) .skeleton-title { width: 66%; }
     .skeleton-item:nth-child(2) .skeleton-summary { width: 88%; }
@@ -1201,6 +1218,8 @@
     .cat-tag {
       font-size: max(10px, calc(var(--fs-meta, 12px) - 2px));
       font-weight: 500;
+      line-height: 1.4;
+      line-height: round(1.4em, 1px);
       padding: 1px 6px;
       border-radius: 3px;
       flex-shrink: 0;
@@ -1220,9 +1239,13 @@
     }
 
     .item-title {
-      font-size: var(--fs-title, 13px);
+      font-size: var(--fs-title, 14px);
       font-weight: 500;
-      line-height: 1.55;
+      /* Whole-pixel line boxes keep the line pitch even at 100% zoom; the unitless value is the
+         fallback where round() is unsupported. pretty avoids one- or two-character last lines. */
+      line-height: 1.5;
+      line-height: round(1.5em, 1px);
+      text-wrap: pretty;
       color: var(--text);
       display: -webkit-box;
       -webkit-line-clamp: 3;
@@ -1242,10 +1265,13 @@
       color: var(--text-unread-3, var(--text-3));
     }
 
+    /* Title and summary read as one block (4px), the meta line sits apart from it (8px). */
     .item-summary {
-      margin-top: 6px;
-      font-size: var(--fs-meta, 12px);
-      line-height: 1.65;
+      margin-top: 4px;
+      font-size: var(--fs-summary, 13px);
+      line-height: 1.7;
+      line-height: round(1.7em, 1px);
+      text-wrap: pretty;
       color: var(--text-2);
       display: -webkit-box;
       -webkit-line-clamp: 7;
@@ -1253,13 +1279,17 @@
       overflow: hidden;
     }
 
+    /* Steps back toward the background like the meta line, so the read title leads by about 12
+       OKLCH lightness, the same step as unread rows. Contrast stays above 6. */
     .item.read .item-summary {
-      color: var(--text-read);
+      color: color-mix(in oklab, var(--text-read) 90%, var(--bg));
     }
 
     .item-meta {
-      margin-top: 6px;
-      font-size: var(--fs-meta, 11px);
+      margin-top: 8px;
+      font-size: var(--fs-meta, 12px);
+      line-height: 1.35;
+      line-height: round(1.35em, 1px);
       color: var(--text-3);
       display: flex;
       align-items: center;
