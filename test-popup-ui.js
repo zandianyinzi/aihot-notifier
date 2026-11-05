@@ -287,7 +287,7 @@ assert(hasDeclaration(settingsRule, 'grid-template-rows', '0fr') && hasDeclarati
 assert(/<div class="settings" id="settingsPanel"[^>]*>\s*<div class="settings-clip">\s*<div class="settings-inner">/.test(popupHtml), '设置内容包在可收缩的裁剪层内，收起时内边距不外露');
 assert(/settingsPanel\.addEventListener\('transitionend', event => \{\s*if \(event\.propertyName !== 'grid-template-rows'\) return;/.test(popupJs), '设置面板高度过渡结束后刷新列表边缘控件');
 const markReadConfirmRule = popupHtml.match(/\.btn-mark-read\.is-result-accent\s*{([\s\S]*?)}/i)?.[1] || '';
-assert(hasDeclaration(markReadConfirmRule, 'animation', /mark-read-confirm 750ms ease-in-out forwards/), '全部已读成功时播放 750ms 确认动效');
+assert(hasDeclaration(markReadConfirmRule, 'animation', /mark-read-confirm 480ms ease-out forwards/), '全部已读成功时播放 480ms ease-out 确认动效');
 const markReadConfirmKeyframes = popupHtml.match(/@keyframes\s+mark-read-confirm\s*{([\s\S]*?)}\s*}/)?.[1] || '';
 assert(/100%\s*{[^}]*opacity:\s*0;/.test(markReadConfirmKeyframes), '全部已读确认动效保持主题色后渐隐');
 assert(!/transform/.test(markReadConfirmKeyframes), '全部已读确认动效不接管 transform，按压缩放由 :active 独占');
@@ -862,6 +862,9 @@ assert(/const\s+scrollAnchor\s*=\s*captureScrollAnchor\(historyList\)/.test(mark
 assert(/const\s+rollbackOptimisticReadState\s*=\s*applyOptimisticReadState\(historyList\.querySelectorAll\('\.item'\),\s*markAllReadBtn\)/.test(markAllReadHandler), '全部已读乐观状态保留可同步执行的 DOM 回滚');
 assert(/applyOptimisticReadState\(historyList\.querySelectorAll\('\.item'\),\s*markAllReadBtn\);\s*restoreScrollAnchor\(historyList,\s*scrollAnchor\);\s*const\s+now/.test(markAllReadHandler), '全部已读乐观 class 切换后立即恢复滚动锚点');
 assert(!/HISTORY_SCROLL_ANCHOR_MAX_JUMP/.test(popupJs), '全部已读滚动锚点恢复不设置距离上限');
+assert(/refreshUnreadNavigatorFromDom\(\);[\s\S]*?showButtonResult\(markAllReadBtn,\s*'is-result-accent',\s*0\);\s*try\s*{\s*await\s+runMarkAllReadMutation/.test(markAllReadHandler)
+  && !/onCommitted:[^}]*showButtonResult/.test(markAllReadHandler), '全部已读确认动效随乐观已读同步开始，不等待后台提交');
+assert(/onFailure:[\s\S]*?if\s*\(!committed\s*\|\|\s*markAllReadBtn\.classList\.contains\('visible'\)\)\s*{\s*showButtonResult\(markAllReadBtn,\s*'is-result-danger'/.test(markAllReadHandler), '已提交但按钮已淡出隐藏时不再挂失败反馈，避免残留 class');
 assert(/await\s+runMarkAllReadMutation\(\{[\s\S]*?rollback:\s*\(\)\s*=>\s*\{\s*rollbackOptimisticReadState\(\);\s*restoreScrollAnchor\(historyList,\s*scrollAnchor\);\s*}[\s\S]*?reload:\s*\(\)\s*=>\s*loadHistory\(undefined,\s*\{\s*immediate:\s*true,\s*forceRender:\s*true,\s*scrollAnchor\s*}\)/.test(markAllReadHandler), '全部已读失败回滚 class 后立即恢复滚动锚点，再执行权威刷新');
 assert(/onFailure:\s*\(\{\s*committed,\s*recovered\s*}\)\s*=>\s*\{[\s\S]*?if\s*\(committed\s*&&\s*recovered\)\s*return[;\s]*[\s\S]*?committed\s*\?[\s\S]*?列表刷新失败[\s\S]*?:\s*'全部已读失败，请重试。'/.test(markAllReadHandler), '后台已提交且刷新重试成功时才静默，mutation 失败仍提示');
 assert(/commit:\s*\(data,\s*context\)\s*=>\s*\{[\s\S]*?renderHistory\(data,\s*\{[\s\S]*?skipUnchanged:\s*!context\.forceRender[\s\S]*?scrollAnchor:\s*context\.scrollAnchor[\s\S]*?}\)/.test(popupJs), 'history load commit 将强制重绘和滚动锚点传给列表渲染');

@@ -484,20 +484,25 @@
       82%, 100% { background: transparent; }
     }
 
-    /* Mark-all-read success: hold the accent, then fade out. The button stays visible for the
-       whole 750ms; showButtonResult hides it afterwards if nothing is unread.
+    /* Mark-all-read: starts on click together with the optimistic read state (not after the
+       background commit), holds the accent, then fades out. The button stays visible for the
+       whole 480ms; showButtonResult hides it afterwards if nothing is unread. A failed commit
+       swaps in the danger result.
        Press and result own separate properties: the shared :active press owns transform (driven
-       by its transition), the result owns color, background and opacity. The commit may land
-       before or after release, and neither motion interrupts the other. The fade starts at rest
-       after the hold, so there is no step between the two. */
+       by its transition), the result owns color, background and opacity, so the fade can start
+       while the button is still pressed without either motion interrupting the other. The fade
+       starts at rest after the hold, so there is no step between the two. */
     .btn-mark-read.is-result-accent {
       color: var(--accent);
       background: var(--accent-soft);
-      animation: mark-read-confirm 750ms ease-in-out forwards;
+      animation: mark-read-confirm 480ms ease-out forwards;
     }
 
+    /* The hold (about 70ms) is roughly the press-down time (--motion-press is 80ms), so the accent
+       registers under the finger; ease-out then drops most of the opacity in the first half, which
+       reads as the button leaving right after the rows dim instead of lingering. */
     @keyframes mark-read-confirm {
-      0%, 25% { opacity: 1; }
+      0%, 15% { opacity: 1; }
       100% { opacity: 0; }
     }
 

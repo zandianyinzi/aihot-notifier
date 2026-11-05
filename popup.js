@@ -1359,6 +1359,10 @@ markAllReadBtn.addEventListener('click', async () => {
   restoreScrollAnchor(historyList, scrollAnchor);
   const now = new Date().toISOString();
   refreshUnreadNavigatorFromDom();
+  // The confirmation starts with the optimistic read state, not after the background commit,
+  // so the list dimming and the button fade read as one step. A failed commit replaces it with
+  // the danger result and rolls the rows back.
+  showButtonResult(markAllReadBtn, 'is-result-accent', 0);
   try {
     await runMarkAllReadMutation({
       send: () => chrome.runtime.sendMessage({ type: 'markAllRead', readAllBefore: now }),
@@ -1368,13 +1372,17 @@ markAllReadBtn.addEventListener('click', async () => {
       },
       reload: () => loadHistory(undefined, { immediate: true, forceRender: true, scrollAnchor }),
       onCommitted: () => {
-        showButtonResult(markAllReadBtn, 'is-result-accent', Date.now() - feedbackStartedAt);
         clearScrollPosition();
       },
       onFailure: ({ committed, recovered }) => {
         refreshUnreadNavigatorFromDom();
         if (committed && recovered) return;
-        showButtonResult(markAllReadBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
+        // The confirmation starts on click, so a slow commit can land after the button has
+        // already faded and hidden. A hidden button never fires animationend, which would leave
+        // the danger and is-confirmed classes behind; the commit stands, so only the status shows.
+        if (!committed || markAllReadBtn.classList.contains('visible')) {
+          showButtonResult(markAllReadBtn, 'is-result-danger', Date.now() - feedbackStartedAt);
+        }
         showPopupStatus(committed
           ? '全部已读已生效，但列表刷新失败，请重试。'
           : '全部已读失败，请重试。');
