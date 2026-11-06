@@ -1,7 +1,17 @@
 // 共享特关规则模块：匹配精度与添加规则的合并语义。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { matchWatchRules, mergeWatchRuleInput, getWatchAuthorLabel, removeWatchRuleKeyword } = require('./watch-rules.js');
+const { matchWatchRules, mergeWatchRuleInput, getWatchAuthorLabel, removeWatchRuleKeyword, hasActiveWatchMatch } = require('./watch-rules.js');
+
+test('hasActiveWatchMatch: tagged items need an enabled rule id, legacy tags stay compatible', () => {
+  const rules = [{ id: 'on', enabled: true }, { id: 'off', enabled: false }];
+  assert.equal(hasActiveWatchMatch({ watchMatched: true, watchRuleIds: ['on'] }, rules), true);
+  assert.equal(hasActiveWatchMatch({ watchMatched: true, watchRuleIds: ['off'] }, rules), false);
+  assert.equal(hasActiveWatchMatch({ watchMatched: true, watchRuleIds: ['gone'] }, rules), false);
+  assert.equal(hasActiveWatchMatch({ watchMatched: true }, rules), true);
+  assert.equal(hasActiveWatchMatch({ id: 'plain' }, rules), false);
+  assert.equal(hasActiveWatchMatch(null, rules), false);
+});
 
 const matches = (source, rule, title = 't') =>
   matchWatchRules({ source, title, summary: '' }, [{ id: 'r', ...rule }]).length > 0;

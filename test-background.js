@@ -2714,6 +2714,90 @@ async function runTests() {
   await onAlarmHandler({ name: 'aihot-poll' });
   assert(notificationCreateIds.filter(id => id.startsWith('aihot-watch-')).length === 0, '发布时间超出显示天数的特关条目不发送不可见通知');
 
+  console.log('\n[只看特关：通知与角标]');
+  const watchOnlyRules = [{ id: 'wr-only', source: 'X', author: '目标作者', keywords: [], enabled: true }];
+  const pollWatchOnly = async watchOnly => {
+    resetState({
+      apiFingerprints: { selected: 'fp-old' },
+      lastItemsPollAt: new Date().toISOString(),
+      watchOnly,
+      watchRules: watchOnlyRules,
+      watchNotifyState: {}
+    });
+    fetchImpl = (url) => {
+      if (url.includes('/api/public/fingerprint')) return legacyFingerprintResponse('fp-watch-only');
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(v1Page([
+        v1Item({ id: 'only-watch', source: { name: 'X：目标作者' }, links: { original: 'https://example.com/only-watch', aihot: 'https://aihot.news/items/only-watch' } }),
+        v1Item({ id: 'only-normal', source: { name: 'Other' }, links: { original: 'https://example.com/only-normal', aihot: 'https://aihot.news/items/only-normal' } })
+      ])) });
+    };
+    await onAlarmHandler({ name: 'aihot-poll' });
+    await waitFor(() => notificationCreateIds.length >= (watchOnly ? 1 : 2), 100);
+  };
+  await pollWatchOnly(true);
+  assert(notificationCreateIds.filter(id => id.startsWith('aihot-watch-')).length === 1, '只看特关时特关通知照常发送');
+  assert(notificationCreateIds.filter(id => !id.startsWith('aihot-watch-')).length === 0, '只看特关时普通新内容不发送通知');
+  assert(badgeTexts.at(-1) === '1', '只看特关时角标只统计特关未读');
+  storageData.watchOnly = false;
+  badgeTexts = [];
+  onStorageChangedHandler({ watchOnly: { oldValue: true, newValue: false } });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(badgeTexts.at(-1) === '2', '关闭只看特关后角标恢复统计全部未读');
+  storageData.watchOnly = true;
+  storageData.watchRules = [{ ...watchOnlyRules[0], enabled: false }];
+  badgeTexts = [];
+  onStorageChangedHandler({ watchRules: {} });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(badgeTexts.at(-1) === '', '只看特关时停用规则会触发角标重算');
+  await pollWatchOnly(false);
+  assert(notificationCreateIds.filter(id => !id.startsWith('aihot-watch-')).length === 1, '关闭只看特关时普通新内容照常通知');
+
+  console.log('\n[只看特关：角标与列表同一匹配口径]');
+  const legacyAt = new Date().toISOString();
+  resetState({
+    watchOnly: true,
+    watchRules: watchOnlyRules,
+    history: [
+      { id: 'legacy-watch', url: 'https://example.com/legacy-watch', time: legacyAt, discoveredAt: legacyAt, selected: true, watchMatched: true },
+      { id: 'tagged-watch', url: 'https://example.com/tagged-watch', time: legacyAt, discoveredAt: legacyAt, selected: true, watchMatched: true, watchRuleIds: ['wr-only'] },
+      { id: 'plain-item', url: 'https://example.com/plain-item', time: legacyAt, discoveredAt: legacyAt, selected: true }
+    ]
+  });
+  onStorageChangedHandler({ watchOnly: { newValue: true } });
+  await waitFor(() => badgeTexts.length > 0);
+  const { hasActiveWatchRuleMatch: popupWatchMatch } = require('./popup-reliability.js');
+  const popupWatchCount = storageData.history.filter(item => popupWatchMatch(item, storageData.watchRules)).length;
+  assert(badgeTexts.at(-1) === '2' && popupWatchCount === 2, '只带 watchMatched 的旧数据在角标与弹窗列表中口径一致');
+
+  console.log('\n[只看特关：全部已读只标记特关]');
+  const scopeNow = Date.now();
+  const scopeAt = minutes => new Date(scopeNow - minutes * 60000).toISOString();
+  const scopeFuture = new Date(scopeNow + 2 * 60000).toISOString();
+  resetState({
+    feedMode: 'all',
+    watchOnly: true,
+    watchRules: watchOnlyRules,
+    watchNotifyState: { 'scope-watch': { firstMatchedAt: scopeAt(10), notifyCount: 1, viewedAt: '' } },
+    history: [
+      { id: 'scope-watch', url: 'https://example.com/scope-watch', time: scopeAt(10), discoveredAt: scopeAt(10), watchMatched: true, watchRuleIds: ['wr-only'] },
+      { id: 'scope-late-watch', url: 'https://example.com/scope-late-watch', time: scopeFuture, discoveredAt: scopeFuture, watchMatched: true, watchRuleIds: ['wr-only'] },
+      { id: 'scope-normal', url: 'https://example.com/scope-normal', time: scopeAt(20), discoveredAt: scopeAt(20) }
+    ]
+  });
+  const scopeClickAt = new Date(scopeNow).toISOString();
+  const scopedResponse = await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: scopeClickAt, scope: 'watch' });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(scopedResponse.ok === true && storageData.readIds.includes('scope-watch') && Boolean(storageData.watchNotifyState['scope-watch']?.viewedAt), '特关范围全部已读标记可见特关为已读并已查看');
+  assert(!storageData.readIds.includes('scope-normal') && storageData.readAllBefore === '', '特关范围全部已读不推进全局水位，普通条目保持未读');
+  assert(!storageData.readIds.includes('scope-late-watch') && badgeTexts.at(-1) === '1', '点击后才到达的特关不被标记');
+  storageData.watchOnly = false;
+  badgeTexts = [];
+  onStorageChangedHandler({ watchOnly: { newValue: false } });
+  await waitFor(() => badgeTexts.length > 0);
+  assert(badgeTexts.at(-1) === '2', '关闭只看特关后被隐藏的普通条目仍是未读');
+  const globalResponse = await sendMessageWithTimeout({ type: 'markAllRead', readAllBefore: scopeClickAt });
+  assert(globalResponse.ok === true && storageData.readAllBefore === scopeClickAt, '不带 scope 的全部已读仍推进全局水位');
+
   console.log('\n[并发轮询与特关状态清理]');
   resetState({
     apiFingerprints: { selected: 'fp-old' },

@@ -20,6 +20,7 @@ const fontFamilyEl = document.getElementById('fontFamily');
 const fontSizeEl = document.getElementById('fontSize');
 const openPositionModeEl = document.getElementById('openPositionMode');
 const historyDaysEl = document.getElementById('historyDays');
+const watchOnlyEl = document.getElementById('watchOnly');
 const jumpToUnreadBtn = document.getElementById('jumpToUnread');
 const brandLink = document.getElementById('brandLink');
 const markAllReadBtn = document.getElementById('markAllRead');
@@ -41,6 +42,8 @@ const { normalizeFeedMode, normalizeHistoryDays, projectHistory } = window.FeedS
 const { splitWatchKeywords, normalizeWatchRuleList, mergeWatchRuleInput, removeWatchRuleKeyword } = window.WatchRules;
 const { getSafeHttpsUrl, openHttpsUrl, runOpenItemMutation, removeOptimisticReadAliases, createConfigMutationController, createFeedModeSwitchController, createLatestWinsLoadController, createPopupInitializationController, createPopupStorageChangeHandler, createAllFeedContinuationStatusController, createSessionWatchPinTracker, hasActiveWatchRuleMatch, moveWatchRule, captureWatchRuleActionFocus, restoreWatchRuleActionFocus, sortWatchItemsByRulePriority, buildHistoryRenderSignature, captureScrollAnchor, buildScrollPosition, restoreScrollAnchor, applyOptimisticReadState, runMarkAllReadMutation } = popupReliability;
 const sessionWatchPinTracker = createSessionWatchPinTracker();
+// 最近一次渲染是否处于「只看特关」，决定「全部已读」的标记范围与用户所见一致。
+let renderedWatchOnly = false;
 
 const CATEGORY_MAP = {
   'ai-models': { cls: 'cat-model', label: '模型' },
@@ -566,7 +569,8 @@ function renderItemHtml(item, isUnread, options = {}) {
   const tagHtml = cat.label ? `<span class="cat-tag ${cat.cls}">${cat.label}</span>` : '';
   // Tag only items still matched by an enabled rule, consistent with pinning.
   const isWatch = options.isWatch === undefined ? item.watchMatched === true : options.isWatch === true;
-  const watchTagHtml = isWatch ? '<span class="watch-badge">特关</span>' : '';
+  // 只看特关时每条都是特关，标签不再区分任何东西，故隐藏；watch-item 状态样式保留。
+  const watchTagHtml = isWatch && options.showWatchTag !== false ? '<span class="watch-badge">特关</span>' : '';
   const summary = escapeHtml(item.summary || '');
   const summaryHtml = summary ? `<div class="item-summary">${summary}</div>` : '';
   const stateKey = getItemStateKey(item);
@@ -883,6 +887,7 @@ function applyConfig(data, options = {}) {
   openPositionModeEl.value = normalizeOpenPositionMode(data.openPositionMode);
   const days = normalizeHistoryDays(data.historyDays);
   historyDaysEl.value = String(days);
+  watchOnlyEl.checked = data.watchOnly === true;
   renderWatchRules(data.watchRules || []);
 }
 
@@ -901,14 +906,23 @@ function renderHistory(data, options = {}) {
   const readAllBefore = getReadAllBefore(data);
   const historyDays = normalizeHistoryDays(data.historyDays);
   const watchRules = normalizeWatchRules(data.watchRules || []);
+  const watchOnly = data.watchOnly === true;
+  renderedWatchOnly = watchOnly;
+  const markAllReadLabel = watchOnly ? '特关全部已读' : '全部已读';
+  markAllReadBtn.title = markAllReadLabel;
+  markAllReadBtn.setAttribute('aria-label', markAllReadLabel);
 
   const readIdSet = new Set(readIds);
   cachedReadIds = readIdSet;
   const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
 
   const cutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000;
-  const history = rawHistory.filter(i => isWithinDisplayWindow(i, cutoff));
-  const signature = buildHistoryRenderSignature(
+  const windowHistory = rawHistory.filter(i => isWithinDisplayWindow(i, cutoff));
+  // 只看特关：与后台角标、通知一致，只保留匹配启用中特关规则的条目。
+  const history = watchOnly
+    ? windowHistory.filter(item => hasActiveWatchRuleMatch(item, watchRules))
+    : windowHistory;
+  const signature = (watchOnly ? 'watch-only|' : '') + buildHistoryRenderSignature(
     history,
     historyDays,
     watchRules,
@@ -939,9 +953,16 @@ function renderHistory(data, options = {}) {
   }
 
   if (history.length === 0) {
-    const tip = rawHistory.length > 0
-      ? `当前${historyDays}天内无记录，记录会随轮询逐步积累`
-      : '暂无内容，等待下一次推送';
+    let tip;
+    if (watchOnly) {
+      tip = watchRules.some(rule => rule.enabled)
+        ? `当前${historyDays}天内没有特关内容`
+        : '还没有启用的特关规则，可在设置的「特关」中添加';
+    } else {
+      tip = rawHistory.length > 0
+        ? `当前${historyDays}天内无记录，记录会随轮询逐步积累`
+        : '暂无内容，等待下一次推送';
+    }
     historyList.innerHTML = `<div class="empty-state">${tip}</div>`;
     if (!markAllReadBtn.classList.contains('is-confirmed')) {
       markAllReadBtn.classList.remove('visible');
@@ -968,12 +989,12 @@ function renderHistory(data, options = {}) {
 
   let html = '';
   pinnedWatch.forEach(item => {
-    html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime), { watchPinned: true, isWatch: true });
+    html += renderItemHtml(item, !isReadFast(item, readIdSet, readAllBeforeTime), { watchPinned: true, isWatch: true, showWatchTag: !watchOnly });
   });
 
   displayHistory.filter(item => !pinnedKeys.has(getItemStateKey(item))).forEach(item => {
     const isUnread = !isReadFast(item, cachedReadIds, readAllBeforeTime);
-    html += renderItemHtml(item, isUnread, { isWatch: hasActiveWatchRuleMatch(item, watchRules) });
+    html += renderItemHtml(item, isUnread, { isWatch: hasActiveWatchRuleMatch(item, watchRules), showWatchTag: !watchOnly });
   });
 
   historyList.innerHTML = html;
@@ -1131,7 +1152,8 @@ function cacheLoadedPopupData(data) {
     readIds: data.readIds || [],
     readAllBefore: data.readAllBefore || '',
     readAllBeforeByMode: data.readAllBeforeByMode || {},
-    watchRules: data.watchRules || []
+    watchRules: data.watchRules || [],
+    watchOnly: data.watchOnly === true
   });
 }
 
@@ -1149,7 +1171,8 @@ function normalizeConfigSnapshot(data = {}) {
     fontFamily: normalizeFontFamily(data.fontFamily),
     fontSize: data.fontSize || 'medium',
     openPositionMode: normalizeOpenPositionMode(data.openPositionMode),
-    historyDays: normalizeHistoryDays(data.historyDays)
+    historyDays: normalizeHistoryDays(data.historyDays),
+    watchOnly: data.watchOnly === true
   };
 }
 
@@ -1161,7 +1184,8 @@ function readConfigControls() {
     fontFamily: fontFamilyEl.value,
     fontSize: fontSizeEl.value,
     openPositionMode: openPositionModeEl.value,
-    historyDays: historyDaysEl.value
+    historyDays: historyDaysEl.value,
+    watchOnly: watchOnlyEl.checked
   });
 }
 
@@ -1173,6 +1197,7 @@ function applyConfigSnapshot(config) {
   fontSizeEl.value = config.fontSize;
   openPositionModeEl.value = config.openPositionMode;
   historyDaysEl.value = String(config.historyDays);
+  watchOnlyEl.checked = config.watchOnly === true;
   applyTheme(config.theme);
   applyFontFamily(config.fontFamily);
   applyFontSize(config.fontSize);
@@ -1208,12 +1233,12 @@ function saveConfigWithStatus(options = {}) {
 const POPUP_HISTORY_STORAGE_KEYS = [
   'enabled', 'interval', 'theme', 'fontFamily', 'fontSize',
   'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays',
-  'feedMode', 'openPositionMode', 'watchRules', 'allFeedContinuation'
+  'feedMode', 'openPositionMode', 'watchRules', 'watchOnly', 'allFeedContinuation'
 ];
 
 const POPUP_INITIAL_STORAGE_KEYS = [
   'enabled', 'interval', 'feedMode', 'theme', 'fontFamily', 'fontSize', 'openPositionMode', 'historyDays',
-  'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules'
+  'history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules', 'watchOnly'
 ];
 
 const historyLoadController = createLatestWinsLoadController({
@@ -1365,7 +1390,12 @@ markAllReadBtn.addEventListener('click', async () => {
   showButtonResult(markAllReadBtn, 'is-result-accent', 0);
   try {
     await runMarkAllReadMutation({
-      send: () => chrome.runtime.sendMessage({ type: 'markAllRead', readAllBefore: now }),
+      send: () => chrome.runtime.sendMessage({
+        type: 'markAllRead',
+        readAllBefore: now,
+        // 只看特关时只标记可见的特关条目，非特关只是被隐藏，保持原未读状态。
+        ...(renderedWatchOnly ? { scope: 'watch' } : {})
+      }),
       rollback: () => {
         rollbackOptimisticReadState();
         restoreScrollAnchor(historyList, scrollAnchor);
@@ -1598,6 +1628,11 @@ fontFamilyEl.addEventListener('change', () => { requestAnimationFrame(updateSour
 fontSizeEl.addEventListener('change', () => { requestAnimationFrame(updateSourceTitles); void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
 openPositionModeEl.addEventListener('change', () => { void saveConfigWithStatus({ notifyBackground: false }).catch(() => {}); });
 historyDaysEl.addEventListener('change', () => {
+  clearScrollPosition();
+  void saveConfigWithStatus({ notifyBackground: false }).catch(() => {});
+});
+// 角标由后台监听 storage 中的 watchOnly 变化更新，无需额外通知。
+watchOnlyEl.addEventListener('change', () => {
   clearScrollPosition();
   void saveConfigWithStatus({ notifyBackground: false }).catch(() => {});
 });

@@ -300,7 +300,7 @@ assert(/settingsInnerEl\.classList\.toggle\('has-scroll-tail',\s*hasScrollTail\)
 assert(/settingsInnerEl\.addEventListener\('scroll',\s*updateSettingsScrollHint,\s*\{\s*passive:\s*true\s*}\)/.test(popupJs), '设置面板滚动时刷新渐隐状态');
 assert(/requestAnimationFrame\(updateSettingsScrollHint\)/.test(popupJs), '设置面板布局变化后下一帧重新计算渐隐状态');
 assert(/function\s+isWithinDisplayWindow\(item,\s*cutoff\)/.test(popupJs), '显示天数具备按发布时间筛选函数');
-assert(/const\s+history\s*=\s*rawHistory\.filter\(i\s*=>\s*isWithinDisplayWindow\(i,\s*cutoff\)\)/.test(popupJs), '主列表按发布时间应用显示天数');
+assert(/const\s+windowHistory\s*=\s*rawHistory\.filter\(i\s*=>\s*isWithinDisplayWindow\(i,\s*cutoff\)\)/.test(popupJs), '主列表按发布时间应用显示天数');
 assert(/logPerf\('settings-click'/.test(popupJs), '设置面板点击记录目标状态');
 assert(/logPerf\('settings-frame'/.test(popupJs), '设置面板展开帧记录关键帧时序');
 assert(/settingsPanel\.addEventListener\('transition(run|end)'/.test(popupJs), '设置面板记录高度过渡起止事件');
@@ -855,7 +855,8 @@ assert(/readCommittedMode:\s*async\s*\(\)\s*=>[\s\S]*?chrome\.storage\.local\.ge
 assert(/readWarmCache:\s*\(\)\s*=>\s*readWarmPopupCache\(\)/.test(popupJs), 'popup 初始化不等待 full history 即开始 warm cache 读取');
 assert(/readFullStorage:\s*\(\)\s*=>\s*chrome\.storage\.local\.get\(POPUP_INITIAL_STORAGE_KEYS\)/.test(popupJs), 'popup 初始化并发发起 full storage 读取');
 assert(/applyStorage:[\s\S]*?observeCommittedMode\(data\.feedMode\)/.test(popupJs), '权威 mode 更新仅位于 coordinator fenced storage commit 中');
-assert(/chrome\.runtime\.sendMessage\(\{\s*type:\s*'markAllRead',\s*readAllBefore:\s*now\s*}\)/.test(markAllReadHandler), '全部已读通过 background 串行推进全局水位');
+assert(/chrome\.runtime\.sendMessage\(\{\s*type:\s*'markAllRead',\s*readAllBefore:\s*now\b/.test(markAllReadHandler), '全部已读通过 background 串行推进全局水位');
+assert(/renderedWatchOnly\s*\?\s*\{\s*scope:\s*'watch'\s*}/.test(markAllReadHandler), '只看特关时全部已读只标记特关范围');
 assert(!/chrome\.storage\.local\.set\(\{[\s\S]*?readAllBefore/.test(markAllReadHandler), 'popup 不独立覆写全部已读水位');
 assert(!/watchAliases|markWatchItemsViewed\(/.test(markAllReadHandler), '全部已读由 background 原子提交全局水位与全部特关已查看状态');
 assert(/const\s+scrollAnchor\s*=\s*captureScrollAnchor\(historyList\)/.test(markAllReadHandler), '全部已读前捕获当前列表滚动锚点');

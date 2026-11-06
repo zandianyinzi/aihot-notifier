@@ -5,7 +5,7 @@ const { normalizeFeedMode, normalizeHistoryDays, projectHistory } = feedState;
 const watchRulesApi = typeof importScripts === 'function'
   ? (importScripts('watch-rules.js'), globalThis.WatchRules)
   : require('./watch-rules.js');
-const { normalizeWatchRuleList, getEnabledWatchRules, matchWatchRules, getWatchAuthorLabel } = watchRulesApi;
+const { normalizeWatchRuleList, getEnabledWatchRules, matchWatchRules, getWatchAuthorLabel, hasActiveWatchMatch } = watchRulesApi;
 
 const API_BASE = 'https://aihot.news/api/v1/items';
 const API_WINDOW = '7d';
@@ -808,6 +808,42 @@ async function markItemsRead(ids, options = {}) {
   return bounded;
 }
 
+// 只看特关时的「全部已读」：只标记当前可见、点击前已有的特关未读条目，不推进全局 readAllBefore，
+// 被过滤掉的普通条目保持原未读状态。可见口径与 updateBadgeInternal 一致。
+async function markWatchItemsReadBefore(candidate) {
+  const candidateTime = new Date(candidate).getTime();
+  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode', 'watchRules', 'watchNotifyState']);
+  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode, watchRules = [] } = data;
+  const readIdSet = new Set(readIds);
+  const readAllBefore = getReadAllBefore(data);
+  const readAllBeforeTime = readAllBefore ? new Date(readAllBefore).getTime() : 0;
+  const cutoff = Date.now() - normalizeHistoryDays(historyDays) * 24 * 60 * 60 * 1000;
+  const activeWatchRules = normalizeWatchRuleList(watchRules);
+  const targets = projectHistory(history, feedMode).filter(item => {
+    if (!isWithinDisplayWindow(item, cutoff) || !hasActiveWatchMatch(item, activeWatchRules)) return false;
+    const referenceTime = getUnreadReferenceTime(item);
+    // 点击之后才到达的条目不在用户确认范围内。
+    if (referenceTime > candidateTime) return false;
+    if (getItemAliases(item).some(alias => readIdSet.has(alias))) return false;
+    return !(readAllBeforeTime && referenceTime <= readAllBeforeTime);
+  });
+  if (targets.length === 0) return 0;
+
+  const aliases = [...new Set(targets.flatMap(getItemAliases))];
+  const watchNotifyState = { ...(data.watchNotifyState || {}) };
+  aliases.forEach(alias => {
+    if (watchNotifyState[alias]) {
+      watchNotifyState[alias] = { ...watchNotifyState[alias], viewedAt: watchNotifyState[alias].viewedAt || candidate };
+    }
+  });
+  // 已读与特关已查看同次写入，避免只成功一半。
+  await chrome.storage.local.set({
+    readIds: retainReadIdsForHistory([...new Set([...readIds, ...aliases])], history),
+    watchNotifyState
+  });
+  return targets.length;
+}
+
 async function openItem(urlValue, ids) {
   const url = getSafeHttpsUrl(urlValue);
   if (!url) return { ok: false, reason: 'unsafe-url' };
@@ -1357,8 +1393,9 @@ async function persistFetchedItems(items, options = {}) {
     watchRules = [],
     watchNotifyState = {},
     allFeedContinuation = {},
-    feedMode
-  } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules', 'watchNotifyState', 'allFeedContinuation', 'feedMode']);
+    feedMode,
+    watchOnly
+  } = await chrome.storage.local.get(['history', 'historyDays', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'watchRules', 'watchNotifyState', 'allFeedContinuation', 'feedMode', 'watchOnly']);
 
   if (typeof options.isCurrent === 'function' && !await options.isCurrent()) {
     return { skipped: true, updated: history, newEntries: [], watchNotificationsSent: 0 };
@@ -1415,7 +1452,8 @@ async function persistFetchedItems(items, options = {}) {
   const normalItems = discoveryDelta.normalInserted;
   const normalVisibleUnreadItems = discoveryDelta.normalVisibleUnreadInserted;
 
-  if (shouldNotify && normalVisibleUnreadItems.length > 0) {
+  // 只看特关时普通新内容不推送，特关通知照常。
+  if (shouldNotify && watchOnly !== true && normalVisibleUnreadItems.length > 0) {
     const notificationItem = normalVisibleUnreadItems[0];
     const visibleUnreadCount = normalVisibleUnreadItems.length;
     const notifId = getNotificationId('aihot');
@@ -1563,14 +1601,17 @@ function updateBadge() {
 }
 
 async function updateBadgeInternal() {
-  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode']);
-  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode } = data;
+  const data = await chrome.storage.local.get(['history', 'readIds', 'readAllBefore', 'readAllBeforeByMode', 'historyDays', 'feedMode', 'watchOnly', 'watchRules']);
+  const { history = [], readIds = [], historyDays = DEFAULT_HISTORY_DAYS, feedMode, watchOnly, watchRules = [] } = data;
   const readIdSet = new Set(readIds);
   const readAllBefore = getReadAllBefore(data);
   const cutoff = Date.now() - normalizeHistoryDays(historyDays) * 24 * 60 * 60 * 1000;
   const projectedHistory = projectHistory(history, feedMode);
+  const activeWatchRules = watchOnly === true ? normalizeWatchRuleList(watchRules) : [];
   const unread = projectedHistory.filter(i => {
     if (!isWithinDisplayWindow(i, cutoff)) return false;
+    // 只看特关：角标与弹窗列表使用同一匹配口径，只统计命中启用规则的条目。
+    if (watchOnly === true && !hasActiveWatchMatch(i, activeWatchRules)) return false;
     if (getItemAliases(i).some(alias => readIdSet.has(alias))) return false;
     if (readAllBefore && getUnreadReferenceTime(i) <= new Date(readAllBefore).getTime()) return false;
     return true;
@@ -2088,6 +2129,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'markAllRead') {
     runMigratedStateMutation(async () => {
       if (!msg.readAllBefore || !Number.isFinite(new Date(msg.readAllBefore).getTime())) throw new Error('Invalid readAllBefore');
+      if (msg.scope === 'watch') {
+        await markWatchItemsReadBefore(msg.readAllBefore);
+        await runPostCommitSideEffect('mark-watch-read badge update', updateBadge);
+        return '';
+      }
       const readAllBefore = await advanceReadAllBefore(msg.readAllBefore, true);
       await runPostCommitSideEffect('mark-all-read badge update', updateBadge);
       return readAllBefore;
@@ -2100,7 +2146,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // 数据变化时自动更新 badge
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.history || changes.readIds || changes.readAllBefore || changes.readAllBeforeByMode || changes.feedMode || changes.historyDays) {
+  if (changes.history || changes.readIds || changes.readAllBefore || changes.readAllBeforeByMode || changes.feedMode || changes.historyDays || changes.watchOnly || changes.watchRules) {
     runMigratedStateMutation(updateBadge)
       .catch(e => console.warn('[AI HOT] failed to update badge:', e));
   }

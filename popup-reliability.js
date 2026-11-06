@@ -308,14 +308,11 @@
     return { getPinnedItems };
   }
 
+  // 匹配语义只在 watch-rules.js 维护；这里保留原导出名供既有调用与测试使用。
   function hasActiveWatchRuleMatch(item, rules) {
-    if (!Array.isArray(item?.watchRuleIds)) return item?.watchMatched === true;
-    const activeRuleIds = new Set(
-      (Array.isArray(rules) ? rules : [])
-        .filter(rule => rule?.enabled !== false)
-        .map(rule => String(rule?.id || ''))
-    );
-    return item.watchRuleIds.some(ruleId => activeRuleIds.has(String(ruleId)));
+    const watchRules = globalThis.WatchRules
+      || (typeof require === 'function' ? require('./watch-rules.js') : null);
+    return watchRules.hasActiveWatchMatch(item, rules);
   }
 
   function moveWatchRule(rules, ruleId, direction) {
@@ -484,6 +481,7 @@
     'readAllBeforeByMode',
     'historyDays',
     'watchRules',
+    'watchOnly',
     'allFeedContinuation'
   ]);
 

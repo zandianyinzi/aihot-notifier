@@ -154,6 +154,18 @@
       .map(rule => rule.id === ruleId ? { ...rule, keywords: rule.keywords.filter((_, index) => index !== keywordIndex) } : rule));
   }
 
+  // 已打标的 history 条目是否仍命中启用中的规则。弹窗列表、置顶、标签与「只看特关」角标共用，
+  // 保证列表与角标口径一致。旧数据只有 watchMatched 没有 watchRuleIds 时按命中兼容。
+  function hasActiveWatchMatch(item, rules) {
+    if (!Array.isArray(item?.watchRuleIds)) return item?.watchMatched === true;
+    const activeRuleIds = new Set(
+      (Array.isArray(rules) ? rules : [])
+        .filter(rule => rule?.enabled !== false)
+        .map(rule => String(rule?.id || ''))
+    );
+    return item.watchRuleIds.some(ruleId => activeRuleIds.has(String(ruleId)));
+  }
+
   return {
     splitWatchKeywords,
     normalizeWatchRuleList,
@@ -164,6 +176,7 @@
     matchWatchRules,
     getWatchAuthorLabel,
     mergeWatchRuleInput,
-    removeWatchRuleKeyword
+    removeWatchRuleKeyword,
+    hasActiveWatchMatch
   };
 });
