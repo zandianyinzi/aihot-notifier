@@ -11,6 +11,7 @@ Automatically tracks the latest AI updates and delivers desktop notifications, s
 • Mark all as read in one click; unread items stand out by background and title brightness
 • Category tags (Model / Product / Industry / Paper / Tips / Opinion) for quick scanning
 • Watch rules: follow sources, authors or keywords; matches are pinned to the top and notified separately
+• Watch-only mode: when on, the list shows only watch matches, the badge counts only their unread items, and desktop notifications cover only watch matches
 
 ✦ Personalization
 
